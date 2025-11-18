@@ -97,6 +97,72 @@ pub struct ManualClearingResponse {
     pub triggered_at: DateTime<Utc>,
 }
 
+/// Get current epoch status (public endpoint)
+/// 
+/// Returns current epoch status without requiring authentication
+#[utoipa::path(
+    get,
+    path = "/api/market/epoch/status",
+    tag = "Market Epochs",
+    responses(
+        (status = 200, description = "Current epoch status", body = CurrentEpochResponse),
+        (status = 404, description = "No active epoch found"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_epoch_status(
+    State(state): State<AppState>,
+) -> Result<Json<CurrentEpochResponse>, ApiError> {
+    // Query current epoch from database
+    let epoch = sqlx::query!(
+        r#"
+        SELECT 
+            id, epoch_number, start_time, end_time, status,
+            clearing_price::text, total_volume::text,
+            total_orders, matched_orders
+        FROM market_epochs
+        WHERE start_time <= NOW() AND end_time > NOW()
+        ORDER BY start_time DESC
+        LIMIT 1
+        "#
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(ApiError::Database)?;
+
+    if let Some(epoch) = epoch {
+        let now = Utc::now();
+        let time_remaining = (epoch.end_time - now).num_seconds().max(0);
+
+        Ok(Json(CurrentEpochResponse {
+            id: epoch.id.to_string(),
+            epoch_number: epoch.epoch_number,
+            start_time: epoch.start_time,
+            end_time: epoch.end_time,
+            status: epoch.status,
+            clearing_price: epoch.clearing_price,
+            total_volume: epoch.total_volume.unwrap_or_else(|| "0".to_string()),
+            total_orders: epoch.total_orders,
+            matched_orders: epoch.matched_orders,
+            time_remaining_seconds: time_remaining,
+        }))
+    } else {
+        // No active epoch, return basic response
+        Ok(Json(CurrentEpochResponse {
+            id: "none".to_string(),
+            epoch_number: 0,
+            start_time: Utc::now(),
+            end_time: Utc::now(),
+            status: "none".to_string(),
+            clearing_price: None,
+            total_volume: "0".to_string(),
+            total_orders: Some(0),
+            matched_orders: Some(0),
+            time_remaining_seconds: 0,
+        }))
+    }
+}
+
 /// Get current active epoch
 /// 
 /// Returns information about the currently active trading epoch
@@ -122,7 +188,7 @@ pub async fn get_current_epoch(
             clearing_price::text, total_volume::text,
             total_orders, matched_orders
         FROM market_epochs
-        WHERE status IN ('Pending', 'Active')
+        WHERE status IN ('pending', 'active')
         ORDER BY start_time DESC
         LIMIT 1
         "#
@@ -301,7 +367,7 @@ pub async fn get_epoch_stats(
     let settlements = sqlx::query!(
         r#"
         SELECT 
-            COUNT(*) FILTER (WHERE status = 'Pending') as pending,
+            COUNT(*) FILTER (WHERE status = 'pending') as pending,
             COUNT(*) FILTER (WHERE status = 'Confirmed') as confirmed
         FROM settlements
         WHERE epoch_id = $1

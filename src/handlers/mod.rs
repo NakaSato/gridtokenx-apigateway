@@ -8,6 +8,7 @@ pub mod erc;
 pub mod trading;
 pub mod market_data;
 pub mod energy_trading;
+pub mod energy_trading_simple;
 pub mod blockchain;
 pub mod blockchain_test;
 pub mod registry;

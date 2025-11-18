@@ -99,208 +99,170 @@ impl OrderMatchingEngine {
         debug!("Running order matching cycle...");
 
         // Get all pending buy orders
-        let pending_orders = sqlx::query(
+        let buy_orders = sqlx::query(
             r#"
             SELECT 
                 id, 
-                created_by, 
+                user_id, 
                 energy_amount, 
-                max_price_per_kwh,
-                preferred_source,
-                required_from,
-                required_until
+                price_per_kwh,
+                filled_amount,
+                epoch_id
             FROM trading_orders
-            WHERE status = 'Pending'
+            WHERE order_type = 'buy' AND status = 'pending'
             ORDER BY created_at ASC
             "#
         )
         .fetch_all(&self.db)
         .await?;
 
-        if pending_orders.is_empty() {
+        // Get all pending sell orders
+        let sell_orders = sqlx::query(
+            r#"
+            SELECT 
+                id, 
+                user_id, 
+                energy_amount, 
+                price_per_kwh,
+                filled_amount,
+                epoch_id
+            FROM trading_orders
+            WHERE order_type = 'sell' AND status = 'pending'
+            ORDER BY price_per_kwh ASC, created_at ASC
+            "#
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        if buy_orders.is_empty() || sell_orders.is_empty() {
             return Ok(0);
         }
 
-        debug!("Found {} pending orders to process", pending_orders.len());
+        debug!("Found {} buy orders and {} sell orders to process", buy_orders.len(), sell_orders.len());
 
         let mut matches_created = 0;
 
-        // Try to match each order
-        for order in pending_orders {
-            let order_id: Uuid = order.try_get("id")?;
-            let created_by: Uuid = order.try_get("created_by")?;
-            let energy_amount: BigDecimal = order.try_get("energy_amount")?;
-            let max_price_per_kwh: BigDecimal = order.try_get("max_price_per_kwh")?;
-            let preferred_source: Option<String> = order.try_get("preferred_source")?;
+        // Try to match each buy order with sell orders
+        for buy_order in &buy_orders {
+            let buy_order_id: Uuid = buy_order.try_get("id")?;
+            let buyer_id: Uuid = buy_order.try_get("user_id")?;
+            let buy_energy_amount: BigDecimal = buy_order.try_get("energy_amount")?;
+            let buy_filled_amount: BigDecimal = buy_order.try_get("filled_amount")?;
+            let buy_price_per_kwh: BigDecimal = buy_order.try_get("price_per_kwh")?;
+            let epoch_id: Uuid = buy_order.try_get("epoch_id")?;
 
-            // Find compatible active offers
-            let compatible_offers = if let Some(ref source) = preferred_source {
-                sqlx::query(
-                    r#"
-                    SELECT 
-                        id,
-                        created_by,
-                        energy_amount,
-                        price_per_kwh,
-                        energy_source,
-                        available_from,
-                        available_until
-                    FROM offers
-                    WHERE status = 'Active'
-                        AND energy_source = $1
-                        AND price_per_kwh <= $2
-                        AND energy_amount > 0
-                    ORDER BY price_per_kwh ASC, created_at ASC
-                    LIMIT 10
-                    "#,
-                )
-                .bind(source)
-                .bind(&max_price_per_kwh)
-                .fetch_all(&self.db)
-                .await?
-            } else {
-                sqlx::query(
-                    r#"
-                    SELECT 
-                        id,
-                        created_by,
-                        energy_amount,
-                        price_per_kwh,
-                        energy_source,
-                        available_from,
-                        available_until
-                    FROM offers
-                    WHERE status = 'Active'
-                        AND price_per_kwh <= $1
-                        AND energy_amount > 0
-                    ORDER BY price_per_kwh ASC, created_at ASC
-                    LIMIT 10
-                    "#,
-                )
-                .bind(&max_price_per_kwh)
-                .fetch_all(&self.db)
-                .await?
-            };
-
-            if compatible_offers.is_empty() {
-                debug!("No compatible offers found for order {}", order_id);
-                continue;
+            // Calculate remaining amount needed
+            let remaining_buy_amount = &buy_energy_amount - &buy_filled_amount;
+            let zero = BigDecimal::from_str("0").unwrap();
+            if remaining_buy_amount <= zero {
+                continue; // Order already fully filled
             }
 
-            debug!(
-                "Found {} compatible offers for order {} (needs {} kWh at max ${}/kWh)",
-                compatible_offers.len(),
-                order_id,
-                energy_amount,
-                max_price_per_kwh
-            );
+            // Find compatible sell orders (price <= buy price)
+            for sell_order in &sell_orders {
+                let sell_order_id: Uuid = sell_order.try_get("id")?;
+                let seller_id: Uuid = sell_order.try_get("user_id")?;
+                let sell_energy_amount: BigDecimal = sell_order.try_get("energy_amount")?;
+                let sell_filled_amount: BigDecimal = sell_order.try_get("filled_amount")?;
+                let sell_price_per_kwh: BigDecimal = sell_order.try_get("price_per_kwh")?;
+                let sell_epoch_id: Uuid = sell_order.try_get("epoch_id")?;
 
-            // Match with the best offer
-            let mut remaining_order_amount = energy_amount.clone();
-            
-            for offer in compatible_offers {
-                // Check if order is fulfilled
-                let zero = BigDecimal::from_str("0").unwrap();
-                if remaining_order_amount <= zero {
-                    break;
+                // Check if sell order is compatible
+                if sell_price_per_kwh > buy_price_per_kwh {
+                    continue; // Sell price too high
                 }
 
-                let offer_id: Uuid = offer.try_get("id")?;
-                let offer_created_by: Uuid = offer.try_get("created_by")?;
-                let offer_energy_amount: BigDecimal = offer.try_get("energy_amount")?;
-                let offer_price_per_kwh: BigDecimal = offer.try_get("price_per_kwh")?;
+                if sell_epoch_id != epoch_id {
+                    continue; // Different epochs
+                }
 
-                // Calculate match amount (min of order and offer)
-                let match_amount = if remaining_order_amount < offer_energy_amount {
-                    remaining_order_amount.clone()
+                // Calculate remaining amount available to sell
+                let remaining_sell_amount = &sell_energy_amount - &sell_filled_amount;
+                if remaining_sell_amount <= zero {
+                    continue; // Sell order already fully filled
+                }
+
+                // Calculate match amount (min of remaining buy and sell amounts)
+                let match_amount = if remaining_buy_amount < remaining_sell_amount {
+                    remaining_buy_amount.clone()
                 } else {
-                    offer_energy_amount.clone()
+                    remaining_sell_amount.clone()
                 };
-                let match_price = offer_price_per_kwh.clone();
+
+                let match_price = sell_price_per_kwh.clone(); // Use sell price (market maker advantage)
                 let total_price = &match_amount * &match_price;
 
                 debug!(
-                    "Matching order {} with offer {}: {} kWh at ${}/kWh (total: ${})",
-                    order_id, offer_id, match_amount, match_price, total_price
+                    "Matching buy order {} with sell order {}: {} kWh at ${}/kWh (total: ${})",
+                    buy_order_id, sell_order_id, match_amount, match_price, total_price
                 );
 
-                // Create transaction
+                // Create order match
                 match self
-                    .create_transaction(
-                        &offer_id,
-                        &order_id,
-                        &offer_created_by,
-                        &created_by,
+                    .create_order_match(
+                        epoch_id,
+                        buy_order_id,
+                        sell_order_id,
+                        buyer_id,
+                        seller_id,
                         match_amount.clone(),
                         match_price.clone(),
                         total_price.clone(),
                     )
                     .await
                 {
-                    Ok(transaction_id) => {
+                    Ok(match_id) => {
                         info!(
-                            "✅ Created transaction {}: {} kWh from offer {} to order {} at ${}/kWh",
-                            transaction_id, match_amount, offer_id, order_id, match_price
+                            "✅ Created match {}: {} kWh from sell order {} to buy order {} at ${}/kWh",
+                            match_id, match_amount, sell_order_id, buy_order_id, match_price
                         );
                         matches_created += 1;
 
-                        // Update offer energy amount
-                        let new_offer_amount = &offer_energy_amount - &match_amount;
-                        let zero = BigDecimal::from_str("0").unwrap();
-                        if new_offer_amount <= zero {
-                            // Mark offer as completed (don't update energy_amount to avoid constraint violation)
-                            sqlx::query(
-                                "UPDATE offers SET status = 'Completed', updated_at = NOW() WHERE id = $1"
-                            )
-                            .bind(offer_id)
-                            .execute(&self.db)
-                            .await?;
-                            debug!("Offer {} fully consumed and marked as completed", offer_id);
-                        } else {
-                            // Update remaining amount
-                            sqlx::query(
-                                "UPDATE offers SET energy_amount = $1, updated_at = NOW() WHERE id = $2"
-                            )
-                            .bind(&new_offer_amount)
-                            .bind(offer_id)
-                            .execute(&self.db)
-                            .await?;
-                            debug!("Offer {} updated: {} kWh remaining", offer_id, new_offer_amount);
-                        }
+                        // Update buy order filled amount
+                        let new_buy_filled = &buy_filled_amount + &match_amount;
+                        let buy_complete = new_buy_filled >= buy_energy_amount;
+                        
+                        sqlx::query(
+                            r#"
+                            UPDATE trading_orders 
+                            SET filled_amount = $1, 
+                                status = CASE WHEN $2 THEN 'filled' ELSE 'active' END,
+                                updated_at = NOW()
+                            WHERE id = $3
+                            "#,
+                        )
+                        .bind(&new_buy_filled)
+                        .bind(buy_complete)
+                        .bind(buy_order_id)
+                        .execute(&self.db)
+                        .await?;
 
-                        // Update remaining order amount
-                        remaining_order_amount = &remaining_order_amount - &match_amount;
+                        // Update sell order filled amount
+                        let new_sell_filled = &sell_filled_amount + &match_amount;
+                        let sell_complete = new_sell_filled >= sell_energy_amount;
+                        
+                        sqlx::query(
+                            r#"
+                            UPDATE trading_orders 
+                            SET filled_amount = $1, 
+                                status = CASE WHEN $2 THEN 'filled' ELSE 'active' END,
+                                updated_at = NOW()
+                            WHERE id = $3
+                            "#,
+                        )
+                        .bind(&new_sell_filled)
+                        .bind(sell_complete)
+                        .bind(sell_order_id)
+                        .execute(&self.db)
+                        .await?;
 
-                        // Update order status
-                        if remaining_order_amount <= zero {
-                            // Order fully filled
-                            sqlx::query(
-                                "UPDATE orders SET status = 'Completed', updated_at = NOW() WHERE id = $1"
-                            )
-                            .bind(order_id)
-                            .execute(&self.db)
-                            .await?;
-                            debug!("Order {} fully filled and marked as completed", order_id);
-                            break; // Move to next order
-                        } else {
-                            // Order partially filled
-                            sqlx::query(
-                                "UPDATE orders SET status = 'PartiallyFilled', energy_amount = $1, updated_at = NOW() WHERE id = $2"
-                            )
-                            .bind(&remaining_order_amount)
-                            .bind(order_id)
-                            .execute(&self.db)
-                            .await?;
-                            debug!(
-                                "Order {} partially filled: {} kWh remaining",
-                                order_id,
-                                remaining_order_amount
-                            );
-                            // Continue to next offer for this order
+                        if buy_complete {
+                            debug!("Buy order {} fully filled", buy_order_id);
+                            break; // Move to next buy order
                         }
                     }
                     Err(e) => {
-                        error!("Failed to create transaction: {}", e);
+                        error!("Failed to create order match: {}", e);
                         continue;
                     }
                 }
@@ -310,44 +272,42 @@ impl OrderMatchingEngine {
         Ok(matches_created)
     }
 
-    /// Create a transaction record
-    async fn create_transaction(
+    /// Create an order match record
+    async fn create_order_match(
         &self,
-        offer_id: &Uuid,
-        order_id: &Uuid,
-        seller_id: &Uuid,
-        buyer_id: &Uuid,
+        epoch_id: Uuid,
+        buy_order_id: Uuid,
+        sell_order_id: Uuid,
+        buyer_id: Uuid,
+        seller_id: Uuid,
         energy_amount: BigDecimal,
         price_per_kwh: BigDecimal,
         total_price: BigDecimal,
     ) -> Result<Uuid> {
-        let transaction_id = Uuid::new_v4();
+        let match_id = Uuid::new_v4();
 
         sqlx::query(
             r#"
-            INSERT INTO transactions (
+            INSERT INTO order_matches (
                 id,
-                offer_id,
-                order_id,
-                seller_id,
-                buyer_id,
-                energy_amount,
-                price_per_kwh,
-                total_price,
+                epoch_id,
+                buy_order_id,
+                sell_order_id,
+                matched_amount,
+                match_price,
+                match_time,
                 status,
                 created_at,
                 updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Pending', NOW(), NOW())
+            ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), 'pending', NOW(), NOW())
             "#,
         )
-        .bind(transaction_id)
-        .bind(offer_id)
-        .bind(order_id)
-        .bind(seller_id)
-        .bind(buyer_id)
+        .bind(match_id)
+        .bind(epoch_id)
+        .bind(buy_order_id)
+        .bind(sell_order_id)
         .bind(&energy_amount)
         .bind(&price_per_kwh)
-        .bind(&total_price)
         .execute(&self.db)
         .await?;
 
@@ -358,16 +318,16 @@ impl OrderMatchingEngine {
             
             tokio::spawn({
                 let ws = ws_service.clone();
-                let tid = transaction_id.to_string();
-                let oid = order_id.to_string();
-                let ofid = offer_id.to_string();
+                let mid = match_id.to_string();
+                let buy_id = buy_order_id.to_string();
+                let sell_id = sell_order_id.to_string();
                 async move {
-                    ws.broadcast_order_matched(oid, ofid, tid, energy_f64, price_f64).await;
+                    ws.broadcast_order_matched(buy_id, sell_id, mid, energy_f64, price_f64).await;
                 }
             });
         }
 
-        Ok(transaction_id)
+        Ok(match_id)
     }
 
     /// Manually trigger a matching cycle (for testing or API endpoints)

@@ -1183,7 +1183,7 @@ pub async fn get_market_stats(
         .map_err(|e| ApiError::Database(e))?;
     let active_offers: i64 = active_offers_row.try_get("count").map_err(|e| ApiError::Internal(format!("Failed to get count: {}", e)))?;
 
-    let active_orders_row = sqlx::query("SELECT COUNT(*) as count FROM trading_orders WHERE status = 'Pending'")
+    let active_orders_row = sqlx::query("SELECT COUNT(*) as count FROM trading_orders WHERE status = 'pending'")
         .fetch_one(&state.db)
         .await
         .map_err(|e| ApiError::Database(e))?;

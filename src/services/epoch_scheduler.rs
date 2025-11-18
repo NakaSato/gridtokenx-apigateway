@@ -259,7 +259,7 @@ impl EpochScheduler {
             r#"
             SELECT id, epoch_number, start_time, end_time, status
             FROM market_epochs 
-            WHERE status = 'Pending' 
+            WHERE status = 'pending'
             AND start_time <= $1 
             AND end_time > $1
             ORDER BY start_time ASC
@@ -274,7 +274,7 @@ impl EpochScheduler {
             
             // Update status to active
             sqlx::query!(
-                "UPDATE market_epochs SET status = 'Active', updated_at = NOW() WHERE id = $1",
+                "UPDATE market_epochs SET status = 'active', updated_at = NOW() WHERE id = $1",
                 epoch_row.id
             )
             .execute(db)
@@ -320,7 +320,7 @@ impl EpochScheduler {
             r#"
             SELECT id, epoch_number, start_time, end_time, status
             FROM market_epochs 
-            WHERE status = 'Active' 
+            WHERE status = 'active' 
             AND end_time <= $1
             ORDER BY end_time ASC
             "#,
@@ -334,7 +334,7 @@ impl EpochScheduler {
             
             // Update status to expired first
             sqlx::query!(
-                "UPDATE market_epochs SET status = 'Expired', updated_at = NOW() WHERE id = $1",
+                "UPDATE market_epochs SET status = 'expired', updated_at = NOW() WHERE id = $1",
                 epoch_row.id
             )
             .execute(db)
@@ -351,7 +351,7 @@ impl EpochScheduler {
                     
                     // Update status to cleared
                     sqlx::query!(
-                        "UPDATE market_epochs SET status = 'Cleared', updated_at = NOW() WHERE id = $1",
+                        "UPDATE market_epochs SET status = 'cleared', updated_at = NOW() WHERE id = $1",
                         epoch_row.id
                     )
                     .execute(db)
@@ -418,7 +418,7 @@ impl EpochScheduler {
                 r#"
                 INSERT INTO market_epochs (
                     id, epoch_number, start_time, end_time, status
-                ) VALUES ($1, $2, $3, $4, 'Pending')
+                ) VALUES ($1, $2, $3, $4, 'pending')
                 "#,
                 epoch_id,
                 next_epoch_number,
@@ -442,11 +442,11 @@ impl EpochScheduler {
     
     fn determine_target_state(&self, epoch: &MarketEpoch, now: DateTime<Utc>) -> String {
         if now < epoch.start_time {
-            "Pending".to_string()
+            "pending".to_string()
         } else if now >= epoch.start_time && now < epoch.end_time {
-            "Active".to_string()
-        } else if epoch.status == "Active" {
-            "Expired".to_string()
+            "active".to_string()
+        } else if epoch.status == "active" {
+            "expired".to_string()
         } else {
             epoch.status.clone()
         }

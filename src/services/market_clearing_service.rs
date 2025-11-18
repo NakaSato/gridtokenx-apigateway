@@ -198,7 +198,7 @@ impl MarketClearingService {
                 id as order_id, user_id, side as "side: OrderSide", 
                 energy_amount, price_per_kwh, created_at
             FROM trading_orders 
-            WHERE status = 'Pending' AND side = 'Buy' AND epoch_id = $1
+            WHERE status = 'pending' AND order_type = 'buy' AND epoch_id = $1
             ORDER BY price_per_kwh DESC, created_at ASC
             "#,
             epoch_id
@@ -216,7 +216,7 @@ impl MarketClearingService {
                 id as order_id, user_id, side as "side: OrderSide", 
                 energy_amount, price_per_kwh, created_at
             FROM trading_orders 
-            WHERE status = 'Pending' AND side = 'Sell' AND epoch_id = $1
+            WHERE status = 'pending' AND order_type = 'sell' AND epoch_id = $1
             ORDER BY price_per_kwh ASC, created_at ASC
             "#,
             epoch_id
@@ -421,7 +421,7 @@ impl MarketClearingService {
     async fn update_epoch_statistics(&self, epoch_id: Uuid, total_volume: BigDecimal, matched_orders: i64) -> Result<()> {
         // Get total orders count for this epoch
         let total_orders = sqlx::query_scalar!(
-            "SELECT COUNT(*) FROM trading_orders WHERE epoch_id = $1 AND status IN ('Pending', 'Filled')",
+            "SELECT COUNT(*) FROM trading_orders WHERE epoch_id = $1 AND status IN ('pending', 'filled')",
             epoch_id
         )
         .fetch_one(&self.db)
@@ -431,7 +431,7 @@ impl MarketClearingService {
         sqlx::query!(
             r#"
             UPDATE market_epochs 
-            SET total_volume = $1, matched_orders = $2, total_orders = $3, status = 'Cleared'
+            SET total_volume = $1, matched_orders = $2, total_orders = $3, status = 'cleared'
             WHERE id = $4
             "#,
             total_volume,
@@ -530,13 +530,13 @@ impl MarketClearingService {
                 return Err(ApiError::Forbidden("Order does not belong to user".to_string()).into());
             }
 
-            if !matches!(order.status, OrderStatus::Pending) {
+            if !matches!(order.status, Some(OrderStatus::Pending)) {
                 return Err(ApiError::BadRequest("Order cannot be cancelled".to_string()).into());
             }
 
             // Cancel the order
             sqlx::query!(
-                "UPDATE trading_orders SET status = 'Cancelled', updated_at = NOW() WHERE id = $1",
+                "UPDATE trading_orders SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
                 order_id
             )
             .execute(&self.db)
@@ -582,7 +582,7 @@ impl MarketClearingService {
                 id, epoch_number, start_time, end_time, status,
                 clearing_price, total_volume, total_orders, matched_orders
             FROM market_epochs 
-            WHERE status IN ('Cleared', 'Expired')
+            WHERE status IN ('cleared', 'expired')
             ORDER BY epoch_number DESC
             LIMIT $1
             "#,
