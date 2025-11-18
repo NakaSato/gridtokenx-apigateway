@@ -79,18 +79,18 @@ The GridTokenX platform utilizes Solana blockchain through Anchor framework to i
 
 | Program ID | Program Name | Primary Purpose | Deploy Address |
 |------------|--------------|-----------------|----------------|
-| `6LgvcJ...` | **Energy Token** | GRID token management & minting | energy_token.so |
-| `Bxvy5Y...` | **Registry** | User & meter registration | registry.so |
-| `2Jqh9J...` | **Oracle** | External data ingestion | oracle.so |
-| `Hzmt59...` | **Trading** | P2P energy marketplace | trading.so |
-| `83V1DX...` | **Governance** | PoA & ERC certification | governance.so |
+| `94G1r674LmRD...` | **Energy Token** | GRID token management & minting | energy_token.so |
+| `2XPQmFYMdXjP...` | **Registry** | User & meter registration | registry.so |
+| `DvdtU4quEbux...` | **Oracle** | External data ingestion | oracle.so |
+| `GZnqNTJsre6q...` | **Trading** | P2P energy marketplace | trading.so |
+| `4DY97YYBt4bx...` | **Governance** | PoA & ERC certification | governance.so |
 
 ---
 
 ## Program Architecture
 
 ### 1. Registry Program
-**Program ID:** `Bxvy5YGhGXcqKCtBRHwmToT6mJ4ABEnAKALWiDcmvnN4`
+**Program ID:** `2XPQmFYMdXjP7ffoBB3mXeCdboSFg5Yeb6QmTSGbW8a7`
 
 #### Purpose
 Central registration hub for users, meters, and energy data tracking. Acts as the source of truth for identity and energy measurements.
@@ -182,7 +182,7 @@ pub enum MeterStatus { Active, Inactive, Maintenance }
 ---
 
 ### 2. Energy Token Program
-**Program ID:** `6LgvcJJ9fQ4P3h2JybqoRXq5mNqMkTPyMbuYrqpSb7yj`
+**Program ID:** `94G1r674LmRDmLN2UPjDFD8Eh7zT8JaSaxv9v68GyEur`
 
 #### Purpose
 Manages the GRID utility token lifecycle: minting, transferring, and burning. Integrates with Registry for settlement-based minting.
@@ -260,7 +260,7 @@ pub struct TokenInfo {
 ---
 
 ### 3. Oracle Program
-**Program ID:** `2Jqh9JgArbcvAfpwbsnMDz8MRxsyApmn2HvrvhGsyYcE`
+**Program ID:** `DvdtU4quEbuxUY2FckmvcXwTpC9qp4HLJKb1PMLaqAoE`
 
 #### Purpose
 Bridges off-chain data (AMI readings, market prices) to on-chain programs. Only API Gateway can submit data.
@@ -340,7 +340,7 @@ pub struct OracleData {
 ---
 
 ### 4. Trading Program
-**Program ID:** `Hzmt59G8cSt1viEeX8QcmNDo46xTPU3TE7LrcQ1PVMLV`
+**Program ID:** `GZnqNTJsre6qB4pWCQRE9FiJU2GUeBtBDPp6s7zosctk`
 
 #### Purpose
 Implements the P2P energy marketplace with order book, matching engine, and settlement.
@@ -428,7 +428,7 @@ pub struct TradeRecord {
 ---
 
 ### 5. Governance Program
-**Program ID:** `83V1DXEmnzze8jgU4UKDfC6WRhwbkgbU9ApHVVyaaKBQ`
+**Program ID:** `4DY97YYBt4bxvG7xaSmWy3MhYhmA6HoMajBHVqhySvXe`
 
 #### Purpose
 Implements Proof-of-Authority (PoA) governance for REC certification and system-wide controls.
@@ -1059,11 +1059,11 @@ class BlockchainEventListener {
 
 ```toml
 [programs.localnet]
-energy_token = "6LgvcJJ9fQ4P3h2JybqoRXq5mNqMkTPyMbuYrqpSb7yj"
-governance = "83V1DXEmnzze8jgU4UKDfC6WRhwbkgbU9ApHVVyaaKBQ"
-oracle = "2Jqh9JgArbcvAfpwbsnMDz8MRxsyApmn2HvrvhGsyYcE"
-registry = "Bxvy5YGhGXcqKCtBRHwmToT6mJ4ABEnAKALWiDcmvnN4"
-trading = "Hzmt59G8cSt1viEeX8QcmNDo46xTPU3TE7LrcQ1PVMLV"
+energy_token = "94G1r674LmRDmLN2UPjDFD8Eh7zT8JaSaxv9v68GyEur"
+governance = "4DY97YYBt4bxvG7xaSmWy3MhYhmA6HoMajBHVqhySvXe"
+oracle = "DvdtU4quEbuxUY2FckmvcXwTpC9qp4HLJKb1PMLaqAoE"
+registry = "2XPQmFYMdXjP7ffoBB3mXeCdboSFg5Yeb6QmTSGbW8a7"
+trading = "GZnqNTJsre6qB4pWCQRE9FiJU2GUeBtBDPp6s7zosctk"
 ```
 
 ### Deployment Commands

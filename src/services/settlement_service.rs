@@ -229,41 +229,96 @@ impl SettlementService {
         }
     }
 
-    /// Execute the actual blockchain transfer
+    /// Execute actual blockchain transfer
     async fn execute_blockchain_transfer(
         &self,
         settlement: &Settlement,
     ) -> Result<SettlementTransaction, ApiError> {
-        // Note: This is a simplified implementation
-        // In production, you would:
-        // 1. Get buyer and seller token accounts
-        // 2. Create SPL token transfer instruction
-        // 3. Sign and send transaction
-        // 4. Wait for confirmation
-
         info!(
             "🔗 Executing blockchain transfer for settlement {}",
             settlement.id
         );
 
-        // For now, we'll simulate a successful transaction
-        // In production, replace with actual Solana SPL token transfer
-        let simulated_signature = format!(
-            "{}{}",
-            settlement.id.to_string().replace("-", ""),
-            "1234567890abcdef"
-        )[..64]
-            .to_string();
-
-        // Simulate network delay
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
+        // 1. Get buyer and seller wallets from database
+        let buyer_wallet = self.get_user_wallet(&settlement.buyer_id).await?;
+        let seller_wallet = self.get_user_wallet(&settlement.seller_id).await?;
+        
+        // 2. Parse wallet addresses
+        let buyer_pubkey = BlockchainService::parse_pubkey(&buyer_wallet)
+            .map_err(|e| ApiError::Internal(format!("Invalid buyer wallet: {}", e)))?;
+        let seller_pubkey = BlockchainService::parse_pubkey(&seller_wallet)
+            .map_err(|e| ApiError::Internal(format!("Invalid seller wallet: {}", e)))?;
+        
+        // 3. Get mint address from config or environment
+        let mint = BlockchainService::parse_pubkey("94G1r674LmRDmLN2UPjDFD8Eh7zT8JaSaxv9v68GyEur")
+            .map_err(|e| ApiError::Internal(format!("Invalid mint config: {}", e)))?;
+        
+        // 4. Get authority keypair from wallet service
+        let authority = self.blockchain.get_authority_keypair().await
+            .map_err(|e| ApiError::Internal(format!("Failed to get authority keypair: {}", e)))?;
+        
+        // 5. Ensure buyer and seller have token accounts
+        let buyer_token_account = self.blockchain
+            .ensure_token_account_exists(&authority, &buyer_pubkey, &mint)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to create buyer token account: {}", e)))?;
+        
+        let seller_token_account = self.blockchain
+            .ensure_token_account_exists(&authority, &seller_pubkey, &mint)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Failed to create seller token account: {}", e)))?;
+        
+        // 6. Calculate amounts (in lamports, 9 decimals)
+        let total_amount_lamports = (settlement.total_value * Decimal::from(1_000_000_000i64)).to_string().parse::<u64>().unwrap_or(0);
+        let fee_amount_lamports = (settlement.fee_amount * Decimal::from(1_000_000_000i64)).to_string().parse::<u64>().unwrap_or(0);
+        let seller_amount_lamports = total_amount_lamports - fee_amount_lamports;
+        
+        info!(
+            "Settlement transfer: {} tokens from buyer {} to seller {}",
+            settlement.energy_amount, buyer_pubkey, seller_pubkey
+        );
+        
+        // 7. Transfer tokens: buyer → seller (net amount after platform fee)
+        // Note: This assumes buyer has sufficient tokens. In production, use escrow.
+        let signature = self.blockchain
+            .transfer_tokens(
+                &authority,
+                &buyer_token_account,   // From buyer
+                &seller_token_account,  // To seller
+                &mint,
+                seller_amount_lamports,
+                9,  // Decimals
+            )
+            .await
+            .map_err(|e| ApiError::Internal(format!("Blockchain transfer failed: {}", e)))?;
+        
+        info!("Settlement completed. Signature: {}", signature);
+        
+        // 8. Get current slot for confirmation
+        let slot = self.blockchain.get_slot()
+            .map_err(|e| ApiError::Internal(format!("Failed to get slot: {}", e)))?;
+        
+        // 9. Create settlement transaction record
         Ok(SettlementTransaction {
             settlement_id: settlement.id,
-            signature: simulated_signature,
-            slot: 12345678,
-            confirmation_status: "finalized".to_string(),
+            signature: signature.to_string(),
+            slot,
+            confirmation_status: "confirmed".to_string(),
         })
+    }
+
+    /// Helper: Get user wallet address from database
+    async fn get_user_wallet(&self, user_id: &Uuid) -> Result<String, ApiError> {
+        let result = sqlx::query!(
+            "SELECT wallet_address FROM users WHERE id = $1",
+            user_id
+        )
+        .fetch_one(&self.db)
+        .await
+        .map_err(ApiError::Database)?;
+        
+        result.wallet_address
+            .ok_or_else(|| ApiError::Internal(format!("User {} has no wallet connected", user_id)))
     }
 
     /// Process all pending settlements
@@ -414,6 +469,56 @@ impl SettlementService {
         .bind(status.to_string())
         .bind(tx_signature)
         .bind(id)
+        .execute(&self.db)
+        .await
+        .map_err(ApiError::Database)?;
+
+        Ok(())
+    }
+
+    /// Retry failed settlements (called by background job)
+    pub async fn retry_failed_settlements(&self, max_retries: u32) -> Result<usize, ApiError> {
+        // Fetch settlements with status = 'Failed' and retry_count < max_retries
+        let failed = sqlx::query!(
+            r#"
+            SELECT id FROM settlements 
+            WHERE status = 'Failed' 
+            AND retry_count < $1
+            "#,
+            max_retries as i32
+        )
+        .fetch_all(&self.db)
+        .await
+        .map_err(ApiError::Database)?;
+        
+        let mut retried = 0;
+        for settlement in failed {
+            match self.execute_settlement(settlement.id).await {
+                Ok(_) => {
+                    info!("Settlement {} retry succeeded", settlement.id);
+                    retried += 1;
+                }
+                Err(e) => {
+                    error!("Settlement {} retry failed: {}", settlement.id, e);
+                    // Increment retry count
+                    self.increment_retry_count(&settlement.id).await?;
+                }
+            }
+        }
+        
+        Ok(retried)
+    }
+
+    /// Increment retry count for a settlement
+    async fn increment_retry_count(&self, settlement_id: &Uuid) -> Result<(), ApiError> {
+        sqlx::query(
+            r#"
+            UPDATE settlements
+            SET retry_count = retry_count + 1, updated_at = NOW()
+            WHERE id = $1
+            "#,
+        )
+        .bind(settlement_id)
         .execute(&self.db)
         .await
         .map_err(ApiError::Database)?;

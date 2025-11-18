@@ -19,11 +19,11 @@
 ### Localnet
 
 ```
-Registry:      Bxvy5YGhGXcqKCtBRHwmToT6mJ4ABEnAKALWiDcmvnN4
-Energy Token:  6LgvcJJ9fQ4P3h2JybqoRXq5mNqMkTPyMbuYrqpSb7yj
-Oracle:        2Jqh9JgArbcvAfpwbsnMDz8MRxsyApmn2HvrvhGsyYcE
-Trading:       Hzmt59G8cSt1viEeX8QcmNDo46xTPU3TE7LrcQ1PVMLV
-Governance:    83V1DXEmnzze8jgU4UKDfC6WRhwbkgbU9ApHVVyaaKBQ
+Registry:      2XPQmFYMdXjP7ffoBB3mXeCdboSFg5Yeb6QmTSGbW8a7
+Energy Token:  94G1r674LmRDmLN2UPjDFD8Eh7zT8JaSaxv9v68GyEur
+Oracle:        DvdtU4quEbuxUY2FckmvcXwTpC9qp4HLJKb1PMLaqAoE
+Trading:       GZnqNTJsre6qB4pWCQRE9FiJU2GUeBtBDPp6s7zosctk
+Governance:    4DY97YYBt4bxvG7xaSmWy3MhYhmA6HoMajBHVqhySvXe
 ```
 
 ---

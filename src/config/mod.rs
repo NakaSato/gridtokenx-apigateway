@@ -13,6 +13,7 @@ pub struct Config {
     pub jwt_expiration: i64,
     pub solana_rpc_url: String,
     pub solana_ws_url: String,
+    pub energy_token_mint: String,
     pub engineering_api_key: String,
     pub max_connections: u32,
     pub redis_pool_size: u32,
@@ -65,6 +66,8 @@ impl Config {
                 .map_err(|_| anyhow::anyhow!("SOLANA_RPC_URL environment variable is required"))?,
             solana_ws_url: env::var("SOLANA_WS_URL")
                 .map_err(|_| anyhow::anyhow!("SOLANA_WS_URL environment variable is required"))?,
+            energy_token_mint: env::var("ENERGY_TOKEN_MINT")
+                .map_err(|_| anyhow::anyhow!("ENERGY_TOKEN_MINT environment variable is required"))?,
             engineering_api_key: env::var("ENGINEERING_API_KEY")
                 .map_err(|_| anyhow::anyhow!("ENGINEERING_API_KEY environment variable is required"))?,
             max_connections: env::var("MAX_CONNECTIONS")

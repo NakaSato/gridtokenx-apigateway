@@ -4,6 +4,7 @@ pub mod audit;
 pub mod user_management;
 pub mod email_verification;
 pub mod meters;
+pub mod meter_verification;
 pub mod erc;
 pub mod trading;
 pub mod market_data;

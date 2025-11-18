@@ -15,6 +15,7 @@ use redis::AsyncCommands;
 
 use crate::error::ApiError;
 use crate::services::WebSocketService;
+use crate::services::SettlementService;
 
 /// Order side (Buy or Sell)
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -301,6 +302,7 @@ pub struct MarketClearingEngine {
     redis: redis::Client,
     order_book: Arc<RwLock<OrderBook>>,
     websocket: Option<WebSocketService>,
+    settlement_service: Option<SettlementService>,
 }
 
 impl MarketClearingEngine {
@@ -310,12 +312,19 @@ impl MarketClearingEngine {
             redis,
             order_book: Arc::new(RwLock::new(OrderBook::new())),
             websocket: None,
+            settlement_service: None,
         }
     }
 
     /// Set WebSocket service for real-time broadcasts
     pub fn with_websocket(mut self, websocket: WebSocketService) -> Self {
         self.websocket = Some(websocket);
+        self
+    }
+
+    /// Set settlement service for blockchain integration
+    pub fn with_settlement_service(mut self, settlement_service: SettlementService) -> Self {
+        self.settlement_service = Some(settlement_service);
         self
     }
 
@@ -946,6 +955,14 @@ impl MarketClearingEngine {
         // Persist to database with atomic updates
         let persisted = self.persist_matches(matches).await?;
         
+        // Execute settlements for matched trades if settlement service is available
+        if let Some(settlement_service) = &self.settlement_service {
+            info!("🔄 Executing settlements for {} trades", persisted);
+            if let Err(e) = settlement_service.process_pending_settlements().await {
+                error!("❌ Settlement execution failed: {}", e);
+            }
+        }
+        
         // Broadcast updated order book after matching
         if let Some(ws) = &self.websocket {
             self.broadcast_order_book_snapshot(ws).await;
@@ -954,6 +971,79 @@ impl MarketClearingEngine {
         
         info!("✅ Matching cycle complete: {} trades persisted", persisted);
         Ok(persisted)
+    }
+
+    /// Execute settlements for matched trades
+    async fn execute_settlements_for_matches(&self, settlement_service: &SettlementService) -> Result<(), ApiError> {
+        // Get recent trades that need settlement (status = 'Pending')
+        let trades = sqlx::query_as::<_, (Uuid, Uuid, Uuid, Uuid, String, String, String, DateTime<Utc>)>(
+            r#"
+            SELECT 
+                id, buyer_id, seller_id, 
+                quantity::text, price::text, total_value::text,
+                executed_at
+            FROM trades 
+            WHERE status = 'Pending'
+            ORDER BY executed_at ASC
+            LIMIT 50
+            "#
+        )
+        .fetch_all(&self.db)
+        .await
+        .map_err(ApiError::Database)?;
+
+        if trades.is_empty() {
+            debug!("No pending trades to settle");
+            return Ok(());
+        }
+
+        info!("🔄 Processing settlements for {} pending trades", trades.len());
+        let mut processed = 0;
+        let mut failed = 0;
+
+        for (trade_id, buyer_id, seller_id, quantity_str, price_str, total_value_str, executed_at) in trades {
+            // Convert TradeMatch to settlement format
+            let quantity = Decimal::from_str_exact(&quantity_str)
+                .map_err(|_| ApiError::Internal("Invalid quantity".into()))?;
+            let price = Decimal::from_str_exact(&price_str)
+                .map_err(|_| ApiError::Internal("Invalid price".into()))?;
+            let total_value = Decimal::from_str_exact(&total_value_str)
+                .map_err(|_| ApiError::Internal("Invalid total value".into()))?;
+
+            let settlement = crate::services::settlement_service::Settlement {
+                id: Uuid::new_v4(),
+                trade_id,
+                buyer_id,
+                seller_id,
+                energy_amount: quantity,
+                price,
+                total_value,
+                fee_amount: total_value * Decimal::from_str_exact("0.01").unwrap(), // 1% fee
+                net_amount: total_value * Decimal::from_str_exact("0.99").unwrap(), // 99% after fee
+                status: crate::services::settlement_service::SettlementStatus::Pending,
+                blockchain_tx: None,
+                created_at: executed_at,
+                confirmed_at: None,
+            };
+
+            match settlement_service.execute_settlement(settlement.id).await {
+                Ok(_) => {
+                    processed += 1;
+                    info!("✅ Settlement {} executed successfully", settlement.id);
+                }
+                Err(e) => {
+                    failed += 1;
+                    error!("❌ Settlement {} failed: {}", settlement.id, e);
+                }
+            }
+        }
+
+        info!(
+            "🏁 Settlement processing complete: {} processed, {} failed",
+            processed, failed
+        );
+
+        Ok(())
     }
 
     /// Broadcast order book snapshot to WebSocket clients

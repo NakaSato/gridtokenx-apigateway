@@ -11,14 +11,13 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info, warn, error};
-use sha2::Digest; // Sha256 not used
 
-/// Program IDs from Anchor.toml
-pub const REGISTRY_PROGRAM_ID: &str = "Bxvy5YGhGXcqKCtBRHwmToT6mJ4ABEnAKALWiDcmvnN4";
-pub const ORACLE_PROGRAM_ID: &str = "2Jqh9JgArbcvAfpwbsnMDz8MRxsyApmn2HvrvhGsyYcE";
-pub const GOVERNANCE_PROGRAM_ID: &str = "83V1DXEmnzze8jgU4UKDfC6WRhwbkgbU9ApHVVyaaKBQ";
-pub const ENERGY_TOKEN_PROGRAM_ID: &str = "6LgvcJJ9fQ4P3h2JybqoRXq5mNqMkTPyMbuYrqpSb7yj";
-pub const TRADING_PROGRAM_ID: &str = "Hzmt59G8cSt1viEeX8QcmNDo46xTPU3TE7LrcQ1PVMLV";
+/// Program IDs (localnet) — keep in sync with `gridtokenx-anchor/Anchor.toml`
+pub const REGISTRY_PROGRAM_ID: &str = "2XPQmFYMdXjP7ffoBB3mXeCdboSFg5Yeb6QmTSGbW8a7";
+pub const ORACLE_PROGRAM_ID: &str = "DvdtU4quEbuxUY2FckmvcXwTpC9qp4HLJKb1PMLaqAoE";
+pub const GOVERNANCE_PROGRAM_ID: &str = "4DY97YYBt4bxvG7xaSmWy3MhYhmA6HoMajBHVqhySvXe";
+pub const ENERGY_TOKEN_PROGRAM_ID: &str = "94G1r674LmRDmLN2UPjDFD8Eh7zT8JaSaxv9v68GyEur";
+pub const TRADING_PROGRAM_ID: &str = "GZnqNTJsre6qB4pWCQRE9FiJU2GUeBtBDPp6s7zosctk";
 
 /// Blockchain service for interacting with Solana programs
 #[derive(Clone)]
@@ -368,6 +367,131 @@ impl BlockchainService {
         info!("Successfully minted {} kWh as tokens. Signature: {}", amount_kwh, signature);
         
         Ok(signature)
+    }
+
+    /// Ensures user has an Associated Token Account for the token mint
+    /// Creates ATA if it doesn't exist, returns ATA address
+    pub async fn ensure_token_account_exists(
+        &self,
+        authority: &Keypair,
+        user_wallet: &Pubkey,
+        mint: &Pubkey,
+    ) -> Result<Pubkey> {
+        // Calculate ATA address manually to avoid type conversion issues
+        // ATA = PDA of [associated_token_account_program_id, wallet, token_program_id, mint]
+        let ata_program_id = Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
+            .map_err(|e| anyhow!("Invalid ATA program ID: {}", e))?;
+        
+        let token_program_id = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+            .map_err(|e| anyhow!("Invalid token program ID: {}", e))?;
+        
+        let (ata_address, _bump) = Pubkey::find_program_address(
+            &[
+                user_wallet.as_ref(),
+                token_program_id.as_ref(),
+                mint.as_ref(),
+            ],
+            &ata_program_id,
+        );
+        
+        // Check if account exists
+        if self.account_exists(&ata_address)? {
+            info!("ATA already exists: {}", ata_address);
+            return Ok(ata_address);
+        }
+        
+        info!("Creating ATA for user: {}", user_wallet);
+        
+        // ATA creation instruction data (empty for associated token account creation)
+        let instruction_data = vec![];
+        
+        // Accounts for the instruction
+        let accounts = vec![
+            solana_sdk::instruction::AccountMeta::new(ata_address, false),     // ATA account (writable)
+            solana_sdk::instruction::AccountMeta::new(*user_wallet, false),      // Wallet owner
+            solana_sdk::instruction::AccountMeta::new(authority.pubkey(), true), // Payer (signer)
+            solana_sdk::instruction::AccountMeta::new(*mint, false),            // Mint
+            solana_sdk::instruction::AccountMeta::new_readonly(
+                Pubkey::from_str("11111111111111111111111111111112")
+                    .expect("Valid system program ID"), false
+            ), // System program
+            solana_sdk::instruction::AccountMeta::new_readonly(
+                token_program_id, false
+            ), // Token program
+            solana_sdk::instruction::AccountMeta::new_readonly(
+                ata_program_id, false
+            ), // ATA program
+        ];
+        
+        let create_ata_ix = Instruction {
+            program_id: ata_program_id,
+            accounts,
+            data: instruction_data,
+        };
+        
+        // Submit transaction
+        let signature = self.build_and_send_transaction(
+            vec![create_ata_ix],
+            &[authority],
+        ).await?;
+        
+        info!("ATA created. Signature: {}", signature);
+        
+        // Wait for confirmation
+        self.wait_for_confirmation(&signature, 30).await?;
+        
+        Ok(ata_address)
+    }
+
+    /// Transfer SPL tokens from one account to another
+    /// Used for settlement transfers: buyer → seller
+    pub async fn transfer_tokens(
+        &self,
+        authority: &Keypair,
+        from_token_account: &Pubkey,
+        to_token_account: &Pubkey,
+        mint: &Pubkey,
+        amount: u64,
+        decimals: u8,
+    ) -> Result<Signature> {
+        info!(
+            "Transferring {} tokens from {} to {}",
+            amount, from_token_account, to_token_account
+        );
+        
+        // Create transfer instruction using transfer_checked for safety
+        let transfer_ix = spl_token::instruction::transfer_checked(
+            &spl_token::id(),
+            from_token_account,
+            mint,
+            to_token_account,
+            &authority.pubkey(),  // Authority (owner of from_account)
+            &[],                   // No multisig signers
+            amount,
+            decimals,
+        )?;
+        
+        // Submit transaction
+        let signature = self.build_and_send_transaction(
+            vec![transfer_ix],
+            &[authority],
+        ).await?;
+        
+        info!("Tokens transferred. Signature: {}", signature);
+        
+        // Wait for confirmation
+        self.wait_for_confirmation(&signature, 30).await?;
+        
+        Ok(signature)
+    }
+
+    /// Get authority keypair (for settlement service)
+    /// This should be implemented by the wallet service, but providing a placeholder
+    pub async fn get_authority_keypair(&self) -> Result<Keypair> {
+        // This should be moved to wallet service in production
+        // For now, create a test keypair - in production this should load from secure storage
+        warn!("Using placeholder authority keypair - implement proper wallet service integration");
+        Err(anyhow!("Authority keypair not implemented - integrate with wallet service"))
     }
 }
 

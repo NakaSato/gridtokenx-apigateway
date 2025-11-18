@@ -11,6 +11,7 @@ pub mod health_check;
 pub mod market_clearing;
 pub mod market_clearing_service;
 pub mod meter_service;
+pub mod meter_verification_service;
 pub mod order_matching_engine;
 pub mod settlement_service;
 pub mod token_service;

@@ -3,7 +3,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use utoipa::{ToSchema, IntoParams};
 use uuid::Uuid;
 use bigdecimal::BigDecimal;
@@ -41,6 +41,9 @@ pub struct SubmitReadingRequest {
     pub kwh_amount: BigDecimal,
     pub reading_timestamp: chrono::DateTime<chrono::Utc>,
     pub meter_signature: Option<String>,
+    /// NEW: Required UUID from meter_registry (for verified meters)
+    /// For legacy support, this can be omitted during grace period
+    pub meter_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -148,11 +151,11 @@ pub struct MintFromReadingRequest {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MintResponse {
-    pub success: bool,
+    pub message: String,
     pub transaction_signature: String,
-    pub reading_id: Uuid,
     #[schema(value_type = String)]
     pub kwh_amount: BigDecimal,
+    pub wallet_address: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -218,6 +221,34 @@ pub async fn submit_reading(
         ApiError::BadRequest("Wallet address not set for user".to_string())
     })?;
 
+    // NEW: Verify meter ownership if meter_id is provided
+    let verification_status = if let Some(meter_id) = request.meter_id {
+        // Verify meter ownership
+        let is_owner = state.meter_verification_service
+            .verify_meter_ownership(&user.sub.to_string(), &meter_id)
+            .await
+            .map_err(|e| {
+                error!("Failed to verify meter ownership: {}", e);
+                ApiError::Internal(format!("Failed to verify meter ownership: {}", e))
+            })?;
+
+        if !is_owner {
+            return Err(ApiError::Forbidden(
+                "You do not own this meter or it is not verified".to_string(),
+            ));
+        }
+
+        info!("Meter ownership verified for meter_id: {}", meter_id);
+        "verified"
+    } else {
+        // Legacy support during grace period
+        warn!(
+            "User {} submitting reading without meter_id - using legacy_unverified status",
+            user.sub
+        );
+        "legacy_unverified"
+    };
+
     // Validate reading data
     let meter_request = crate::services::meter_service::SubmitMeterReadingRequest {
         wallet_address: wallet_address.clone(),
@@ -229,9 +260,9 @@ pub async fn submit_reading(
     crate::services::meter_service::MeterService::validate_reading(&meter_request)
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
 
-    // Submit reading to database
+    // Submit reading to database with verification status
     let reading = state.meter_service
-        .submit_reading(user.sub, meter_request)
+        .submit_reading_with_verification(user.sub, meter_request, request.meter_id, verification_status)
         .await
         .map_err(|e| {
             error!("Failed to submit meter reading: {}", e);
@@ -526,41 +557,21 @@ pub async fn mint_from_reading(
             ApiError::Internal("Authority wallet not configured".to_string())
         })?;
 
-    // Get environment configuration for token mint
-    let token_mint_str = std::env::var("GRID_TOKEN_MINT")
-        .map_err(|_| {
-            error!("GRID_TOKEN_MINT not configured");
-            ApiError::Internal("Token mint address not configured".to_string())
-        })?;
+    // Get token mint address from config
+    let token_mint = BlockchainService::parse_pubkey(&state.config.energy_token_mint)
+        .map_err(|e| ApiError::Internal(format!("Invalid token mint config: {}", e)))?;
     
-    let token_mint = BlockchainService::parse_pubkey(&token_mint_str)
-        .map_err(|e| ApiError::Internal(format!("Invalid token mint address: {}", e)))?;
+    // Ensure user has token account (create if needed)
+    let user_token_account = state.blockchain_service
+        .ensure_token_account_exists(&authority_keypair, &wallet_pubkey, &token_mint)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to create token account: {}", e)))?;
     
-    // Derive user's associated token account
-    // We need to convert the Pubkey types to be compatible with spl_associated_token_account
-    let user_token_account = {
-        use solana_sdk::pubkey::Pubkey as SdkPubkey;
-        let wallet_bytes = wallet_pubkey.to_bytes();
-        let mint_bytes = token_mint.to_bytes();
-        
-        // Parse as spl_associated_token_account pubkeys
-        let wallet_spl = spl_associated_token_account::solana_program::pubkey::Pubkey::new_from_array(wallet_bytes);
-        let mint_spl = spl_associated_token_account::solana_program::pubkey::Pubkey::new_from_array(mint_bytes);
-        
-        let ata_spl = spl_associated_token_account::get_associated_token_address(&wallet_spl, &mint_spl);
-        
-        // Convert back to solana_sdk::pubkey::Pubkey
-        SdkPubkey::new_from_array(ata_spl.to_bytes())
-    };
+    info!("User token account: {}", user_token_account);
     
     // Mint tokens on blockchain
     let kwh_amount = reading.kwh_amount
         .ok_or_else(|| ApiError::Internal("Missing kWh amount".to_string()))?;
-    
-    info!(
-        "Minting {} kWh as tokens for wallet {} (token account: {})",
-        kwh_amount, reading.wallet_address, user_token_account
-    );
     
     let amount_kwh = kwh_amount.to_string().parse::<f64>()
         .map_err(|e| ApiError::Internal(format!("Invalid kWh amount: {}", e)))?;
@@ -596,11 +607,11 @@ pub async fn mint_from_reading(
     );
 
     Ok(Json(MintResponse {
-        success: true,
+        message: "Tokens minted successfully".to_string(),
         transaction_signature: tx_signature.to_string(),
-        reading_id: updated_reading.id,
         kwh_amount: updated_reading.kwh_amount
             .ok_or_else(|| ApiError::Internal("Missing kWh amount".to_string()))?,
+        wallet_address: reading.wallet_address,
     }))
 }
 

@@ -199,7 +199,7 @@ pub async fn issue_certificate(
         .map(|r| r.id)
         .unwrap_or_else(|| Uuid::nil()); // Use nil UUID if user not found
 
-    // Issue certificate
+    // Issue certificate in database first
     let cert_request = crate::services::erc_service::IssueErcRequest {
         wallet_address: request.wallet_address,
         kwh_amount: request.kwh_amount,
@@ -215,23 +215,102 @@ pub async fn issue_certificate(
             ApiError::Internal(format!("Failed to issue certificate: {}", e))
         })?;
 
+    // Parse user wallet for blockchain operation
+    let user_wallet = state.blockchain_service
+        .parse_pubkey(&certificate.wallet_address)
+        .map_err(|e| {
+            error!("Failed to parse user wallet: {}", e);
+            ApiError::BadRequest(format!("Invalid wallet address: {}", e))
+        })?;
+
+    // Get authority keypair for blockchain operation
+    let authority = state.wallet_service
+        .get_authority_keypair()
+        .await
+        .map_err(|e| {
+            error!("Failed to get authority keypair: {}", e);
+            ApiError::ServiceUnavailable(format!("Authority wallet unavailable: {}", e))
+        })?;
+
+    // Get governance program ID
+    let governance_program_id = state.blockchain_service
+        .get_governance_program_id()
+        .map_err(|e| {
+            error!("Failed to get governance program ID: {}", e);
+            ApiError::Internal(format!("Governance program not configured: {}", e))
+        })?;
+
+    // Extract renewable source and validation data from metadata
+    let (renewable_source, validation_data) = if let Some(metadata) = &certificate.metadata {
+        let renewable_source = metadata
+            .get("renewable_source")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown")
+            .to_string();
+        
+        let validation_data = metadata
+            .get("validation_data")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        
+        (renewable_source, validation_data)
+    } else {
+        ("Unknown".to_string(), "".to_string())
+    };
+
+    // Convert kwh_amount to f64 for blockchain
+    let kwh_amount_f64 = certificate.kwh_amount
+        .as_ref()
+        .and_then(|bd| {
+            use std::str::FromStr;
+            f64::from_str(&bd.to_string()).ok()
+        })
+        .unwrap_or(0.0);
+
+    // Mint certificate on-chain
+    let blockchain_signature = state.erc_service
+        .issue_certificate_on_chain(
+            &certificate.certificate_id,
+            &user_wallet,
+            kwh_amount_f64,
+            &renewable_source,
+            &validation_data,
+            &authority,
+            &governance_program_id,
+        )
+        .await
+        .map_err(|e| {
+            error!("Failed to mint certificate on-chain: {}", e);
+            ApiError::Internal(format!("Blockchain minting failed: {}", e))
+        })?;
+
+    // Update certificate with blockchain signature
+    let updated_certificate = state.erc_service
+        .update_blockchain_signature(&certificate.certificate_id, &blockchain_signature.to_string())
+        .await
+        .map_err(|e| {
+            error!("Failed to update certificate blockchain signature: {}", e);
+            ApiError::Internal(format!("Failed to update database: {}", e))
+        })?;
+
     info!(
-        "Certificate {} issued successfully",
-        certificate.certificate_id
+        "Certificate {} issued and minted on-chain: {}",
+        certificate.certificate_id, blockchain_signature
     );
 
     Ok(Json(ErcCertificateResponse {
-        id: certificate.id,
-        certificate_id: certificate.certificate_id,
-        user_id: certificate.user_id,
-        wallet_address: certificate.wallet_address,
-        kwh_amount: certificate.kwh_amount,
-        issue_date: certificate.issue_date,
-        expiry_date: certificate.expiry_date,
-        issuer_wallet: certificate.issuer_wallet,
-        status: certificate.status,
-        blockchain_tx_signature: certificate.blockchain_tx_signature,
-        metadata: certificate.metadata,
+        id: updated_certificate.id,
+        certificate_id: updated_certificate.certificate_id,
+        user_id: updated_certificate.user_id,
+        wallet_address: updated_certificate.wallet_address,
+        kwh_amount: updated_certificate.kwh_amount,
+        issue_date: updated_certificate.issue_date,
+        expiry_date: updated_certificate.expiry_date,
+        issuer_wallet: updated_certificate.issuer_wallet,
+        status: updated_certificate.status,
+        blockchain_tx_signature: Some(blockchain_signature.to_string()),
+        metadata: updated_certificate.metadata,
     }))
 }
 

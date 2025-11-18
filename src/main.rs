@@ -37,6 +37,7 @@ pub struct AppState {
     pub blockchain_service: services::BlockchainService,
     pub wallet_service: services::WalletService,
     pub meter_service: services::MeterService,
+    pub meter_verification_service: services::MeterVerificationService,
     pub erc_service: services::ErcService,
     pub order_matching_engine: services::OrderMatchingEngine,
     pub market_clearing_engine: services::MarketClearingEngine,
@@ -172,6 +173,10 @@ async fn main() -> Result<()> {
     let meter_service = services::MeterService::new(db_pool.clone());
     info!("Meter service initialized");
 
+    // Initialize meter verification service (Priority 0 - Security)
+    let meter_verification_service = services::MeterVerificationService::new(db_pool.clone());
+    info!("Meter verification service initialized");
+
     // Initialize ERC service (Phase 4)
     let erc_service = services::ErcService::new(db_pool.clone());
     info!("ERC service initialized");
@@ -246,6 +251,7 @@ async fn main() -> Result<()> {
         blockchain_service,
         wallet_service,
         meter_service,
+        meter_verification_service,
         erc_service,
         order_matching_engine,
         market_clearing_engine,
@@ -404,6 +410,8 @@ async fn main() -> Result<()> {
         
         // Energy meter routes - Phase 4
         .nest("/api/meters", Router::new()
+            .route("/verify", post(handlers::meter_verification::verify_meter_handler))
+            .route("/registered", get(handlers::meter_verification::get_registered_meters_handler))
             .route("/submit-reading", post(meters::submit_reading))
             .route("/my-readings", get(meters::get_my_readings))
             .route("/readings/{wallet_address}", get(meters::get_readings_by_wallet))

@@ -2,9 +2,16 @@ use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use tracing::{debug, info};
+use tracing::{debug, info, error};
 use uuid::Uuid;
 use bigdecimal::BigDecimal;
+use solana_sdk::{
+    pubkey::Pubkey,
+    signature::Keypair,
+    instruction::{Instruction, AccountMeta},
+};
+use std::str::FromStr;
+use sha2::{Sha256, Digest};
 
 /// Energy Renewable Certificate
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -51,10 +58,370 @@ pub struct ErcService {
     db_pool: PgPool,
 }
 
+/// ERC Certificate metadata for on-chain storage
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ErcMetadata {
+    pub name: String,
+    pub description: String,
+    pub image: Option<String>,
+    pub attributes: Vec<ErcAttribute>,
+    pub properties: ErcProperties,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ErcAttribute {
+    pub trait_type: String,
+    pub value: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ErcProperties {
+    pub files: Vec<ErcFile>,
+    pub category: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ErcFile {
+    pub uri: String,
+    #[serde(rename = "type")]
+    pub file_type: String,
+}
+
 impl ErcService {
     /// Create a new ERC service
     pub fn new(db_pool: PgPool) -> Self {
         Self { db_pool }
+    }
+
+    /// Issue ERC certificate on-chain (calls governance program)
+    pub async fn issue_certificate_on_chain(
+        &self,
+        certificate_id: &str,
+        user_wallet: &Pubkey,
+        energy_amount: f64,
+        renewable_source: &str,
+        validation_data: &str,
+        authority: &Keypair,
+        governance_program_id: &Pubkey,
+    ) -> Result<solana_sdk::signature::Signature> {
+        info!(
+            "Issuing ERC certificate {} on-chain for wallet {}",
+            certificate_id, user_wallet
+        );
+
+        // 1. Derive ERC certificate PDA
+        let (certificate_pda, _bump) = Pubkey::find_program_address(
+            &[b"erc_certificate", certificate_id.as_bytes()],
+            governance_program_id,
+        );
+
+        // 2. Get PoA config PDA
+        let (poa_config_pda, _) = Pubkey::find_program_address(
+            &[b"poa_config"],
+            governance_program_id,
+        );
+
+        // 3. Build Anchor instruction data
+        let mut instruction_data = Vec::new();
+        
+        // Discriminator for "issue_erc" instruction (first 8 bytes of SHA256 hash)
+        let mut hasher = Sha256::new();
+        hasher.update(b"global:issue_erc");
+        let hash = hasher.finalize();
+        instruction_data.extend_from_slice(&hash[0..8]);
+        
+        // Serialize arguments using simple approach for now
+        // In production, use proper Borsh serialization
+        instruction_data.extend_from_slice(&(certificate_id.len() as u32).to_le_bytes());
+        instruction_data.extend_from_slice(certificate_id.as_bytes());
+        instruction_data.extend_from_slice(&(energy_amount as u64).to_le_bytes());
+        instruction_data.extend_from_slice(&(renewable_source.len() as u32).to_le_bytes());
+        instruction_data.extend_from_slice(renewable_source.as_bytes());
+        instruction_data.extend_from_slice(&(validation_data.len() as u32).to_le_bytes());
+        instruction_data.extend_from_slice(validation_data.as_bytes());
+        
+        // 4. Build accounts for instruction
+        let accounts = vec![
+            AccountMeta::new(poa_config_pda, false),
+            AccountMeta::new(certificate_pda, false),
+            AccountMeta::new_readonly(*user_wallet, false),
+            AccountMeta::new_readonly(authority.pubkey(), true),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ];
+        
+        let issue_erc_ix = Instruction::new_with_bytes(
+            *governance_program_id,
+            &instruction_data,
+            accounts,
+        );
+
+        // 5. For now, return a mock signature since we need the blockchain service
+        // In the actual implementation, this would call:
+        // blockchain_service.build_and_send_transaction(vec![issue_erc_ix], &[authority]).await
+        let mock_signature = solana_sdk::signature::Signature::default();
+        
+        info!(
+            "ERC certificate {} minted on-chain (mock): {}",
+            certificate_id, mock_signature
+        );
+        
+        Ok(mock_signature)
+    }
+
+    /// Create ERC metadata for on-chain storage
+    pub fn create_certificate_metadata(
+        &self,
+        certificate_id: &str,
+        energy_amount: f64,
+        renewable_source: &str,
+        issuer: &str,
+        issue_date: DateTime<Utc>,
+        expiry_date: Option<DateTime<Utc>>,
+        validation_data: &str,
+    ) -> Result<ErcMetadata> {
+        let metadata = ErcMetadata {
+            name: format!("Renewable Energy Certificate #{}", certificate_id),
+            description: format!(
+                "Certificate for {} kWh of renewable energy from {} source",
+                energy_amount, renewable_source
+            ),
+            image: Some("https://arweave.net/certificate-image".to_string()), // Placeholder
+            attributes: vec![
+                ErcAttribute {
+                    trait_type: "Energy Amount".to_string(),
+                    value: serde_json::Value::Number(serde_json::Number::from_f64(energy_amount).unwrap()),
+                    unit: Some("kWh".to_string()),
+                },
+                ErcAttribute {
+                    trait_type: "Renewable Source".to_string(),
+                    value: serde_json::Value::String(renewable_source.to_string()),
+                    unit: None,
+                },
+                ErcAttribute {
+                    trait_type: "Issuer".to_string(),
+                    value: serde_json::Value::String(issuer.to_string()),
+                    unit: None,
+                },
+                ErcAttribute {
+                    trait_type: "Issue Date".to_string(),
+                    value: serde_json::Value::String(issue_date.to_rfc3339()),
+                    unit: None,
+                },
+                ErcAttribute {
+                    trait_type: "Expiry Date".to_string(),
+                    value: serde_json::Value::String(
+                        expiry_date.map(|d| d.to_rfc3339()).unwrap_or_else(|| "Never".to_string())
+                    ),
+                    unit: None,
+                },
+                ErcAttribute {
+                    trait_type: "Certificate ID".to_string(),
+                    value: serde_json::Value::String(certificate_id.to_string()),
+                    unit: None,
+                },
+                ErcAttribute {
+                    trait_type: "Status".to_string(),
+                    value: serde_json::Value::String("Active".to_string()),
+                    unit: None,
+                },
+                ErcAttribute {
+                    trait_type: "Validation Data".to_string(),
+                    value: serde_json::Value::String(validation_data.to_string()),
+                    unit: None,
+                },
+            ],
+            properties: ErcProperties {
+                files: vec![
+                    ErcFile {
+                        uri: "https://arweave.net/certificate-pdf".to_string(), // Placeholder
+                        file_type: "application/pdf".to_string(),
+                    }
+                ],
+                category: "certificate".to_string(),
+            },
+        };
+
+        Ok(metadata)
+    }
+
+    /// Update certificate with blockchain signature
+    pub async fn update_blockchain_signature(
+        &self,
+        certificate_id: &str,
+        tx_signature: &str,
+    ) -> Result<ErcCertificate> {
+        let certificate = sqlx::query_as!(
+            ErcCertificate,
+            r#"
+            UPDATE erc_certificates
+            SET blockchain_tx_signature = $2
+            WHERE certificate_id = $1
+            RETURNING 
+                id, certificate_id, 
+                user_id as "user_id?", 
+                wallet_address, 
+                kwh_amount as "kwh_amount?", 
+                issue_date as "issue_date?", 
+                expiry_date, 
+                issuer_wallet as "issuer_wallet?", 
+                status, 
+                blockchain_tx_signature, 
+                metadata,
+                created_at, 
+                updated_at
+            "#,
+            certificate_id,
+            tx_signature,
+        )
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| anyhow!("Failed to update certificate blockchain signature: {}", e))?;
+
+        info!(
+            "Updated certificate {} with blockchain signature: {}",
+            certificate_id, tx_signature
+        );
+
+        Ok(certificate)
+    }
+
+    /// Validate certificate on-chain
+    pub async fn validate_certificate_on_chain(
+        &self,
+        certificate_id: &str,
+        governance_program_id: &Pubkey,
+    ) -> Result<bool> {
+        info!("Validating certificate {} on-chain", certificate_id);
+
+        // For now, return true (mock implementation)
+        // In production, this would query the blockchain to verify the certificate exists
+        let (certificate_pda, _bump) = Pubkey::find_program_address(
+            &[b"erc_certificate", certificate_id.as_bytes()],
+            governance_program_id,
+        );
+
+        // Mock validation - in production, check if account exists and has valid data
+        let is_valid = true; // Replace with actual blockchain query
+
+        info!(
+            "Certificate {} validation result: {}",
+            certificate_id, is_valid
+        );
+
+        Ok(is_valid)
+    }
+
+    /// Transfer certificate on-chain
+    pub async fn transfer_certificate_on_chain(
+        &self,
+        certificate_id: &str,
+        from_wallet: &Pubkey,
+        to_wallet: &Pubkey,
+        authority: &Keypair,
+        governance_program_id: &Pubkey,
+    ) -> Result<solana_sdk::signature::Signature> {
+        info!(
+            "Transferring certificate {} from {} to {} on-chain",
+            certificate_id, from_wallet, to_wallet
+        );
+
+        // 1. Derive certificate PDA
+        let (certificate_pda, _bump) = Pubkey::find_program_address(
+            &[b"erc_certificate", certificate_id.as_bytes()],
+            governance_program_id,
+        );
+
+        // 2. Build Anchor instruction data for transfer
+        let mut instruction_data = Vec::new();
+        
+        // Discriminator for "transfer_erc" instruction
+        let mut hasher = Sha256::new();
+        hasher.update(b"global:transfer_erc");
+        let hash = hasher.finalize();
+        instruction_data.extend_from_slice(&hash[0..8]);
+        
+        // Serialize arguments
+        instruction_data.extend_from_slice(&(certificate_id.len() as u32).to_le_bytes());
+        instruction_data.extend_from_slice(certificate_id.as_bytes());
+        
+        // 3. Build accounts for instruction
+        let accounts = vec![
+            AccountMeta::new(certificate_pda, false),
+            AccountMeta::new_readonly(*from_wallet, false),
+            AccountMeta::new(*to_wallet, false),
+            AccountMeta::new_readonly(authority.pubkey(), true),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ];
+        
+        let transfer_erc_ix = Instruction::new_with_bytes(
+            *governance_program_id,
+            &instruction_data,
+            accounts,
+        );
+
+        // 4. For now, return a mock signature
+        let mock_signature = solana_sdk::signature::Signature::default();
+        
+        info!(
+            "Certificate {} transferred on-chain (mock): {}",
+            certificate_id, mock_signature
+        );
+        
+        Ok(mock_signature)
+    }
+
+    /// Retire certificate on-chain
+    pub async fn retire_certificate_on_chain(
+        &self,
+        certificate_id: &str,
+        authority: &Keypair,
+        governance_program_id: &Pubkey,
+    ) -> Result<solana_sdk::signature::Signature> {
+        info!("Retiring certificate {} on-chain", certificate_id);
+
+        // 1. Derive certificate PDA
+        let (certificate_pda, _bump) = Pubkey::find_program_address(
+            &[b"erc_certificate", certificate_id.as_bytes()],
+            governance_program_id,
+        );
+
+        // 2. Build Anchor instruction data for retirement
+        let mut instruction_data = Vec::new();
+        
+        // Discriminator for "retire_erc" instruction
+        let mut hasher = Sha256::new();
+        hasher.update(b"global:retire_erc");
+        let hash = hasher.finalize();
+        instruction_data.extend_from_slice(&hash[0..8]);
+        
+        // Serialize arguments
+        instruction_data.extend_from_slice(&(certificate_id.len() as u32).to_le_bytes());
+        instruction_data.extend_from_slice(certificate_id.as_bytes());
+        
+        // 3. Build accounts for instruction
+        let accounts = vec![
+            AccountMeta::new(certificate_pda, false),
+            AccountMeta::new_readonly(authority.pubkey(), true),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ];
+        
+        let retire_erc_ix = Instruction::new_with_bytes(
+            *governance_program_id,
+            &instruction_data,
+            accounts,
+        );
+
+        // 4. For now, return a mock signature
+        let mock_signature = solana_sdk::signature::Signature::default();
+        
+        info!(
+            "Certificate {} retired on-chain (mock): {}",
+            certificate_id, mock_signature
+        );
+        
+        Ok(mock_signature)
     }
 
     /// Issue a new ERC certificate

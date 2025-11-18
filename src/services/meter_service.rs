@@ -17,6 +17,10 @@ pub struct MeterReading {
     pub submitted_at: Option<DateTime<Utc>>,
     pub minted: Option<bool>,
     pub mint_tx_signature: Option<String>,
+    /// NEW: Reference to meter_registry entry (for verified meters)
+    pub meter_id: Option<Uuid>,
+    /// NEW: Verification status of the meter for this reading
+    pub verification_status: Option<String>,
 }
 
 /// Request to submit a meter reading
@@ -48,6 +52,18 @@ impl MeterService {
         user_id: Uuid,
         request: SubmitMeterReadingRequest,
     ) -> Result<MeterReading> {
+        self.submit_reading_with_verification(user_id, request, None, "legacy_unverified").await
+    }
+
+    /// Submit a new meter reading with verification status
+    /// Validates the reading and stores it in the database
+    pub async fn submit_reading_with_verification(
+        &self,
+        user_id: Uuid,
+        request: SubmitMeterReadingRequest,
+        meter_id: Option<Uuid>,
+        verification_status: &str,
+    ) -> Result<MeterReading> {
         // Validate reading amount
         use std::str::FromStr;
         if request.kwh_amount <= BigDecimal::from_str("0").unwrap() {
@@ -68,13 +84,13 @@ impl MeterService {
             r#"
             INSERT INTO meter_readings (
                 id, user_id, wallet_address, kwh_amount, 
-                reading_timestamp, submitted_at, minted
+                reading_timestamp, submitted_at, minted, meter_id, verification_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING 
                 id, user_id, wallet_address, 
                 kwh_amount, reading_timestamp, submitted_at, 
-                minted, mint_tx_signature
+                minted, mint_tx_signature, meter_id, verification_status
             "#,
             Uuid::new_v4(),
             user_id,
@@ -83,6 +99,8 @@ impl MeterService {
             request.reading_timestamp,
             Utc::now(),
             false,
+            meter_id: None,
+            verification_status,
         )
         .fetch_one(&self.db_pool)
         .await
@@ -148,7 +166,7 @@ impl MeterService {
                 SELECT 
                     id, user_id, wallet_address, 
                     kwh_amount, reading_timestamp, submitted_at, 
-                    minted, mint_tx_signature
+                    minted, mint_tx_signature, meter_id, verification_status
                 FROM meter_readings
                 WHERE user_id = $1 AND minted = $2
                 ORDER BY {} {}
@@ -162,7 +180,7 @@ impl MeterService {
                 SELECT 
                     id, user_id, wallet_address, 
                     kwh_amount, reading_timestamp, submitted_at, 
-                    minted, mint_tx_signature
+                    minted, mint_tx_signature, meter_id, verification_status
                 FROM meter_readings
                 WHERE user_id = $1
                 ORDER BY {} {}
@@ -241,7 +259,7 @@ impl MeterService {
                 SELECT 
                     id, user_id, wallet_address, 
                     kwh_amount, reading_timestamp, submitted_at, 
-                    minted, mint_tx_signature
+                    minted, mint_tx_signature, meter_id, verification_status
                 FROM meter_readings
                 WHERE wallet_address = $1 AND minted = $2
                 ORDER BY {} {}
@@ -255,7 +273,7 @@ impl MeterService {
                 SELECT 
                     id, user_id, wallet_address, 
                     kwh_amount, reading_timestamp, submitted_at, 
-                    minted, mint_tx_signature
+                    minted, mint_tx_signature, meter_id, verification_status
                 FROM meter_readings
                 WHERE wallet_address = $1
                 ORDER BY {} {}
@@ -325,7 +343,7 @@ impl MeterService {
             SELECT 
                 id, user_id, wallet_address, 
                 kwh_amount, reading_timestamp, submitted_at, 
-                minted, mint_tx_signature
+                minted, mint_tx_signature, meter_id, verification_status
             FROM meter_readings
             WHERE minted = false
             ORDER BY submitted_at ASC
@@ -357,7 +375,7 @@ impl MeterService {
             RETURNING 
                 id, user_id, wallet_address, 
                 kwh_amount, reading_timestamp, submitted_at, 
-                minted, mint_tx_signature
+                minted, mint_tx_signature, meter_id, verification_status
             "#,
             reading_id,
             tx_signature,
@@ -382,7 +400,7 @@ impl MeterService {
             SELECT 
                 id, user_id, wallet_address, 
                 kwh_amount, reading_timestamp, submitted_at, 
-                minted, mint_tx_signature
+                minted, mint_tx_signature, meter_id, verification_status
             FROM meter_readings
             WHERE id = $1
             "#,
