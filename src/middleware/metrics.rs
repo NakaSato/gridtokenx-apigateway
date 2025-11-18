@@ -1,12 +1,10 @@
 use axum::{
     extract::Request,
-    http::Method,
     middleware::Next,
     response::Response,
 };
 use metrics::{counter, gauge, histogram};
 use std::time::Instant;
-use tracing::debug;
 
 /// Metrics middleware that tracks request metrics
 pub async fn metrics_middleware(request: Request, next: Next) -> Response {

@@ -6,7 +6,7 @@ use axum::{
     response::Json,
 };
 use serde::{Deserialize, Serialize};
-use tracing::{error, info};
+use tracing::info;
 use utoipa::ToSchema;
 use uuid::Uuid;
 

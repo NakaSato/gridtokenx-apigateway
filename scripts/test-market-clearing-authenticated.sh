@@ -48,7 +48,7 @@ print_header "2. Admin Authentication"
 echo "Logging in as admin..."
 LOGIN_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}")
+    -d "{\"username\":\"$ADMIN_USERNAME\",\"password\":\"$ADMIN_PASSWORD\"}")
 
 HTTP_CODE=$(echo "$LOGIN_RESPONSE" | tail -n 1)
 BODY=$(echo "$LOGIN_RESPONSE" | sed '$d')

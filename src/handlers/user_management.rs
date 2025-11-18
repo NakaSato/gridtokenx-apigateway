@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
-    http::{StatusCode, HeaderMap},
+    http::StatusCode,
     response::Json,
 };
 use serde::{Deserialize, Serialize};
@@ -12,8 +12,6 @@ use crate::auth::UserInfo;
 use crate::auth::middleware::AuthenticatedUser;
 use crate::auth::password::PasswordService;
 use crate::error::{ApiError, Result};
-use crate::services::AuditEvent;
-use crate::utils::{extract_ip_address, extract_user_agent};
 use crate::AppState;
 
 /// user registration request with additional validation

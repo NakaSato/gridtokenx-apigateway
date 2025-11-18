@@ -11,6 +11,7 @@ use uuid::Uuid;
 use utoipa::ToSchema;
 
 use crate::{error::ApiError, AppState};
+use crate::database::schema::types::EpochStatus;
 
 /// Current epoch response
 #[derive(Debug, Serialize, ToSchema)]
@@ -117,7 +118,7 @@ pub async fn get_epoch_status(
     let epoch = sqlx::query!(
         r#"
         SELECT 
-            id, epoch_number, start_time, end_time, status,
+            id, epoch_number, start_time, end_time, status as "status: EpochStatus",
             clearing_price::text, total_volume::text,
             total_orders, matched_orders
         FROM market_epochs
@@ -139,7 +140,7 @@ pub async fn get_epoch_status(
             epoch_number: epoch.epoch_number,
             start_time: epoch.start_time,
             end_time: epoch.end_time,
-            status: epoch.status,
+            status: epoch.status.to_string(),
             clearing_price: epoch.clearing_price,
             total_volume: epoch.total_volume.unwrap_or_else(|| "0".to_string()),
             total_orders: epoch.total_orders,
@@ -165,7 +166,7 @@ pub async fn get_epoch_status(
 
 /// Get current active epoch
 /// 
-/// Returns information about the currently active trading epoch
+/// Returns information about currently active trading epoch
 #[utoipa::path(
     get,
     path = "/api/market/epoch/current",
@@ -184,7 +185,7 @@ pub async fn get_current_epoch(
     let epoch = sqlx::query!(
         r#"
         SELECT 
-            id, epoch_number, start_time, end_time, status,
+            id, epoch_number, start_time, end_time, status as "status: EpochStatus",
             clearing_price::text, total_volume::text,
             total_orders, matched_orders
         FROM market_epochs
@@ -206,7 +207,7 @@ pub async fn get_current_epoch(
         epoch_number: epoch.epoch_number,
         start_time: epoch.start_time,
         end_time: epoch.end_time,
-        status: epoch.status,
+        status: epoch.status.to_string(),
         clearing_price: epoch.clearing_price,
         total_volume: epoch.total_volume.unwrap_or_else(|| "0".to_string()),
         total_orders: epoch.total_orders,
@@ -246,7 +247,7 @@ pub async fn get_epoch_history(
     let mut epochs = sqlx::query!(
         r#"
         SELECT 
-            id, epoch_number, start_time, end_time, status,
+            id, epoch_number, start_time, end_time, status as "status: EpochStatus",
             clearing_price::text, total_volume::text,
             total_orders, matched_orders, created_at
         FROM market_epochs
@@ -259,7 +260,7 @@ pub async fn get_epoch_history(
 
     // Filter by status if provided
     if let Some(status_filter) = &params.status {
-        epochs.retain(|e| &e.status == status_filter);
+        epochs.retain(|e| e.status.to_string() == *status_filter);
     }
 
     // Get total count before pagination
@@ -281,7 +282,7 @@ pub async fn get_epoch_history(
             epoch_number: e.epoch_number,
             start_time: e.start_time,
             end_time: e.end_time,
-            status: e.status,
+            status: e.status.to_string(),
             clearing_price: e.clearing_price,
             total_volume: e.total_volume.unwrap_or_else(|| "0".to_string()),
             total_orders: e.total_orders,
@@ -323,7 +324,7 @@ pub async fn get_epoch_stats(
     let epoch = sqlx::query!(
         r#"
         SELECT 
-            id, epoch_number, start_time, end_time, status,
+            id, epoch_number, start_time, end_time, status as "status: EpochStatus",
             clearing_price::text, total_volume::text,
             total_orders, matched_orders
         FROM market_epochs
@@ -381,7 +382,7 @@ pub async fn get_epoch_stats(
     Ok(Json(EpochStatsResponse {
         id: epoch.id.to_string(),
         epoch_number: epoch.epoch_number,
-        status: epoch.status,
+        status: epoch.status.to_string(),
         duration_minutes,
         total_orders,
         matched_orders,
@@ -396,7 +397,7 @@ pub async fn get_epoch_stats(
 
 /// Manually trigger epoch clearing (Admin only)
 /// 
-/// Forces an epoch to transition to the cleared state and execute order matching
+/// Forces an epoch to transition to cleared state and execute order matching
 #[utoipa::path(
     post,
     path = "/api/admin/epochs/{epoch_id}/trigger",
@@ -421,7 +422,7 @@ pub async fn trigger_manual_clearing(
     // Verify epoch exists and is in a valid state for clearing
     let epoch = sqlx::query!(
         r#"
-        SELECT id, epoch_number, status
+        SELECT id, epoch_number, status as "status: EpochStatus"
         FROM market_epochs
         WHERE id = $1
         "#,
@@ -432,15 +433,17 @@ pub async fn trigger_manual_clearing(
     .map_err(ApiError::Database)?
     .ok_or_else(|| ApiError::NotFound("Epoch not found".into()))?;
 
+    let epoch_status_str = epoch.status.to_string();
+
     // Check if epoch can be cleared
-    if epoch.status != "Active" && epoch.status != "Pending" {
+    if epoch.status != EpochStatus::Active && epoch.status != EpochStatus::Pending {
         return Err(ApiError::BadRequest(format!(
             "Epoch cannot be cleared from status: {}. Must be 'Active' or 'Pending'",
-            epoch.status
+            epoch_status_str
         )));
     }
 
-    // Log the manual clearing action
+    // Log::manual clearing action
     tracing::info!(
         "Manual epoch clearing triggered for epoch {} ({}). Reason: {}",
         epoch.epoch_number,
@@ -449,13 +452,11 @@ pub async fn trigger_manual_clearing(
     );
 
     // Update epoch status to cleared
-    sqlx::query!(
-        "UPDATE market_epochs SET status = 'Cleared', updated_at = NOW() WHERE id = $1",
-        epoch_id
-    )
-    .execute(&state.db)
-    .await
-    .map_err(ApiError::Database)?;
+    sqlx::query(&format!("UPDATE market_epochs SET status = 'cleared'::epoch_status, updated_at = NOW() WHERE id = $1"))
+        .bind(epoch_id)
+        .execute(&state.db)
+        .await
+        .map_err(ApiError::Database)?;
 
     // Trigger matching cycle
     match state.market_clearing_engine.execute_matching_cycle().await {
@@ -484,13 +485,10 @@ pub async fn trigger_manual_clearing(
             );
 
             // Revert status on failure
-            let _ = sqlx::query!(
-                "UPDATE market_epochs SET status = $1, updated_at = NOW() WHERE id = $2",
-                epoch.status,
-                epoch_id
-            )
-            .execute(&state.db)
-            .await;
+            let _ = sqlx::query(&format!("UPDATE market_epochs SET status = '{}'::epoch_status, updated_at = NOW() WHERE id = $1", epoch_status_str))
+                .bind(epoch_id)
+                .execute(&state.db)
+                .await;
 
             Err(ApiError::Internal(format!(
                 "Failed to execute order matching: {}",
@@ -528,7 +526,7 @@ pub async fn list_all_epochs(
     let epochs = sqlx::query!(
         r#"
         SELECT 
-            id, epoch_number, start_time, end_time, status,
+            id, epoch_number, start_time, end_time, status as "status: EpochStatus",
             clearing_price::text, total_volume::text,
             total_orders, matched_orders, created_at
         FROM market_epochs
@@ -555,7 +553,7 @@ pub async fn list_all_epochs(
             epoch_number: e.epoch_number,
             start_time: e.start_time,
             end_time: e.end_time,
-            status: e.status,
+            status: e.status.to_string(),
             clearing_price: e.clearing_price,
             total_volume: e.total_volume.unwrap_or_else(|| "0".to_string()),
             total_orders: e.total_orders,

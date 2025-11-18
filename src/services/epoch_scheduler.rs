@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::services::market_clearing_service::{MarketClearingService, MarketEpoch};
+use crate::database::schema::types::EpochStatus;
 
 #[derive(Debug, Clone)]
 pub struct EpochConfig {
@@ -163,14 +164,14 @@ impl EpochScheduler {
             );
             
             // Update epoch status if needed
-            if target_state != latest_epoch.status {
+            if target_state != latest_epoch.status.to_string() {
                 self.update_epoch_status(latest_epoch.id, &target_state).await?;
                 
                 // Send transition event
                 let _ = self.event_sender.send(EpochTransitionEvent {
                     epoch_id: latest_epoch.id,
                     epoch_number: latest_epoch.epoch_number,
-                    old_status: latest_epoch.status.clone(),
+                    old_status: latest_epoch.status.to_string(),
                     new_status: target_state.clone(),
                     transition_time: now,
                 });
@@ -180,7 +181,7 @@ impl EpochScheduler {
             *self.current_epoch.write().await = Some(latest_epoch.clone());
             
             // Resume order matching for expired epochs that haven't been processed
-            if target_state == "expired" && latest_epoch.status != "settled" {
+            if target_state == "expired" && latest_epoch.status != EpochStatus::Settled {
                 warn!("Found expired epoch that needs processing: {}", latest_epoch.id);
                 // This will be handled by main loop
             }
@@ -206,13 +207,13 @@ impl EpochScheduler {
             .ok_or_else(|| ApiError::NotFound("Epoch not found".to_string()))?;
         
         let target_state = self.determine_target_state(&epoch, Utc::now());
-        if target_state != epoch.status {
+        if target_state != epoch.status.to_string() {
             self.update_epoch_status(epoch_id, &target_state).await?;
             
             let _ = self.event_sender.send(EpochTransitionEvent {
                 epoch_id,
                 epoch_number: epoch.epoch_number,
-                old_status: epoch.status,
+                old_status: epoch.status.to_string(),
                 new_status: target_state,
                 transition_time: Utc::now(),
             });
@@ -257,13 +258,14 @@ impl EpochScheduler {
         // Find epochs that should be active now
         let epochs_to_activate = sqlx::query!(
             r#"
-            SELECT id, epoch_number, start_time, end_time, status
+            SELECT id, epoch_number, start_time, end_time, status as "status: EpochStatus"
             FROM market_epochs 
-            WHERE status = 'pending'
-            AND start_time <= $1 
-            AND end_time > $1
+            WHERE status = $1
+            AND start_time <= $2 
+            AND end_time > $2
             ORDER BY start_time ASC
             "#,
+            EpochStatus::Pending as EpochStatus,
             now
         )
         .fetch_all(db)
@@ -274,7 +276,8 @@ impl EpochScheduler {
             
             // Update status to active
             sqlx::query!(
-                "UPDATE market_epochs SET status = 'active', updated_at = NOW() WHERE id = $1",
+                "UPDATE market_epochs SET status = $1::epoch_status, updated_at = NOW() WHERE id = $2",
+                EpochStatus::Active as EpochStatus,
                 epoch_row.id
             )
             .execute(db)
@@ -286,7 +289,7 @@ impl EpochScheduler {
                 epoch_number: epoch_row.epoch_number,
                 start_time: epoch_row.start_time,
                 end_time: epoch_row.end_time,
-                status: "active".to_string(),
+                status: EpochStatus::Active,
                 clearing_price: None,
                 total_volume: Some(bigdecimal::BigDecimal::from_str("0").unwrap()),
                 total_orders: Some(0),
@@ -299,7 +302,7 @@ impl EpochScheduler {
             let _ = event_sender.send(EpochTransitionEvent {
                 epoch_id: epoch_row.id,
                 epoch_number: epoch_row.epoch_number,
-                old_status: epoch_row.status,
+                old_status: "pending".to_string(),
                 new_status: "active".to_string(),
                 transition_time: now,
             });
@@ -318,12 +321,13 @@ impl EpochScheduler {
         // Find active epochs that have expired
         let epochs_to_clear = sqlx::query!(
             r#"
-            SELECT id, epoch_number, start_time, end_time, status
+            SELECT id, epoch_number, start_time, end_time, status as "status: EpochStatus"
             FROM market_epochs 
-            WHERE status = 'active' 
-            AND end_time <= $1
+            WHERE status = $1 
+            AND end_time <= $2
             ORDER BY end_time ASC
             "#,
+            EpochStatus::Active as EpochStatus,
             now
         )
         .fetch_all(db)
@@ -332,9 +336,10 @@ impl EpochScheduler {
         for epoch_row in epochs_to_clear {
             info!("Clearing expired epoch: {} ({})", epoch_row.epoch_number, epoch_row.id);
             
-            // Update status to expired first
+            // Update status to cleared first
             sqlx::query!(
-                "UPDATE market_epochs SET status = 'expired', updated_at = NOW() WHERE id = $1",
+                "UPDATE market_epochs SET status = $1::epoch_status, updated_at = NOW() WHERE id = $2",
+                EpochStatus::Cleared as EpochStatus,
                 epoch_row.id
             )
             .execute(db)
@@ -349,14 +354,6 @@ impl EpochScheduler {
                         matches.len()
                     );
                     
-                    // Update status to cleared
-                    sqlx::query!(
-                        "UPDATE market_epochs SET status = 'cleared', updated_at = NOW() WHERE id = $1",
-                        epoch_row.id
-                    )
-                    .execute(db)
-                    .await?;
-
                     // Send transition event
                     let _ = event_sender.send(EpochTransitionEvent {
                         epoch_id: epoch_row.id,
@@ -369,12 +366,12 @@ impl EpochScheduler {
                 Err(e) => {
                     error!("Failed to run order matching for epoch {}: {}", epoch_row.id, e);
                     
-                    // Keep as expired, will be retried
+                    // Keep as cleared, will be retried
                     let _ = event_sender.send(EpochTransitionEvent {
                         epoch_id: epoch_row.id,
                         epoch_number: epoch_row.epoch_number,
                         old_status: "active".to_string(),
-                        new_status: "expired".to_string(),
+                        new_status: "cleared".to_string(),
                         transition_time: now,
                     });
                 }
@@ -384,7 +381,7 @@ impl EpochScheduler {
             let mut current = current_epoch.write().await;
             if let Some(ref mut current_epoch) = *current {
                 if current_epoch.id == epoch_row.id {
-                    current_epoch.status = "cleared".to_string();
+                    current_epoch.status = EpochStatus::Cleared;
                 }
             }
         }
@@ -418,12 +415,13 @@ impl EpochScheduler {
                 r#"
                 INSERT INTO market_epochs (
                     id, epoch_number, start_time, end_time, status
-                ) VALUES ($1, $2, $3, $4, 'pending')
+                ) VALUES ($1, $2, $3, $4, $5::epoch_status)
                 "#,
                 epoch_id,
                 next_epoch_number,
                 next_epoch_time,
-                epoch_end
+                epoch_end,
+                EpochStatus::Pending as EpochStatus
             )
             .execute(db)
             .await?;
@@ -445,10 +443,10 @@ impl EpochScheduler {
             "pending".to_string()
         } else if now >= epoch.start_time && now < epoch.end_time {
             "active".to_string()
-        } else if epoch.status == "active" {
-            "expired".to_string()
+        } else if epoch.status == EpochStatus::Active {
+            "cleared".to_string()
         } else {
-            epoch.status.clone()
+            epoch.status.to_string()
         }
     }
 
@@ -457,7 +455,7 @@ impl EpochScheduler {
             MarketEpoch,
             r#"
             SELECT 
-                id, epoch_number, start_time, end_time, status,
+                id, epoch_number, start_time, end_time, status as "status: EpochStatus",
                 clearing_price, total_volume, total_orders, matched_orders
             FROM market_epochs 
             ORDER BY epoch_number DESC
@@ -475,7 +473,7 @@ impl EpochScheduler {
             MarketEpoch,
             r#"
             SELECT 
-                id, epoch_number, start_time, end_time, status,
+                id, epoch_number, start_time, end_time, status as "status: EpochStatus",
                 clearing_price, total_volume, total_orders, matched_orders
             FROM market_epochs 
             WHERE id = $1
@@ -489,13 +487,19 @@ impl EpochScheduler {
     }
 
     async fn update_epoch_status(&self, epoch_id: Uuid, status: &str) -> Result<()> {
-        sqlx::query!(
-            "UPDATE market_epochs SET status = $1, updated_at = NOW() WHERE id = $2",
-            status,
-            epoch_id
-        )
-        .execute(&self.db)
-        .await?;
+        let status_str = match status {
+            "pending" => "pending",
+            "active" => "active", 
+            "cleared" => "cleared",
+            "settled" => "settled",
+            _ => return Err(anyhow::anyhow!("Invalid epoch status: {}", status)),
+        };
+
+        // Use raw query to avoid type casting issues
+        sqlx::query(&format!("UPDATE market_epochs SET status = '{}'::epoch_status, updated_at = NOW() WHERE id = $1", status_str))
+            .bind(epoch_id)
+            .execute(&self.db)
+            .await?;
 
         Ok(())
     }
@@ -504,7 +508,7 @@ impl EpochScheduler {
         (timestamp.year() as i64) * 100_000_000
             + (timestamp.month() as i64) * 1_000_000
             + (timestamp.day() as i64) * 10_000
-            + (timestamp.hour() as i64) *100
+            + (timestamp.hour() as i64) * 100
             + ((timestamp.minute() / 15) * 15) as i64
     }
 
@@ -565,7 +569,7 @@ mod tests {
             epoch_number: 202511091430,
             start_time: Utc.with_ymd_and_hms(2025, 11, 9, 14, 30, 0).unwrap(),
             end_time: Utc.with_ymd_and_hms(2025, 11, 9, 14, 45, 0).unwrap(),
-            status: "pending".to_string(),
+            status: EpochStatus::Pending,
             clearing_price: None,
             total_volume: Some(bigdecimal::BigDecimal::from_str("0").unwrap()),
             total_orders: Some(0),
@@ -578,7 +582,7 @@ mod tests {
         // Test expired epoch
         let later_now = Utc.with_ymd_and_hms(2025, 11, 9, 14, 50, 0).unwrap();
         let target_state = scheduler.determine_target_state(&pending_epoch, later_now);
-        assert_eq!(target_state, "expired");
+        assert_eq!(target_state, "cleared");
     }
 
     #[tokio::test]
@@ -631,7 +635,7 @@ mod tests {
             epoch_number: 202511091430,
             start_time: epoch_start,
             end_time: epoch_end,
-            status: "pending".to_string(),
+            status: EpochStatus::Pending,
             clearing_price: None,
             total_volume: Some(bigdecimal::BigDecimal::from_str("0").unwrap()),
             total_orders: Some(0),
@@ -643,7 +647,7 @@ mod tests {
         assert_eq!(state, "active");
 
         // During epoch: active → active
-        epoch.status = "active".to_string();
+        epoch.status = EpochStatus::Active;
         let mid_time = epoch_start + chrono::Duration::minutes(7);
         let state = scheduler.determine_target_state(&epoch, mid_time);
         assert_eq!(state, "active");
@@ -742,7 +746,7 @@ mod tests {
             epoch_number: 202511091430,
             start_time: Utc.with_ymd_and_hms(2025, 11, 9, 14, 30, 0).unwrap(),
             end_time: Utc.with_ymd_and_hms(2025, 11, 9, 14, 45, 0).unwrap(),
-            status: "pending".to_string(),
+            status: EpochStatus::Pending,
             clearing_price: None,
             total_volume: Some(bigdecimal::BigDecimal::from_str("0").unwrap()),
             total_orders: Some(0),
@@ -752,7 +756,7 @@ mod tests {
         // 1 hour after end time - should be expired
         let far_future = Utc.with_ymd_and_hms(2025, 11, 9, 15, 45, 0).unwrap();
         let state = scheduler.determine_target_state(&epoch, far_future);
-        assert_eq!(state, "expired");
+        assert_eq!(state, "cleared");
     }
 
     #[tokio::test]
@@ -765,7 +769,7 @@ mod tests {
             epoch_number: 202511091430,
             start_time: Utc.with_ymd_and_hms(2025, 11, 9, 14, 30, 0).unwrap(),
             end_time: Utc.with_ymd_and_hms(2025, 11, 9, 14, 45, 0).unwrap(),
-            status: "cleared".to_string(),
+            status: EpochStatus::Cleared,
             clearing_price: Some(bigdecimal::BigDecimal::from_str("0.15").unwrap()),
             total_volume: Some(bigdecimal::BigDecimal::from_str("1000").unwrap()),
             total_orders: Some(10),

@@ -4,15 +4,13 @@
 pub mod types {
     use serde::{Deserialize, Serialize};
     use utoipa::ToSchema;
+    use std::fmt;
 
     #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, ToSchema)]
     #[sqlx(type_name = "user_role", rename_all = "lowercase")]
     pub enum UserRole {
         User,
         Admin,
-        Ami,
-        Producer,
-        Consumer,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, ToSchema)]
@@ -39,5 +37,25 @@ pub mod types {
         Settled,
         Cancelled,
         Expired,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, sqlx::Type, ToSchema)]
+    #[sqlx(type_name = "epoch_status")]
+    pub enum EpochStatus {
+        Pending,
+        Active,
+        Cleared,
+        Settled,
+    }
+
+    impl fmt::Display for EpochStatus {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                EpochStatus::Pending => write!(f, "pending"),
+                EpochStatus::Active => write!(f, "active"),
+                EpochStatus::Cleared => write!(f, "cleared"),
+                EpochStatus::Settled => write!(f, "settled"),
+            }
+        }
     }
 }

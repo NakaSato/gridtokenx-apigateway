@@ -11,6 +11,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::WebSocketService;
+use crate::database::schema::types::OrderStatus;
 
 /// Background service that automatically matches orders with offers
 #[derive(Clone)]
@@ -109,10 +110,11 @@ impl OrderMatchingEngine {
                 filled_amount,
                 epoch_id
             FROM trading_orders
-            WHERE order_type = 'buy' AND status = 'pending'
+            WHERE order_type = 'buy' AND status = $1
             ORDER BY created_at ASC
             "#
         )
+        .bind(OrderStatus::Pending)
         .fetch_all(&self.db)
         .await?;
 
@@ -127,10 +129,11 @@ impl OrderMatchingEngine {
                 filled_amount,
                 epoch_id
             FROM trading_orders
-            WHERE order_type = 'sell' AND status = 'pending'
+            WHERE order_type = 'sell' AND status = $1
             ORDER BY price_per_kwh ASC, created_at ASC
             "#
         )
+        .bind(OrderStatus::Pending)
         .fetch_all(&self.db)
         .await?;
 
@@ -221,18 +224,19 @@ impl OrderMatchingEngine {
                         // Update buy order filled amount
                         let new_buy_filled = &buy_filled_amount + &match_amount;
                         let buy_complete = new_buy_filled >= buy_energy_amount;
+                        let new_buy_status = if buy_complete { OrderStatus::Filled } else { OrderStatus::Active };
                         
                         sqlx::query(
                             r#"
                             UPDATE trading_orders 
                             SET filled_amount = $1, 
-                                status = CASE WHEN $2 THEN 'filled' ELSE 'active' END,
+                                status = $2,
                                 updated_at = NOW()
                             WHERE id = $3
                             "#,
                         )
                         .bind(&new_buy_filled)
-                        .bind(buy_complete)
+                        .bind(&new_buy_status)
                         .bind(buy_order_id)
                         .execute(&self.db)
                         .await?;
@@ -240,18 +244,19 @@ impl OrderMatchingEngine {
                         // Update sell order filled amount
                         let new_sell_filled = &sell_filled_amount + &match_amount;
                         let sell_complete = new_sell_filled >= sell_energy_amount;
+                        let new_sell_status = if sell_complete { OrderStatus::Filled } else { OrderStatus::Active };
                         
                         sqlx::query(
                             r#"
                             UPDATE trading_orders 
                             SET filled_amount = $1, 
-                                status = CASE WHEN $2 THEN 'filled' ELSE 'active' END,
+                                status = $2,
                                 updated_at = NOW()
                             WHERE id = $3
                             "#,
                         )
                         .bind(&new_sell_filled)
-                        .bind(sell_complete)
+                        .bind(&new_sell_status)
                         .bind(sell_order_id)
                         .execute(&self.db)
                         .await?;
@@ -299,7 +304,7 @@ impl OrderMatchingEngine {
                 status,
                 created_at,
                 updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), 'pending', NOW(), NOW())
+            ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, NOW(), NOW())
             "#,
         )
         .bind(match_id)
@@ -308,6 +313,7 @@ impl OrderMatchingEngine {
         .bind(sell_order_id)
         .bind(&energy_amount)
         .bind(&price_per_kwh)
+        .bind(OrderStatus::Pending)
         .execute(&self.db)
         .await?;
 

@@ -1,7 +1,6 @@
 // Market Clearing Engine for P2P Energy Trading
 // Implements double auction mechanism with price discovery
 
-use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -9,7 +8,7 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 use utoipa::ToSchema;
 use redis::AsyncCommands;

@@ -1,7 +1,7 @@
 // Market data and trading endpoints for the market clearing engine
 
 use axum::{
-    extract::{Query, State},
+    extract::State,
     response::Json,
 };
 use serde::Serialize;
@@ -10,7 +10,7 @@ use utoipa::ToSchema;
 use crate::auth::middleware::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::AppState;
-use crate::services::{OrderBookSnapshot, ClearingPrice};
+use crate::services::ClearingPrice;
 
 /// Market statistics response
 #[derive(Debug, Serialize, ToSchema)]

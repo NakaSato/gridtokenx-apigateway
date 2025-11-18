@@ -4,7 +4,7 @@ use anyhow::Result;
 use axum::{routing::{get, post}, Router, middleware::from_fn_with_state};
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, trace::TraceLayer, timeout::TimeoutLayer};
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 use tracing_subscriber::EnvFilter;
 
 mod config;
@@ -19,7 +19,7 @@ mod auth;
 mod openapi;
 
 use config::Config;
-use handlers::{health, auth as auth_handlers, user_management, blockchain, trading, meters, wallet_auth, registry, oracle, governance, token, erc, blockchain_test, audit, admin, epochs, energy_trading_simple};
+use handlers::{health, auth as auth_handlers, user_management, blockchain, trading, meters, wallet_auth, registry, oracle, governance, token, erc, blockchain_test, audit, admin, epochs};
 use auth::{jwt::JwtService, jwt::ApiKeyService};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
@@ -89,19 +89,44 @@ async fn main() -> Result<()> {
     // Setup Redis connection with authentication support
     let redis_client = redis::Client::open(config.redis_url.as_str())?;
     
-    // Test Redis connection
+    // Test Redis connection and validate authentication
     match redis_client.get_multiplexed_async_connection().await {
-        Ok(_) => {
-            let auth_status = if config.redis_url.contains("@") {
-                "✅ Redis connection established (authenticated)"
-            } else {
-                "⚠️  Redis connection established (no authentication - consider adding password)"
-            };
-            info!("{}", auth_status);
+        Ok(mut conn) => {
+            // Test basic Redis operation
+            use redis::AsyncCommands;
+            match conn.get::<&str, Option<String>>("health_check").await {
+                Ok(_) => {
+                    let auth_status = if config.redis_url.contains("@") {
+                        "✅ Redis connection established (authenticated)"
+                    } else {
+                        "⚠️  Redis connection established (no authentication - consider adding password)"
+                    };
+                    info!("{}", auth_status);
+                    
+                    // Additional security warning for production
+                    if config.environment == "production" && !config.redis_url.contains("@") {
+                        warn!("🚨 SECURITY WARNING: Redis connection in production is not authenticated!");
+                    }
+                }
+                Err(e) => {
+                    error!("Redis connection test failed: {}", e);
+                    return Err(anyhow::anyhow!("Redis connection test failed: {}", e));
+                }
+            }
         }
         Err(e) => {
-            tracing::error!("Failed to establish Redis connection: {}", e);
-            return Err(e.into());
+            error!("Failed to establish Redis connection: {}", e);
+            
+            // Provide helpful error message for authentication issues
+            if e.to_string().contains("NOAUTH") {
+                error!("Redis authentication failed. Please check your REDIS_URL format:");
+                error!("  Correct format: redis://:password@host:port");
+                error!("  Current URL: {}", config.redis_url);
+            } else if e.to_string().contains("Connection refused") {
+                error!("Redis server is not running or not accessible at: {}", config.redis_url);
+            }
+            
+            return Err(anyhow::anyhow!("Redis connection failed: {}", e));
         }
     }
 
@@ -230,9 +255,9 @@ async fn main() -> Result<()> {
         audit_logger,
     };
 
-    // Build application router with separate sections for public and protected routes
+    // Build API routes
     
-    // Public routes (no authentication required)
+    // Public API routes
     let public_routes = Router::new()
         // Health check routes
         .route("/health", get(health::health_check))
@@ -259,6 +284,19 @@ async fn main() -> Result<()> {
         // Swagger UI
         .merge(SwaggerUi::new("/api/docs")
             .url("/api/docs/openapi.json", openapi::ApiDoc::openapi()));
+    
+    // V1 routes (for backward compatibility)
+    let v1_routes = public_routes.clone();
+    
+    // Versioned public routes
+    let versioned_public_routes = Router::new()
+        .nest("/api/v1", v1_routes)
+        .fallback(get(|| async { 
+            axum::Json(serde_json::json!({
+                "error": "Version not specified. Use /api/v1/",
+                "supported_versions": ["v1"]
+            }))
+        }));
     
     // Protected routes (authentication required)
     let protected_routes = Router::new()
@@ -390,11 +428,20 @@ async fn main() -> Result<()> {
         .layer(from_fn_with_state(app_state.clone(), auth::middleware::auth_middleware))
         .layer(axum::middleware::from_fn(middleware::auth_logger_middleware));
 
+    // V1 protected routes (for backward compatibility)
+    let v1_protected_routes = protected_routes.clone();
+    
+    // Versioned protected routes
+    let versioned_protected_routes = Router::new()
+        .nest("/api/v1", v1_protected_routes);
+
     // Combine all routes
-    let app = public_routes
-        .merge(protected_routes)
+    let app = versioned_public_routes
+        .merge(versioned_protected_routes)
         .layer(
             ServiceBuilder::new()
+                .layer(axum::middleware::from_fn(middleware::versioning_middleware))
+                .layer(axum::middleware::from_fn(middleware::version_check_middleware))
                 .layer(axum::middleware::from_fn(middleware::add_security_headers))
                 .layer(axum::middleware::from_fn(middleware::metrics_middleware))
                 .layer(axum::middleware::from_fn(middleware::active_requests_middleware))

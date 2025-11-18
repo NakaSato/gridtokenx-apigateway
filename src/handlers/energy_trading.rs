@@ -359,7 +359,7 @@ pub struct PricePoint {
 
 // ==================== OFFER ENDPOINTS ====================
 
-/// Create a new energy offer (Producer only)
+/// Create a new energy offer
 #[utoipa::path(
     post,
     path = "/api/offers",
@@ -370,7 +370,7 @@ pub struct PricePoint {
         (status = 200, description = "Offer created successfully", body = Offer),
         (status = 400, description = "Invalid offer data"),
         (status = 401, description = "Unauthorized"),
-        (status = 403, description = "Forbidden - Producer role required"),
+        (status = 403, description = "Forbidden - Authentication required"),
     )
 )]
 pub async fn create_offer(
@@ -385,21 +385,7 @@ pub async fn create_offer(
     // Validate business rules
     payload.validate_business_rules()?;
     
-    // Verify user has producer role
-    let db_user = sqlx::query("SELECT role::text as role FROM users WHERE id = $1")
-        .bind(user.0.sub)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| ApiError::Database(e))?;
-
-    let role: String = db_user.try_get("role").map_err(|e| ApiError::Internal(format!("Failed to get role: {}", e)))?;
-
-    if role != "producer" {
-        return Err(ApiError::Forbidden(
-            "Only producers can create energy offers".to_string(),
-        ));
-    }
-
+    // All verified users can create energy offers
     let now = Utc::now();
     let available_from = payload.available_from.unwrap_or(now);
     let available_until = payload
@@ -734,7 +720,7 @@ pub async fn cancel_offer(
 
 // ==================== ORDER ENDPOINTS ====================
 
-/// Create a new energy order (Consumer only)
+/// Create a new energy order
 #[utoipa::path(
     post,
     path = "/api/orders",
@@ -744,7 +730,7 @@ pub async fn cancel_offer(
     responses(
         (status = 200, description = "Order created successfully", body = Order),
         (status = 400, description = "Invalid order data"),
-        (status = 403, description = "Forbidden - Consumer role required"),
+        (status = 403, description = "Forbidden - Authentication required"),
     )
 )]
 pub async fn create_order(
@@ -759,21 +745,7 @@ pub async fn create_order(
     // Validate business rules
     payload.validate_business_rules()?;
     
-    // Verify user has consumer role
-    let db_user = sqlx::query("SELECT role::text as role FROM users WHERE id = $1")
-        .bind(user.0.sub)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| ApiError::Database(e))?;
-
-    let role: String = db_user.try_get("role").map_err(|e| ApiError::Internal(format!("Failed to get role: {}", e)))?;
-
-    if role != "consumer" {
-        return Err(ApiError::Forbidden(
-            "Only consumers can create energy orders".to_string(),
-        ));
-    }
-
+    // All verified users can create energy orders
     let now = Utc::now();
     let order_id = Uuid::new_v4();
 

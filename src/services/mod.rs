@@ -22,21 +22,12 @@ pub use audit_logger::{AuditLogger, AuditEvent, AuditEventRecord};
 pub use blockchain_service::BlockchainService;
 pub use email_service::EmailService;
 pub use erc_service::ErcService;
-pub use epoch_scheduler::{EpochScheduler, EpochConfig, EpochTransitionEvent};
-pub use health_check::{HealthChecker, DetailedHealthStatus, DependencyHealth, HealthCheckStatus, SystemMetrics};
-pub use market_clearing::{MarketClearingEngine, OrderBook, OrderBookSnapshot, BookOrder, TradeMatch, ClearingPrice};
-pub use market_clearing_service::{MarketClearingService, MarketEpoch, OrderMatch, Settlement as EpochSettlement, OrderBookEntry};
+pub use epoch_scheduler::{EpochScheduler, EpochConfig};
+pub use health_check::HealthChecker;
+pub use market_clearing::{MarketClearingEngine, ClearingPrice};
+pub use market_clearing_service::MarketClearingService;
 pub use meter_service::MeterService;
 pub use order_matching_engine::OrderMatchingEngine;
-pub use settlement_service::{
-    SettlementService, Settlement, SettlementStatus, SettlementTransaction,
-    SettlementConfig, SettlementStats
-};
 pub use token_service::TokenService;
-pub use transaction_service::{
-    TransactionService, TransactionMonitor, TransactionRetryService,
-    TransactionSubmissionResult, TransactionStatus, TradingTransactionResult, MintTransactionResult,
-    BatchTransaction, RetryConfig
-};
 pub use wallet_service::WalletService;
 pub use websocket_service::WebSocketService;

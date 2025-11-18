@@ -44,9 +44,10 @@ RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/auth/register"
     -d "{
         \"email\": \"$BUYER_EMAIL\",
         \"password\": \"$PASSWORD\",
-        \"full_name\": \"Test Buyer\",
+        \"first_name\": \"Test\",
+        \"last_name\": \"Buyer\",
         \"role\": \"consumer\",
-        \"solana_wallet_address\": \"$(openssl rand -hex 32)\"
+        \"username\": \"buyer_$TIMESTAMP\"
     }")
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
@@ -67,14 +68,14 @@ sleep $SLEEP_TIME
 print_header "3. Login Buyer"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$BUYER_EMAIL\",\"password\":\"$PASSWORD\"}")
+    -d "{\"username\":\"buyer_$TIMESTAMP\",\"password\":\"$PASSWORD\"}")
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
 BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" -eq 200 ]; then
     echo -e "${GREEN}✓ Buyer logged in${NC}"
-    BUYER_TOKEN=$(echo "$BODY" | jq -r '.token')
+    BUYER_TOKEN=$(echo "$BODY" | jq -r '.access_token')
 else
     echo -e "${RED}✗ Buyer login failed${NC}"
     exit 1
@@ -90,9 +91,10 @@ RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/auth/register"
     -d "{
         \"email\": \"$SELLER_EMAIL\",
         \"password\": \"$PASSWORD\",
-        \"full_name\": \"Test Seller\",
-        \"role\": \"prosumer\",
-        \"solana_wallet_address\": \"$(openssl rand -hex 32)\"
+        \"first_name\": \"Test\",
+        \"last_name\": \"Seller\",
+        \"role\": \"producer\",
+        \"username\": \"seller_$TIMESTAMP\"
     }")
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
@@ -112,14 +114,14 @@ sleep $SLEEP_TIME
 print_header "5. Login Seller"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$SELLER_EMAIL\",\"password\":\"$PASSWORD\"}")
+    -d "{\"username\":\"seller_$TIMESTAMP\",\"password\":\"$PASSWORD\"}")
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
 BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" -eq 200 ]; then
     echo -e "${GREEN}✓ Seller logged in${NC}"
-    SELLER_TOKEN=$(echo "$BODY" | jq -r '.token')
+    SELLER_TOKEN=$(echo "$BODY" | jq -r '.access_token')
 else
     echo -e "${RED}✗ Seller login failed${NC}"
     exit 1
@@ -135,8 +137,8 @@ RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/trading/orders
     -H "Content-Type: application/json" \
     -d '{
         "order_type": "sell",
-        "energy_amount": "100.0",
-        "price_per_kwh": "0.15",
+        "energy_amount": 100.0,
+        "price_per_kwh": 0.15,
         "valid_until": "2025-12-31T23:59:59Z"
     }')
 
@@ -162,8 +164,8 @@ RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/trading/orders
     -H "Content-Type: application/json" \
     -d '{
         "order_type": "buy",
-        "energy_amount": "50.0",
-        "price_per_kwh": "0.16",
+        "energy_amount": 50.0,
+        "price_per_kwh": 0.16,
         "valid_until": "2025-12-31T23:59:59Z"
     }')
 

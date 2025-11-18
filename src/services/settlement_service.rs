@@ -5,12 +5,6 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use solana_client::rpc_client::RpcClient;
-use solana_sdk::{
-    pubkey::Pubkey,
-    signature::{Keypair, Signature, Signer},
-    transaction::Transaction,
-};
 use sqlx::PgPool;
 use std::str::FromStr;
 use std::sync::Arc;

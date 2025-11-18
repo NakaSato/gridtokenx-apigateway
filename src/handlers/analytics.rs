@@ -81,7 +81,7 @@ pub struct TraderStats {
     pub total_volume_kwh: f64,
     pub transaction_count: i64,
     pub average_price_per_kwh: f64,
-    pub role: String, // "producer", "consumer", "prosumer"
+    pub role: String, // "user", "admin"
 }
 
 #[derive(Debug, Serialize, ToSchema)]
