@@ -15,6 +15,7 @@ NC='\033[0m'
 
 # Configuration
 API_BASE_URL="${API_BASE_URL:-http://localhost:8080}"
+DATABASE_URL="${DATABASE_URL:-postgresql://gridtokenx_user:gridtokenx_password@localhost:5432/gridtokenx}"
 SLEEP_TIME=2
 SETTLEMENT_WAIT_TIME=30  # Time to wait for settlement processing
 
@@ -450,7 +451,7 @@ SELL_ORDER_DATA="{
     \"side\": \"Sell\"
 }"
 
-RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/orders" \
+RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/trading/orders" \
     -H "Authorization: Bearer $SELLER_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$SELL_ORDER_DATA")
@@ -484,7 +485,7 @@ BUY_ORDER_DATA="{
     \"side\": \"Buy\"
 }"
 
-RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/orders" \
+RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/trading/orders" \
     -H "Authorization: Bearer $BUYER_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$BUY_ORDER_DATA")
@@ -865,7 +866,7 @@ CANCEL_ORDER_DATA="{
     \"side\": \"Buy\"
 }"
 
-RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/orders" \
+RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/trading/orders" \
     -H "Authorization: Bearer $BUYER_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$CANCEL_ORDER_DATA")

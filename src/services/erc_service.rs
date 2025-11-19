@@ -111,13 +111,13 @@ impl ErcService {
         );
 
         // 1. Derive ERC certificate PDA
-        let (certificate_pda, _bump) = Pubkey::find_program_address(
+        let (_certificate_pda, _bump) = Pubkey::find_program_address(
             &[b"erc_certificate", certificate_id.as_bytes()],
             governance_program_id,
         );
 
         // 2. Get PoA config PDA
-        let (poa_config_pda, _) = Pubkey::find_program_address(
+        let (_poa_config_pda, _) = Pubkey::find_program_address(
             &[b"poa_config"],
             governance_program_id,
         );
@@ -143,14 +143,14 @@ impl ErcService {
         
         // 4. Build accounts for instruction
         let accounts = vec![
-            AccountMeta::new(poa_config_pda, false),
-            AccountMeta::new(certificate_pda, false),
+            AccountMeta::new(_poa_config_pda, false),
+            AccountMeta::new(_certificate_pda, false),
             AccountMeta::new_readonly(*user_wallet, false),
             AccountMeta::new_readonly(authority.pubkey(), true),
             AccountMeta::new_readonly(solana_sdk::pubkey!("11111111111111111111111111111112"), false),
         ];
         
-        let issue_erc_ix = Instruction::new_with_bytes(
+        let _issue_erc_ix = Instruction::new_with_bytes(
             *governance_program_id,
             &instruction_data,
             accounts,
@@ -296,7 +296,7 @@ impl ErcService {
 
         // For now, return true (mock implementation)
         // In production, this would query the blockchain to verify the certificate exists
-        let (certificate_pda, _bump) = Pubkey::find_program_address(
+        let (_certificate_pda, _bump) = Pubkey::find_program_address(
             &[b"erc_certificate", certificate_id.as_bytes()],
             governance_program_id,
         );
@@ -327,7 +327,7 @@ impl ErcService {
         );
 
         // 1. Derive certificate PDA
-        let (certificate_pda, _bump) = Pubkey::find_program_address(
+        let (_certificate_pda, _bump) = Pubkey::find_program_address(
             &[b"erc_certificate", certificate_id.as_bytes()],
             governance_program_id,
         );
@@ -347,14 +347,14 @@ impl ErcService {
         
         // 3. Build accounts for instruction
         let accounts = vec![
-            AccountMeta::new(certificate_pda, false),
+            AccountMeta::new(_certificate_pda, false),
             AccountMeta::new_readonly(*from_wallet, false),
             AccountMeta::new(*to_wallet, false),
             AccountMeta::new_readonly(authority.pubkey(), true),
             AccountMeta::new_readonly(solana_sdk::pubkey!("11111111111111111111111111111112"), false),
         ];
         
-        let transfer_erc_ix = Instruction::new_with_bytes(
+        let _transfer_erc_ix = Instruction::new_with_bytes(
             *governance_program_id,
             &instruction_data,
             accounts,
@@ -381,7 +381,7 @@ impl ErcService {
         info!("Retiring certificate {} on-chain", certificate_id);
 
         // 1. Derive certificate PDA
-        let (certificate_pda, _bump) = Pubkey::find_program_address(
+        let (_certificate_pda, _bump) = Pubkey::find_program_address(
             &[b"erc_certificate", certificate_id.as_bytes()],
             governance_program_id,
         );
@@ -401,12 +401,12 @@ impl ErcService {
         
         // 3. Build accounts for instruction
         let accounts = vec![
-            AccountMeta::new(certificate_pda, false),
+            AccountMeta::new(_certificate_pda, false),
             AccountMeta::new_readonly(authority.pubkey(), true),
             AccountMeta::new_readonly(solana_sdk::pubkey!("11111111111111111111111111111112"), false),
         ];
         
-        let retire_erc_ix = Instruction::new_with_bytes(
+        let _retire_erc_ix = Instruction::new_with_bytes(
             *governance_program_id,
             &instruction_data,
             accounts,

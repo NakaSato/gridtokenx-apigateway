@@ -1,10 +1,10 @@
 use anyhow::{anyhow, Result};
-use bcrypt::{hash, verify, DEFAULT_COST};
+use bcrypt::{hash, DEFAULT_COST};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use sqlx::types::ipnetwork::IpNetwork;
-use tracing::{debug, error, info, warn};
+use tracing::info;
 use uuid::Uuid;
 
 /// Meter registry entry
