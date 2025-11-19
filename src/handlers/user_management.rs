@@ -30,10 +30,6 @@ pub struct RegisterRequest {
     #[schema(example = "SecurePassword123!")]
     pub password: String,
     
-    #[validate(length(min = 1, max = 20))]
-    #[schema(example = "user")]
-    pub role: String,
-    
     #[validate(length(min = 1, max = 100))]
     #[schema(example = "John")]
     pub first_name: String,
@@ -43,6 +39,7 @@ pub struct RegisterRequest {
     pub last_name: String,
     
     // wallet_address removed - assigned after email verification via /api/users/wallet endpoint
+    // role removed - all users default to "user" role
 }
 
 /// Wallet address management request
@@ -123,9 +120,8 @@ pub async fn register(
     request.validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
 
-    // Validate role
-    crate::auth::Role::from_str(&request.role)
-        .map_err(|_| ApiError::BadRequest("Invalid role".to_string()))?;
+    // All new users default to "user" role
+    let default_role = "user";
 
     // Check if username already exists
     let existing_user = sqlx::query_scalar::<_, i64>(
@@ -157,7 +153,7 @@ pub async fn register(
     .bind(&request.username)
     .bind(&request.email)
     .bind(&password_hash)
-    .bind(&request.role)
+    .bind(default_role)
     .bind(&request.first_name)
     .bind(&request.last_name)
     .execute(&state.db)
@@ -236,7 +232,7 @@ pub async fn register(
         user_id,
         "user_registered".to_string(),
         Some(serde_json::json!({
-            "role": request.role,
+            "role": default_role,
             "email_verification_sent": email_sent
         })),
         None,
@@ -679,9 +675,9 @@ pub async fn get_user_activity(
     let per_page = params.per_page.unwrap_or(20).min(100).max(1);
     let offset = (page - 1) * per_page;
 
-    // Get activities
+    // Get activities - using correct column names from migration
     let activities = sqlx::query_as::<_, ActivityRow>(
-        "SELECT id, user_id, action, details, ip_address, user_agent, created_at
+        "SELECT id, user_id, activity_type, description, ip_address, user_agent, created_at
          FROM user_activities 
          WHERE user_id = $1 
          ORDER BY created_at DESC 
@@ -708,8 +704,8 @@ pub async fn get_user_activity(
         .map(|row| UserActivity {
             id: row.id,
             user_id: row.user_id,
-            action: row.action,
-            details: row.details,
+            action: row.activity_type,  // Map activity_type to action
+            details: row.description,  // Map description to details
             ip_address: row.ip_address,
             user_agent: row.user_agent,
             created_at: row.created_at,
@@ -741,14 +737,15 @@ async fn log_user_activity(
 ) -> Result<()> {
     let activity_id = Uuid::new_v4();
     
+    // Use correct column names from migration
     let _ = sqlx::query(
-        "INSERT INTO user_activities (id, user_id, action, details, ip_address, user_agent, created_at)
+        "INSERT INTO user_activities (id, user_id, activity_type, description, ip_address, user_agent, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, NOW())"
     )
     .bind(activity_id)
     .bind(user_id)
-    .bind(action)
-    .bind(details)
+    .bind(action)  // action maps to activity_type
+    .bind(details)  // details maps to description
     .bind(ip_address)
     .bind(user_agent)
     .execute(db)
@@ -788,8 +785,8 @@ pub struct ActivityListResponse {
 struct ActivityRow {
     id: Uuid,
     user_id: Uuid,
-    action: String,
-    details: Option<serde_json::Value>,
+    activity_type: String,  // Correct column name from migration
+    description: Option<serde_json::Value>,  // Correct column name from migration
     ip_address: Option<String>,
     user_agent: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,

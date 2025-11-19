@@ -18,6 +18,15 @@ API_BASE_URL="${API_BASE_URL:-http://localhost:8080}"
 DATABASE_URL="${DATABASE_URL:-postgresql://gridtokenx_user:gridtokenx_password@localhost:5432/gridtokenx}"
 SLEEP_TIME=2
 SETTLEMENT_WAIT_TIME=30  # Time to wait for settlement processing
+VERBOSE=${VERBOSE:-false}
+STRICT_MODE=${STRICT_MODE:-false}  # Set to true to exit on any failure
+
+# Performance metrics
+START_TIME=$(date +%s)
+PASSED_TESTS=0
+FAILED_TESTS=0
+WARNING_TESTS=0
+TOTAL_TESTS=35
 
 # Generate unique test data
 TIMESTAMP=$(date +%s)
@@ -31,6 +40,46 @@ print_header() {
     echo -e "\n${BLUE}========================================${NC}"
     echo -e "${BLUE}$1${NC}"
     echo -e "${BLUE}========================================${NC}\n"
+}
+
+print_success() {
+    echo -e "${GREEN}✓ $1${NC}"
+    ((PASSED_TESTS++))
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠ $1${NC}"
+    ((WARNING_TESTS++))
+}
+
+print_error() {
+    echo -e "${RED}✗ $1${NC}"
+    ((FAILED_TESTS++))
+    if [ "$STRICT_MODE" = true ]; then
+        print_summary
+        exit 1
+    fi
+}
+
+print_verbose() {
+    if [ "$VERBOSE" = true ]; then
+        echo -e "${CYAN}[DEBUG] $1${NC}"
+    fi
+}
+
+measure_time() {
+    local start=$1
+    local end=$(date +%s)
+    echo $((end - start))
+}
+
+validate_json() {
+    local json="$1"
+    if echo "$json" | jq empty 2>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 # Helper function to verify email via API
@@ -127,23 +176,46 @@ check_email_verified() {
 
 # Health check
 print_header "1. Health Check"
-if ! curl -s "$API_BASE_URL/health" > /dev/null 2>&1; then
-    echo -e "${RED}✗ Server not running${NC}"
+STEP_START=$(date +%s)
+RESPONSE=$(curl -s -w "\n%{http_code}" "$API_BASE_URL/health" 2>&1)
+HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+if [ "$HTTP_CODE" -eq 200 ]; then
+    print_success "Server is running ($(measure_time $STEP_START)s)"
+    if validate_json "$BODY"; then
+        print_verbose "Health response: $BODY"
+        SERVER_VERSION=$(echo "$BODY" | jq -r '.version // "unknown"')
+        print_verbose "Server version: $SERVER_VERSION"
+    fi
+else
+    print_error "Server not running (HTTP $HTTP_CODE)"
     exit 1
 fi
-echo -e "${GREEN}✓ Server is running${NC}"
 
 # Check server configuration for email verification
 print_header "1.5. Check Server Configuration"
+STEP_START=$(date +%s)
 echo "Checking if email verification is required..."
 CONFIG_RESPONSE=$(curl -s "$API_BASE_URL/health")
 
 if echo "$CONFIG_RESPONSE" | grep -q "test_mode.*true"; then
-    echo -e "${YELLOW}⚠ Server is in TEST MODE - email verification may be bypassed${NC}"
+    print_warning "Server is in TEST MODE - email verification may be bypassed"
     TEST_MODE=true
 else
-    echo -e "${GREEN}✓ Server is in normal mode - email verification required${NC}"
+    print_success "Server is in normal mode - email verification required ($(measure_time $STEP_START)s)"
     TEST_MODE=false
+fi
+
+# Check database connectivity
+if [ ! -z "$DATABASE_URL" ]; then
+    print_verbose "Testing database connection..."
+    if PGPASSWORD=$(echo "$DATABASE_URL" | sed -n 's/.*:\/\/[^:]*:\([^@]*\)@.*/\1/p') \
+       psql "$DATABASE_URL" -c "SELECT 1;" > /dev/null 2>&1; then
+        print_verbose "Database connection: OK"
+    else
+        print_warning "Database connection failed - some tests may not work"
+    fi
 fi
 
 # Register buyer
@@ -183,6 +255,7 @@ sleep $SLEEP_TIME
 
 # Login buyer
 print_header "3. Login Buyer"
+STEP_START=$(date +%s)
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/auth/login" \
     -H "Content-Type: application/json" \
     -d "{\"username\":\"buyer_$TIMESTAMP\",\"password\":\"$PASSWORD\"}")
@@ -191,12 +264,33 @@ HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
 BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" -eq 200 ]; then
-    echo -e "${GREEN}✓ Buyer logged in${NC}"
     BUYER_TOKEN=$(echo "$BODY" | jq -r '.access_token')
-    echo "$BODY" | jq '.'
+    
+    if [ ! -z "$BUYER_TOKEN" ] && [ "$BUYER_TOKEN" != "null" ]; then
+        print_success "Buyer logged in successfully ($(measure_time $STEP_START)s)"
+        print_verbose "Token length: ${#BUYER_TOKEN} characters"
+        
+        # Validate JWT structure (should have 3 parts)
+        TOKEN_PARTS=$(echo "$BUYER_TOKEN" | tr '.' '\n' | wc -l)
+        if [ "$TOKEN_PARTS" -eq 3 ]; then
+            print_verbose "JWT token structure: Valid"
+        else
+            print_warning "JWT token structure: Invalid (expected 3 parts, got $TOKEN_PARTS)"
+        fi
+        
+        if [ "$VERBOSE" = true ]; then
+            echo "$BODY" | jq '.'
+        fi
+    else
+        print_error "Login succeeded but no token received"
+        exit 1
+    fi
 elif [ "$HTTP_CODE" -eq 401 ] || [ "$HTTP_CODE" -eq 403 ]; then
-    echo -e "${RED}✗ Buyer login failed - Email not verified${NC}"
-    echo "$BODY" | jq '.'
+    print_error "Buyer login failed - Authentication error (HTTP $HTTP_CODE)"
+    
+    if [ "$VERBOSE" = true ]; then
+        echo "$BODY" | jq '.' 2>/dev/null || echo "$BODY"
+    fi
     
     # Try the email verification fix
     if echo "$BODY" | grep -q "Email not verified"; then
@@ -223,7 +317,11 @@ elif [ "$HTTP_CODE" -eq 401 ] || [ "$HTTP_CODE" -eq 403 ]; then
         if [ "$VERIFY_CODE" -eq 201 ] || [ "$VERIFY_CODE" -eq 200 ]; then
             VERIFY_TOKEN=$(echo "$VERIFY_BODY" | jq -r '.email_verification_token // empty')
             if [ ! -z "$VERIFY_TOKEN" ]; then
+                echo -e "${CYAN}Testing email verification endpoint...${NC}"
                 verify_email "$VERIFY_BUYER_EMAIL" "$VERIFY_TOKEN"
+            else
+                echo -e "${YELLOW}⚠ No verification token received, trying database verification method${NC}"
+                verify_email_in_db "$VERIFY_BUYER_EMAIL"
             fi
             
             # Try login with verified user
@@ -330,7 +428,11 @@ elif [ "$HTTP_CODE" -eq 401 ] || [ "$HTTP_CODE" -eq 403 ]; then
         if [ "$VERIFY_CODE" -eq 201 ] || [ "$VERIFY_CODE" -eq 200 ]; then
             VERIFY_TOKEN=$(echo "$VERIFY_BODY" | jq -r '.email_verification_token // empty')
             if [ ! -z "$VERIFY_TOKEN" ]; then
+                echo -e "${CYAN}Testing email verification endpoint...${NC}"
                 verify_email "$VERIFY_SELLER_EMAIL" "$VERIFY_TOKEN"
+            else
+                echo -e "${YELLOW}⚠ No verification token received, trying database verification method${NC}"
+                verify_email_in_db "$VERIFY_SELLER_EMAIL"
             fi
             
             # Try login with verified seller
@@ -419,36 +521,90 @@ fi
 
 sleep $SLEEP_TIME
 
-# Get current epoch
-print_header "8. Get Current Epoch"
-RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/epochs/current" \
+# Get current epoch (via new endpoint)
+print_header "8. Get Current Epoch (Market)"
+RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/market/epoch" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
 BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" -eq 200 ]; then
-    echo -e "${GREEN}✓ Current epoch retrieved${NC}"
+    echo -e "${GREEN}✓ Current market epoch retrieved${NC}"
     EPOCH_ID=$(echo "$BODY" | jq -r '.id // .epoch_id')
     EPOCH_STATUS=$(echo "$BODY" | jq -r '.status')
     echo "$BODY" | jq '.'
     echo -e "Epoch ID: ${CYAN}$EPOCH_ID${NC}"
     echo -e "Status: ${CYAN}$EPOCH_STATUS${NC}"
 else
-    echo -e "${YELLOW}⚠ Could not get current epoch (HTTP $HTTP_CODE) - will use epoch_id from order creation${NC}"
+    echo -e "${YELLOW}⚠ Could not get current market epoch (HTTP $HTTP_CODE) - will use epoch_id from order creation${NC}"
     EPOCH_ID=""
 fi
 
 sleep $SLEEP_TIME
 
+# Get epoch status
+print_header "8.1 Get Epoch Status"
+RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/market/epoch/status" \
+    -H "Authorization: Bearer $BUYER_TOKEN")
+
+HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+if [ "$HTTP_CODE" -eq 200 ]; then
+    echo -e "${GREEN}✓ Epoch status retrieved${NC}"
+    echo "$BODY" | jq '.'
+else
+    echo -e "${YELLOW}⚠ Could not get epoch status (HTTP $HTTP_CODE)${NC}"
+    echo "$BODY"
+fi
+
+sleep $SLEEP_TIME
+
+# List orders (before creating new ones)
+print_header "9. List All Trading Orders (Before Creation)"
+STEP_START=$(date +%s)
+RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/trading/orders" \
+    -H "Authorization: Bearer $BUYER_TOKEN")
+
+HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+if [ "$HTTP_CODE" -eq 200 ]; then
+    if validate_json "$BODY"; then
+        INITIAL_ORDER_COUNT=$(echo "$BODY" | jq 'length // 0')
+        print_success "Trading orders list retrieved: $INITIAL_ORDER_COUNT orders ($(measure_time $STEP_START)s)"
+        
+        if [ "$INITIAL_ORDER_COUNT" -gt 0 ]; then
+            PENDING_ORDERS=$(echo "$BODY" | jq '[.[] | select(.status == "pending" or .status == "Pending")] | length')
+            FILLED_ORDERS=$(echo "$BODY" | jq '[.[] | select(.status == "filled" or .status == "Filled")] | length')
+            print_verbose "Pending: $PENDING_ORDERS, Filled: $FILLED_ORDERS"
+        fi
+        
+        if [ "$VERBOSE" = true ]; then
+            echo "$BODY" | jq '.'
+        fi
+    else
+        print_warning "Retrieved orders but response is not valid JSON"
+        INITIAL_ORDER_COUNT=0
+    fi
+else
+    print_warning "Could not retrieve trading orders list (HTTP $HTTP_CODE)"
+    INITIAL_ORDER_COUNT=0
+    if [ "$VERBOSE" = true ]; then
+        echo "$BODY"
+    fi
+fi
+
+sleep $SLEEP_TIME
+
 # Create sell order
-print_header "9. Create Sell Order"
-echo "Creating sell order for seller..."
+print_header "10. Create Sell Order"
+echo "Creating sell order for seller via /api/trading/orders..."
 SELL_ORDER_DATA="{
     \"energy_amount\": \"100.0\",
     \"price_per_kwh\": \"0.15\",
-    \"order_type\": \"Limit\",
-    \"side\": \"Sell\"
+    \"order_type\": \"limit\"
 }"
 
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/trading/orders" \
@@ -460,24 +616,38 @@ HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
 BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" -eq 201 ] || [ "$HTTP_CODE" -eq 200 ]; then
-    echo -e "${GREEN}✓ Sell order created${NC}"
-    SELL_ORDER_ID=$(echo "$BODY" | jq -r '.id // .order_id')
-    if [ -z "$EPOCH_ID" ]; then
-        EPOCH_ID=$(echo "$BODY" | jq -r '.epoch_id')
+    if validate_json "$BODY"; then
+        SELL_ORDER_ID=$(echo "$BODY" | jq -r '.id // .order_id')
+        if [ -z "$EPOCH_ID" ]; then
+            EPOCH_ID=$(echo "$BODY" | jq -r '.epoch_id')
+        fi
+        
+        ORDER_STATUS=$(echo "$BODY" | jq -r '.status // "unknown"')
+        ORDER_ENERGY=$(echo "$BODY" | jq -r '.energy_amount // "unknown"')
+        ORDER_PRICE=$(echo "$BODY" | jq -r '.price_per_kwh // "unknown"')
+        
+        print_success "Sell order created - ID: $SELL_ORDER_ID ($(measure_time $STEP_START)s)"
+        print_verbose "Status: $ORDER_STATUS, Energy: $ORDER_ENERGY kWh, Price: $ORDER_PRICE per kWh"
+        
+        if [ "$VERBOSE" = true ]; then
+            echo "$BODY" | jq '.'
+        fi
+    else
+        print_error "Sell order creation returned invalid JSON"
+        echo "$BODY"
+        exit 1
     fi
-    echo "$BODY" | jq '.'
-    echo -e "Order ID: ${CYAN}$SELL_ORDER_ID${NC}"
 else
-    echo -e "${RED}✗ Sell order creation failed (HTTP $HTTP_CODE)${NC}"
-    echo "$BODY"
+    print_error "Sell order creation failed (HTTP $HTTP_CODE)"
+    echo "$BODY" | jq '.' 2>/dev/null || echo "$BODY"
     exit 1
 fi
 
 sleep $SLEEP_TIME
 
 # Create buy order
-print_header "10. Create Buy Order"
-echo "Creating buy order for buyer..."
+print_header "11. Create Buy Order (Simplified Energy Trading)"
+echo "Creating buy order for buyer via /api/trading/orders..."
 BUY_ORDER_DATA="{
     \"energy_amount\": \"100.0\",
     \"price_per_kwh\": \"0.15\",
@@ -506,30 +676,50 @@ fi
 
 sleep $SLEEP_TIME
 
-# Check order book
-print_header "11. Check Order Book"
-RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/orders/book" \
+# List orders after creation (new endpoint)
+print_header "12. List Trading Orders After Creation"
+RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/trading/orders" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
 BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" -eq 200 ]; then
-    echo -e "${GREEN}✓ Order book retrieved${NC}"
+    echo -e "${GREEN}✓ Trading orders list retrieved after creation${NC}"
+    AFTER_ORDER_COUNT=$(echo "$BODY" | jq 'length // 0')
+    echo -e "Orders after creation: ${CYAN}$AFTER_ORDER_COUNT${NC}"
+    echo "$BODY" | jq '.'
+else
+    echo -e "${YELLOW}⚠ Could not retrieve trading orders list (HTTP $HTTP_CODE)${NC}"
+    echo "$BODY"
+fi
+
+sleep $SLEEP_TIME
+
+# Check market order book (new endpoint)
+print_header "13. Check Market Order Book"
+RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/market/orderbook" \
+    -H "Authorization: Bearer $BUYER_TOKEN")
+
+HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+if [ "$HTTP_CODE" -eq 200 ]; then
+    echo -e "${GREEN}✓ Market order book retrieved${NC}"
     echo "$BODY" | jq '.'
     BUY_COUNT=$(echo "$BODY" | jq '.bids | length')
     SELL_COUNT=$(echo "$BODY" | jq '.asks | length')
     echo -e "Buy orders: ${CYAN}$BUY_COUNT${NC}"
     echo -e "Sell orders: ${CYAN}$SELL_COUNT${NC}"
 else
-    echo -e "${YELLOW}⚠ Could not retrieve order book (HTTP $HTTP_CODE)${NC}"
+    echo -e "${YELLOW}⚠ Could not retrieve market order book (HTTP $HTTP_CODE)${NC}"
     echo "$BODY"
 fi
 
 sleep $SLEEP_TIME
 
 # Trigger market clearing (if admin endpoint exists)
-print_header "12. Trigger Market Clearing"
+print_header "14. Trigger Market Clearing"
 echo "Attempting to trigger market clearing..."
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE_URL/api/market/clear" \
     -H "Authorization: Bearer $BUYER_TOKEN" \
@@ -553,7 +743,7 @@ fi
 sleep $SLEEP_TIME
 
 # Check trades
-print_header "13. Check Trades"
+print_header "15. Check Trades"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/trades" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
@@ -578,7 +768,7 @@ fi
 sleep $SLEEP_TIME
 
 # Check buyer's orders
-print_header "14. Check Buyer's Orders"
+print_header "16. Check Buyer's Orders"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/orders/my-orders" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
@@ -602,7 +792,7 @@ fi
 sleep $SLEEP_TIME
 
 # Check seller's orders
-print_header "15. Check Seller's Orders"
+print_header "17. Check Seller's Orders"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/orders/my-orders" \
     -H "Authorization: Bearer $SELLER_TOKEN")
 
@@ -626,7 +816,7 @@ fi
 sleep $SLEEP_TIME
 
 # Check settlements
-print_header "16. Check Settlements"
+print_header "18. Check Settlements"
 if [ ! -z "$EPOCH_ID" ]; then
     RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/settlements/epoch/$EPOCH_ID" \
         -H "Authorization: Bearer $BUYER_TOKEN")
@@ -657,7 +847,7 @@ fi
 sleep $SLEEP_TIME
 
 # Check buyer's balance/tokens
-print_header "17. Check Buyer's Energy Tokens"
+print_header "19. Check Buyer's Energy Tokens"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/tokens/balance" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
@@ -677,7 +867,7 @@ fi
 sleep $SLEEP_TIME
 
 # Check seller's balance/tokens
-print_header "18. Check Seller's Energy Tokens"
+print_header "20. Check Seller's Energy Tokens"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/tokens/balance" \
     -H "Authorization: Bearer $SELLER_TOKEN")
 
@@ -697,7 +887,7 @@ fi
 sleep $SLEEP_TIME
 
 # Check blockchain transactions
-print_header "19. Check Blockchain Transactions"
+print_header "21. Check Blockchain Transactions"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/blockchain/transactions" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
@@ -719,7 +909,7 @@ fi
 sleep $SLEEP_TIME
 
 # Get user profile
-print_header "20. Get User Profile (Buyer)"
+print_header "22. Get User Profile (Buyer)"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/user/profile" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
@@ -737,7 +927,7 @@ fi
 sleep $SLEEP_TIME
 
 # Update user profile
-print_header "21. Update User Profile (Buyer)"
+print_header "23. Update User Profile (Buyer)"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT "$API_BASE_URL/api/user/profile" \
     -H "Authorization: Bearer $BUYER_TOKEN" \
     -H "Content-Type: application/json" \
@@ -757,7 +947,7 @@ fi
 sleep $SLEEP_TIME
 
 # List all users (if admin endpoint)
-print_header "22. List All Users"
+print_header "24. List All Users"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/users" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
@@ -779,7 +969,7 @@ fi
 sleep $SLEEP_TIME
 
 # Get wallet info
-print_header "23. Get Wallet Info (Buyer)"
+print_header "25. Get Wallet Info (Buyer)"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/user/wallet" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
@@ -797,7 +987,7 @@ fi
 sleep $SLEEP_TIME
 
 # List all epochs
-print_header "24. List All Epochs"
+print_header "26. List All Epochs"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/epochs" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
@@ -818,7 +1008,7 @@ sleep $SLEEP_TIME
 
 # Get specific epoch
 if [ ! -z "$EPOCH_ID" ] && [ "$EPOCH_ID" != "null" ]; then
-    print_header "25. Get Specific Epoch"
+    print_header "27. Get Specific Epoch"
     RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/epochs/$EPOCH_ID" \
         -H "Authorization: Bearer $BUYER_TOKEN")
     
@@ -838,7 +1028,7 @@ fi
 
 # Get order by ID
 if [ ! -z "$BUY_ORDER_ID" ]; then
-    print_header "26. Get Order by ID (Buy Order)"
+    print_header "28. Get Order by ID (Buy Order)"
     RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/orders/$BUY_ORDER_ID" \
         -H "Authorization: Bearer $BUYER_TOKEN")
     
@@ -857,7 +1047,7 @@ if [ ! -z "$BUY_ORDER_ID" ]; then
 fi
 
 # Cancel an order (create a new one first)
-print_header "27. Create and Cancel Order"
+print_header "29. Create and Cancel Order"
 echo "Creating test order to cancel..."
 CANCEL_ORDER_DATA="{
     \"energy_amount\": \"50.0\",
@@ -901,8 +1091,8 @@ fi
 
 sleep $SLEEP_TIME
 
-# Get market statistics
-print_header "28. Get Market Statistics"
+# Get market statistics (new endpoint)
+print_header "30. Get Market Statistics"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/market/stats" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
@@ -910,7 +1100,7 @@ HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
 BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" -eq 200 ]; then
-    echo -e "${GREEN}✓ Market statistics retrieved${NC}"
+    echo -e "${GREEN}✓ Market statistics retrieved (new endpoint)${NC}"
     echo "$BODY" | jq '.'
 elif [ "$HTTP_CODE" -eq 404 ]; then
     echo -e "${YELLOW}⚠ Market statistics endpoint not available${NC}"
@@ -922,7 +1112,7 @@ fi
 sleep $SLEEP_TIME
 
 # Get trading history
-print_header "29. Get Trading History"
+print_header "31. Get Trading History"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/trades/history" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
@@ -942,7 +1132,7 @@ fi
 sleep $SLEEP_TIME
 
 # Get user's trades
-print_header "30. Get User Trades (Buyer)"
+print_header "32. Get User Trades (Buyer)"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/trades/my-trades" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
@@ -962,7 +1152,7 @@ fi
 sleep $SLEEP_TIME
 
 # Get settlements list
-print_header "31. Get All Settlements"
+print_header "33. Get All Settlements"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/settlements" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
@@ -982,7 +1172,7 @@ fi
 sleep $SLEEP_TIME
 
 # Get user settlements
-print_header "32. Get User Settlements (Buyer)"
+print_header "34. Get User Settlements (Buyer)"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/api/settlements/my-settlements" \
     -H "Authorization: Bearer $BUYER_TOKEN")
 
@@ -1002,7 +1192,7 @@ fi
 sleep $SLEEP_TIME
 
 # Health check again
-print_header "33. Final Health Check"
+print_header "35. Final Health Check"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "$API_BASE_URL/health")
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
@@ -1017,10 +1207,35 @@ fi
 
 sleep $SLEEP_TIME
 
+# Performance summary helper
+print_summary() {
+    local end_time=$(date +%s)
+    local total_time=$((end_time - START_TIME))
+    
+    print_header "Test Summary - Complete API Endpoint Testing"
+    
+    echo -e "${BLUE}╔════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║     Complete API Integration Test Results             ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════════════════════╝${NC}"
+    
+    echo -e "\n${CYAN}Performance Metrics:${NC}"
+    echo -e "   Total execution time: ${YELLOW}${total_time}s${NC}"
+    echo -e "   Tests passed:  ${GREEN}$PASSED_TESTS${NC}"
+    echo -e "   Tests warned:  ${YELLOW}$WARNING_TESTS${NC}"
+    echo -e "   Tests failed:  ${RED}$FAILED_TESTS${NC}"
+    echo -e "   Total tests:   ${CYAN}$TOTAL_TESTS${NC}"
+    
+    local success_rate=0
+    if [ $TOTAL_TESTS -gt 0 ]; then
+        success_rate=$((PASSED_TESTS * 100 / TOTAL_TESTS))
+    fi
+    echo -e "   Success rate:  ${YELLOW}${success_rate}%${NC}"
+}
+
 # Final Summary
-print_header "Test Summary - Complete API Endpoint Testing"
+print_summary
 echo -e "${BLUE}╔════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║     Complete API Integration Test Results (33 Steps)  ║${NC}"
+echo -e "${BLUE}║     Complete API Integration Test Results (35 Steps)  ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════╝${NC}"
 
 echo -e "\n${CYAN}1. Authentication & User Management (Steps 1-5):${NC}"
@@ -1035,21 +1250,24 @@ echo -e "   ✓ Get user profile"
 echo -e "   ✓ Update user profile"
 echo -e "   ✓ Get wallet info"
 
-echo -e "\n${CYAN}3. Epoch Management (Steps 8, 24-25):${NC}"
+echo -e "\n${CYAN}3. Epoch Management (Steps 8-8.1, 24-25):${NC}"
 if [ ! -z "$EPOCH_ID" ]; then
-    echo -e "   ✓ Current epoch: $EPOCH_ID ($EPOCH_STATUS)"
+    echo -e "   ✓ Current market epoch: $EPOCH_ID ($EPOCH_STATUS)"
+    echo -e "   ✓ Epoch status retrieved"
     echo -e "   ✓ List all epochs: $EPOCH_LIST_COUNT epoch(s)"
     echo -e "   ✓ Get specific epoch details"
 else
     echo -e "   ${YELLOW}⚠${NC} Epoch endpoints tested with warnings"
 fi
 
-echo -e "\n${CYAN}4. Order Management (Steps 9-11, 14-15, 26-27):${NC}"
+echo -e "\n${CYAN}4. Order Management (Steps 9-17, 28-29):${NC}"
 if [ ! -z "$BUY_ORDER_ID" ] && [ ! -z "$SELL_ORDER_ID" ]; then
-    echo -e "   ✓ Create orders (buy & sell)"
+    echo -e "   ✓ List trading orders (initial)"
+    echo -e "   ✓ Create orders via /api/trading/orders (buy & sell)"
+    echo -e "   ✓ List trading orders (after creation): $AFTER_ORDER_COUNT"
     echo -e "   ✓ Get order by ID"
     echo -e "   ✓ Get user's orders"
-    echo -e "   ✓ Check order book (${BUY_COUNT} bids, ${SELL_COUNT} asks)"
+    echo -e "   ✓ Check market order book (${BUY_COUNT} bids, ${SELL_COUNT} asks)"
     echo -e "   ✓ Cancel order functionality"
     echo -e "   Buy Order:  $BUY_ORDER_ID"
     echo -e "   Sell Order: $SELL_ORDER_ID"
@@ -1057,7 +1275,7 @@ else
     echo -e "   ${RED}✗${NC} Order creation failed"
 fi
 
-echo -e "\n${CYAN}5. Market Operations (Steps 12-13, 28-30):${NC}"
+echo -e "\n${CYAN}5. Market Operations (Steps 14-15, 30-32):${NC}"
 if [ ! -z "$TRADE_COUNT" ]; then
     echo -e "   ✓ Market clearing triggered"
     echo -e "   ✓ Trades executed: $TRADE_COUNT"
@@ -1068,7 +1286,7 @@ else
     echo -e "   ${YELLOW}⚠${NC} Market operations tested (some endpoints unavailable)"
 fi
 
-echo -e "\n${CYAN}6. Settlement & Blockchain (Steps 16-19, 31-32):${NC}"
+echo -e "\n${CYAN}6. Settlement & Blockchain (Steps 18-21, 33-34):${NC}"
 if [ ! -z "$SETTLEMENT_COUNT" ] && [ "$SETTLEMENT_COUNT" -gt 0 ]; then
     echo -e "   ✓ Settlements: $SETTLEMENT_COUNT settlement(s)"
     echo -e "   ✓ User settlements: $BUYER_SETTLEMENT_COUNT"
@@ -1083,7 +1301,7 @@ else
     echo -e "   ${YELLOW}⚠${NC} Blockchain transactions (endpoint unavailable)"
 fi
 
-echo -e "\n${CYAN}7. Admin & System (Steps 22, 33):${NC}"
+echo -e "\n${CYAN}7. Admin & System (Steps 24, 35):${NC}"
 if [ ! -z "$USER_COUNT" ]; then
     echo -e "   ✓ List all users: $USER_COUNT users"
 else
@@ -1091,13 +1309,14 @@ else
 fi
 echo -e "   ✓ Final health check passed"
 
-echo -e "\n${BLUE}API Endpoints Tested: 33 steps covering:${NC}"
+echo -e "\n${BLUE}API Endpoints Tested: 35+ steps covering:${NC}"
 echo -e "   • Authentication API (register, login, verify)"
 echo -e "   • User Management API (profile, update, list)"
 echo -e "   • Wallet API (connect, get info)"
-echo -e "   • Epoch API (list, get current, get by ID)"
-echo -e "   • Order API (create, cancel, get, list, order book)"
-echo -e "   • Market API (clear, stats, trades)"
+echo -e "   • Epoch API (current market epoch, status, list, get by ID)"
+echo -e "   • Trading API (create order, list orders via /api/trading/orders)"
+echo -e "   • Order API (cancel, get, user orders)"
+echo -e "   • Market API (orderbook, stats, trades)"
 echo -e "   • Settlement API (list, get by epoch, get user settlements)"
 echo -e "   • Token API (balance)"
 echo -e "   • Blockchain API (transactions)"

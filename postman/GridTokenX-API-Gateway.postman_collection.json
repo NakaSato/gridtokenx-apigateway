@@ -1628,3 +1628,326 @@
 								"method": "POST",
 								"header": [
 									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"new_role\": \"prosumer\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/admin/users/:id/update-role",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "users", ":id", "update-role"],
+									"variable": [
+										{
+											"key": "id",
+											"value": "{{user_id}}"
+										}
+									]
+								},
+								"description": "Update user role on blockchain (admin only)."
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "Governance Admin",
+					"item": [
+						{
+							"name": "Emergency Pause",
+							"request": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/admin/governance/emergency-pause",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "governance", "emergency-pause"]
+								},
+								"description": "Emergency pause all platform operations (admin only)."
+							},
+							"response": []
+						},
+						{
+							"name": "Unpause",
+							"request": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/admin/governance/unpause",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "governance", "unpause"]
+								},
+								"description": "Resume platform operations (admin only)."
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "Token Admin",
+					"item": [
+						{
+							"name": "Mint Tokens",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"recipient\": \"wallet_address_here\",\n  \"amount\": 1000,\n  \"reason\": \"Energy production reward\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/admin/tokens/mint",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "tokens", "mint"]
+								},
+								"description": "Mint new energy tokens (admin only)."
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "Trading Admin",
+					"item": [
+						{
+							"name": "Match Orders",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"epoch_id\": 12345\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/admin/trading/match-orders",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "trading", "match-orders"]
+								},
+								"description": "Manually trigger order matching (admin only)."
+							},
+							"response": []
+						},
+						{
+							"name": "Get Market Health",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/admin/market/health",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "market", "health"]
+								},
+								"description": "Get market health statistics (admin only)."
+							},
+							"response": []
+						},
+						{
+							"name": "Get Trading Analytics",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/admin/market/analytics",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "market", "analytics"]
+								},
+								"description": "Get trading analytics (admin only)."
+							},
+							"response": []
+						},
+						{
+							"name": "Market Control",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"action\": \"pause_trading\",\n  \"reason\": \"Market maintenance\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/admin/market/control",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "market", "control"]
+								},
+								"description": "Control market operations (admin only)."
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "Meter Admin",
+					"item": [
+						{
+							"name": "Get Unminted Readings",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/admin/meters/unminted?limit=50",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "meters", "unminted"],
+									"query": [
+										{
+											"key": "limit",
+											"value": "50"
+										}
+									]
+								},
+								"description": "Get meter readings pending token minting (admin only)."
+							},
+							"response": []
+						},
+						{
+							"name": "Mint from Reading",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"reading_id\": \"reading_id_here\"\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/admin/meters/mint-from-reading",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "meters", "mint-from-reading"]
+								},
+								"description": "Mint tokens from meter reading (admin only)."
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "Audit & Security",
+					"item": [
+						{
+							"name": "Get User Audit Logs",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/admin/audit/user/:user_id",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "audit", "user", ":user_id"],
+									"variable": [
+										{
+											"key": "user_id",
+											"value": "{{user_id}}"
+										}
+									]
+								},
+								"description": "Get audit logs for specific user (admin only)."
+							},
+							"response": []
+						},
+						{
+							"name": "Get Audit Logs by Type",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/admin/audit/type/:event_type",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "audit", "type", ":event_type"],
+									"variable": [
+										{
+											"key": "event_type",
+											"value": "login"
+										}
+									]
+								},
+								"description": "Get audit logs by event type (admin only)."
+							},
+							"response": []
+						},
+						{
+							"name": "Get Security Events",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/admin/audit/security",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "audit", "security"]
+								},
+								"description": "Get security events (admin only)."
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "Epoch Management Admin",
+					"item": [
+						{
+							"name": "Get Epoch Stats",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/admin/epochs/:epoch_id/stats",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "epochs", ":epoch_id", "stats"],
+									"variable": [
+										{
+											"key": "epoch_id",
+											"value": "12345"
+										}
+									]
+								},
+								"description": "Get epoch statistics (admin only)."
+							},
+							"response": []
+						},
+						{
+							"name": "List All Epochs",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/api/admin/epochs",
+									"host": ["{{base_url}}"],
+									"path": ["api", "admin", "epochs"]
+								},
+								"description": "List all epochs (admin only)."
+							},
+							"response": []
+						}
+					]
+				}
+			],
+			"description": "Administrative operations (admin role required)"
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080",
+			"type": "string"
+		}
+	]
+}

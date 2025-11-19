@@ -218,7 +218,7 @@ pub async fn list_orders(
         where_conditions.push(format!("order_type = '{}'", order_type));
     }
     if let Some(status) = &params.status {
-        where_conditions.push(format!("status = '{}'", status));
+        where_conditions.push(format!("o.status::TEXT = '{}'", status));
     }
     if let Some(min_price) = params.min_price {
         where_conditions.push(format!("price_per_kwh >= {}", min_price));
@@ -247,7 +247,7 @@ pub async fn list_orders(
         r#"
         SELECT o.id, o.user_id, u.username, o.order_type, 
                o.energy_amount, o.price_per_kwh, o.filled_amount,
-               o.status, o.created_at
+               o.status::TEXT as status, o.created_at
         FROM trading_orders o
         JOIN users u ON o.user_id = u.id
         WHERE {}
@@ -322,7 +322,7 @@ pub async fn get_orderbook(
         SELECT o.energy_amount, o.price_per_kwh, u.username
         FROM trading_orders o
         JOIN users u ON o.user_id = u.id
-        WHERE o.order_type = 'buy' AND o.status = 'pending'
+        WHERE o.order_type = 'buy' AND o.status::TEXT = 'pending'
         ORDER BY o.price_per_kwh DESC, o.created_at ASC
         LIMIT 50
         "#
@@ -337,7 +337,7 @@ pub async fn get_orderbook(
         SELECT o.energy_amount, o.price_per_kwh, u.username
         FROM trading_orders o
         JOIN users u ON o.user_id = u.id
-        WHERE o.order_type = 'sell' AND o.status = 'pending'
+        WHERE o.order_type = 'sell' AND o.status::TEXT = 'pending'
         ORDER BY o.price_per_kwh ASC, o.created_at ASC
         LIMIT 50
         "#
@@ -354,7 +354,7 @@ pub async fn get_orderbook(
             "price_per_kwh": price_per_kwh.to_string().parse::<f64>().unwrap_or(0.0),
             "username": row.get::<Option<String>, _>("username")
         })
-    }).collect();
+    }).collect::<Vec<_>>();
 
     let sells: Vec<serde_json::Value> = sell_orders.iter().map(|row| {
         let energy_amount: BigDecimal = row.get("energy_amount");
@@ -364,7 +364,7 @@ pub async fn get_orderbook(
             "price_per_kwh": price_per_kwh.to_string().parse::<f64>().unwrap_or(0.0),
             "username": row.get::<Option<String>, _>("username")
         })
-    }).collect();
+    }).collect::<Vec<_>>();
 
     Ok(Json(serde_json::json!({
         "buy_orders": buys,
@@ -406,14 +406,14 @@ pub async fn get_market_stats(
     let completed_matches: i64 = stats_row.try_get("completed_matches").unwrap_or(0);
 
     // Get active orders count
-    let active_orders_row = sqlx::query("SELECT COUNT(*) as count FROM trading_orders WHERE status = 'active'")
+    let active_orders_row = sqlx::query("SELECT COUNT(*) as count FROM trading_orders WHERE status::TEXT = 'active'")
         .fetch_one(&state.db)
         .await
         .map_err(|e| ApiError::Database(e))?;
     let active_orders: i64 = active_orders_row.try_get("count").unwrap_or(0);
 
     // Get pending orders count
-    let pending_orders_row = sqlx::query("SELECT COUNT(*) as count FROM trading_orders WHERE status = 'pending'")
+    let pending_orders_row = sqlx::query("SELECT COUNT(*) as count FROM trading_orders WHERE status::TEXT = 'pending'")
         .fetch_one(&state.db)
         .await
         .map_err(|e| ApiError::Database(e))?;
