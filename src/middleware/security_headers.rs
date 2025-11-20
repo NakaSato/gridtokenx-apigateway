@@ -25,21 +25,21 @@ pub async fn add_security_headers(
     // Protects against: Drive-by downloads, MIME confusion attacks
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
-        "nosniff".parse().unwrap()
+        "nosniff".parse().expect("Failed to parse nosniff header value")
     );
     
     // Prevent clickjacking attacks
     // Protects against: UI redressing, clickjacking
     headers.insert(
         header::X_FRAME_OPTIONS,
-        "DENY".parse().unwrap()
+        "DENY".parse().expect("Failed to parse DENY header value")
     );
     
     // Enable XSS protection (legacy but still useful for older browsers)
     // Protects against: Cross-site scripting
     headers.insert(
         header::HeaderName::from_static("x-xss-protection"),
-        "1; mode=block".parse().unwrap()
+        "1; mode=block".parse().expect("Failed to parse XSS protection header value")
     );
     
     // Content Security Policy - restrict resource loading
@@ -56,14 +56,14 @@ pub async fn add_security_headers(
     
     headers.insert(
         header::HeaderName::from_static("content-security-policy"),
-        csp.parse().unwrap()
+        csp.parse().expect("Failed to parse CSP header value")
     );
     
     // Control referrer information sent to external sites
     // Protects against: Information leakage
     headers.insert(
         header::HeaderName::from_static("referrer-policy"),
-        "strict-origin-when-cross-origin".parse().unwrap()
+        "strict-origin-when-cross-origin".parse().expect("Failed to parse referrer policy header value")
     );
     
     // Restrict browser features and APIs
@@ -79,7 +79,7 @@ pub async fn add_security_headers(
     
     headers.insert(
         header::HeaderName::from_static("permissions-policy"),
-        permissions.parse().unwrap()
+        permissions.parse().expect("Failed to parse permissions policy header value")
     );
     
     // Remove server identification (if present)
@@ -88,7 +88,7 @@ pub async fn add_security_headers(
     // Add custom security header for API version (helps with incident response)
     headers.insert(
         header::HeaderName::from_static("x-api-version"),
-        "1.0".parse().unwrap()
+        "1.0".parse().expect("Failed to parse API version header value")
     );
     
     response

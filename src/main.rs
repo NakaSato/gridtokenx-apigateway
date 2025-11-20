@@ -436,6 +436,7 @@ async fn main() -> Result<()> {
         .merge(protected_routes)
         .layer(
             ServiceBuilder::new()
+                .layer(axum::middleware::from_fn(middleware::json_validation_middleware))
                 .layer(axum::middleware::from_fn(middleware::add_security_headers))
                 .layer(axum::middleware::from_fn(middleware::metrics_middleware))
                 .layer(axum::middleware::from_fn(middleware::active_requests_middleware))

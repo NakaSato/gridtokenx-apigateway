@@ -23,7 +23,7 @@ pub mod websocket_service;
 
 pub use audit_logger::{AuditLogger, AuditEvent, AuditEventRecord};
 pub use blockchain_service::BlockchainService;
-pub use cache_service::{CacheService, CacheKeys};
+pub use cache_service::CacheService;
 pub use email_service::EmailService;
 pub use erc_service::ErcService;
 pub use epoch_scheduler::{EpochScheduler, EpochConfig};
@@ -33,7 +33,6 @@ pub use market_clearing_service::MarketClearingService;
 pub use meter_service::MeterService;
 pub use meter_verification_service::MeterVerificationService;
 pub use order_matching_engine::OrderMatchingEngine;
-pub use priority_fee_service::{PriorityFeeService, PriorityLevel, TransactionType, PriorityTransactionBuilder};
 pub use token_service::TokenService;
 pub use wallet_service::WalletService;
 pub use websocket_service::WebSocketService;

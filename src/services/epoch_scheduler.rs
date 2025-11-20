@@ -1,18 +1,18 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc, Duration, Timelike, Datelike};
+use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
-use tokio::time::{interval, Duration as TokioDuration};
-use tracing::{error, info, warn, instrument, debug};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::{RwLock, broadcast};
+use tokio::time::{Duration as TokioDuration, interval};
+use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
+use crate::database::schema::types::EpochStatus;
 use crate::error::ApiError;
 use crate::services::market_clearing_service::{MarketClearingService, MarketEpoch};
-use crate::database::schema::types::EpochStatus;
 
 #[derive(Debug, Clone)]
 pub struct EpochConfig {
@@ -78,11 +78,14 @@ impl EpochScheduler {
             return Ok(());
         }
 
-        info!("Starting epoch scheduler with configuration: {:?}", self.config);
-        
+        info!(
+            "Starting epoch scheduler with configuration: {:?}",
+            self.config
+        );
+
         // Recover state on startup
         self.recover_state().await?;
-        
+
         self.is_running.store(true, Ordering::Relaxed);
         let is_running = Arc::new(AtomicBool::new(true));
         let db = self.db.clone();
@@ -90,17 +93,19 @@ impl EpochScheduler {
         let market_clearing_service = self.market_clearing_service.clone();
         let current_epoch = self.current_epoch.clone();
         let event_sender = self.event_sender.clone();
-        
+
         tokio::spawn(async move {
-            let mut interval = interval(TokioDuration::from_secs(config.transition_check_interval_secs));
-            
+            let mut interval = interval(TokioDuration::from_secs(
+                config.transition_check_interval_secs,
+            ));
+
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
                         if !is_running.load(Ordering::Relaxed) {
                             break;
                         }
-                        
+
                         match Self::process_epoch_transitions_internal(
                             &db,
                             &market_clearing_service,
@@ -121,7 +126,7 @@ impl EpochScheduler {
                     }
                 }
             }
-            
+
             info!("Epoch scheduler stopped");
         });
 
@@ -133,13 +138,13 @@ impl EpochScheduler {
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping epoch scheduler...");
         self.is_running.store(false, Ordering::Relaxed);
-        
+
         // Send shutdown signal
         let mut shutdown_receiver = self.shutdown_receiver.write().await;
         if let Some(receiver) = shutdown_receiver.take() {
             drop(receiver);
         }
-        
+
         info!("Epoch scheduler stopped");
         Ok(())
     }
@@ -148,25 +153,24 @@ impl EpochScheduler {
     #[instrument(skip(self))]
     pub async fn recover_state(&self) -> Result<()> {
         info!("Recovering epoch scheduler state...");
-        
+
         // Find the most recent epoch
         let latest_epoch = self.get_latest_epoch().await?;
-        
+
         if let Some(latest_epoch) = latest_epoch {
             let now = Utc::now();
             let target_state = self.determine_target_state(&latest_epoch, now);
-            
+
             info!(
                 "Latest epoch: {} ({}), target state: {}",
-                latest_epoch.epoch_number,
-                latest_epoch.status,
-                target_state
+                latest_epoch.epoch_number, latest_epoch.status, target_state
             );
-            
+
             // Update epoch status if needed
             if target_state != latest_epoch.status.to_string() {
-                self.update_epoch_status(latest_epoch.id, &target_state).await?;
-                
+                self.update_epoch_status(latest_epoch.id, &target_state)
+                    .await?;
+
                 // Send transition event
                 let _ = self.event_sender.send(EpochTransitionEvent {
                     epoch_id: latest_epoch.id,
@@ -176,19 +180,22 @@ impl EpochScheduler {
                     transition_time: now,
                 });
             }
-            
+
             // Update current epoch
             *self.current_epoch.write().await = Some(latest_epoch.clone());
-            
+
             // Resume order matching for expired epochs that haven't been processed
             if target_state == "expired" && latest_epoch.status != EpochStatus::Settled {
-                warn!("Found expired epoch that needs processing: {}", latest_epoch.id);
+                warn!(
+                    "Found expired epoch that needs processing: {}",
+                    latest_epoch.id
+                );
                 // This will be handled by main loop
             }
         } else {
             info!("No existing epochs found, will create first epoch when needed");
         }
-        
+
         info!("Epoch scheduler state recovery completed");
         Ok(())
     }
@@ -202,14 +209,16 @@ impl EpochScheduler {
     /// Manually trigger epoch transition (for testing)
     pub async fn trigger_epoch_transition(&self, epoch_id: Uuid) -> Result<()> {
         info!("Manually triggering transition for epoch: {}", epoch_id);
-        
-        let epoch = self.get_epoch_by_id(epoch_id).await?
+
+        let epoch = self
+            .get_epoch_by_id(epoch_id)
+            .await?
             .ok_or_else(|| ApiError::NotFound("Epoch not found".to_string()))?;
-        
+
         let target_state = self.determine_target_state(&epoch, Utc::now());
         if target_state != epoch.status.to_string() {
             self.update_epoch_status(epoch_id, &target_state).await?;
-            
+
             let _ = self.event_sender.send(EpochTransitionEvent {
                 epoch_id,
                 epoch_number: epoch.epoch_number,
@@ -218,7 +227,7 @@ impl EpochScheduler {
                 transition_time: Utc::now(),
             });
         }
-        
+
         Ok(())
     }
 
@@ -228,7 +237,7 @@ impl EpochScheduler {
     }
 
     // Internal methods
-    
+
     async fn process_epoch_transitions_internal(
         db: &PgPool,
         market_clearing_service: &MarketClearingService,
@@ -236,16 +245,23 @@ impl EpochScheduler {
         event_sender: &broadcast::Sender<EpochTransitionEvent>,
     ) -> Result<()> {
         let now = Utc::now();
-        
+
         // 1. Activate pending epochs
         Self::activate_pending_epochs(db, current_epoch, event_sender, now).await?;
-        
+
         // 2. Clear expired active epochs
-        Self::clear_expired_epochs(db, market_clearing_service, current_epoch, event_sender, now).await?;
-        
+        Self::clear_expired_epochs(
+            db,
+            market_clearing_service,
+            current_epoch,
+            event_sender,
+            now,
+        )
+        .await?;
+
         // 3. Create next epoch if needed
         Self::ensure_future_epoch_exists(db, now).await?;
-        
+
         Ok(())
     }
 
@@ -272,8 +288,11 @@ impl EpochScheduler {
         .await?;
 
         for epoch_row in epochs_to_activate {
-            info!("Activating epoch: {} ({})", epoch_row.epoch_number, epoch_row.id);
-            
+            info!(
+                "Activating epoch: {} ({})",
+                epoch_row.epoch_number, epoch_row.id
+            );
+
             // Update status to active
             sqlx::query!(
                 "UPDATE market_epochs SET status = $1::epoch_status, updated_at = NOW() WHERE id = $2",
@@ -295,7 +314,7 @@ impl EpochScheduler {
                 total_orders: Some(0),
                 matched_orders: Some(0),
             };
-            
+
             *current_epoch.write().await = Some(epoch.clone());
 
             // Send transition event
@@ -334,8 +353,11 @@ impl EpochScheduler {
         .await?;
 
         for epoch_row in epochs_to_clear {
-            info!("Clearing expired epoch: {} ({})", epoch_row.epoch_number, epoch_row.id);
-            
+            info!(
+                "Clearing expired epoch: {} ({})",
+                epoch_row.epoch_number, epoch_row.id
+            );
+
             // Update status to cleared first
             sqlx::query!(
                 "UPDATE market_epochs SET status = $1::epoch_status, updated_at = NOW() WHERE id = $2",
@@ -346,14 +368,17 @@ impl EpochScheduler {
             .await?;
 
             // Run order matching for this epoch
-            match market_clearing_service.run_order_matching(epoch_row.id).await {
+            match market_clearing_service
+                .run_order_matching(epoch_row.id)
+                .await
+            {
                 Ok(matches) => {
                     info!(
                         "Order matching completed for epoch {}: {} matches created",
                         epoch_row.id,
                         matches.len()
                     );
-                    
+
                     // Send transition event
                     let _ = event_sender.send(EpochTransitionEvent {
                         epoch_id: epoch_row.id,
@@ -364,8 +389,11 @@ impl EpochScheduler {
                     });
                 }
                 Err(e) => {
-                    error!("Failed to run order matching for epoch {}: {}", epoch_row.id, e);
-                    
+                    error!(
+                        "Failed to run order matching for epoch {}: {}",
+                        epoch_row.id, e
+                    );
+
                     // Keep as cleared, will be retried
                     let _ = event_sender.send(EpochTransitionEvent {
                         epoch_id: epoch_row.id,
@@ -389,10 +417,7 @@ impl EpochScheduler {
         Ok(())
     }
 
-    async fn ensure_future_epoch_exists(
-        db: &PgPool,
-        now: DateTime<Utc>,
-    ) -> Result<()> {
+    async fn ensure_future_epoch_exists(db: &PgPool, now: DateTime<Utc>) -> Result<()> {
         // Calculate next epoch number
         let next_epoch_time = Self::calculate_next_epoch_start(now);
         let next_epoch_number = Self::calculate_epoch_number(next_epoch_time);
@@ -406,11 +431,14 @@ impl EpochScheduler {
         .await?;
 
         if existing.is_none() {
-            info!("Creating next epoch: {} ({})", next_epoch_number, next_epoch_time);
-            
+            info!(
+                "Creating next epoch: {} ({})",
+                next_epoch_number, next_epoch_time
+            );
+
             let epoch_id = Uuid::new_v4();
             let epoch_end = next_epoch_time + Duration::minutes(15);
-            
+
             sqlx::query!(
                 r#"
                 INSERT INTO market_epochs (
@@ -437,13 +465,13 @@ impl EpochScheduler {
     }
 
     // Helper methods
-    
+
     fn determine_target_state(&self, epoch: &MarketEpoch, now: DateTime<Utc>) -> String {
         if now < epoch.start_time {
             "pending".to_string()
         } else if now >= epoch.start_time && now < epoch.end_time {
             "active".to_string()
-        } else if epoch.status == EpochStatus::Active {
+        } else if now >= epoch.end_time && epoch.status != EpochStatus::Settled {
             "cleared".to_string()
         } else {
             epoch.status.to_string()
@@ -489,7 +517,7 @@ impl EpochScheduler {
     async fn update_epoch_status(&self, epoch_id: Uuid, status: &str) -> Result<()> {
         let status_str = match status {
             "pending" => "pending",
-            "active" => "active", 
+            "active" => "active",
             "cleared" => "cleared",
             "settled" => "settled",
             _ => return Err(anyhow::anyhow!("Invalid epoch status: {}", status)),
@@ -513,11 +541,12 @@ impl EpochScheduler {
     }
 
     fn calculate_next_epoch_start(now: DateTime<Utc>) -> DateTime<Utc> {
-        let current_epoch_start = now.with_minute((now.minute() / 15) * 15)
+        let current_epoch_start = now
+            .with_minute((now.minute() / 15) * 15)
             .and_then(|dt| dt.with_second(0))
             .and_then(|dt| dt.with_nanosecond(0))
             .unwrap_or(now);
-        
+
         current_epoch_start + Duration::minutes(15)
     }
 }
@@ -525,23 +554,24 @@ impl EpochScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{Datelike, TimeZone};
     use sqlx::PgPool;
     use std::env;
-    use chrono::{Datelike, TimeZone};
 
     // Helper function to create a test database connection
     async fn create_test_db() -> PgPool {
-        let database_url = env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgresql://postgres:password@localhost/gridtokenx_test".to_string());
-        
-        PgPool::connect(&database_url).await.expect("Failed to connect to test database")
+        let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgresql://postgres:password@localhost/gridtokenx_test".to_string()
+        });
+
+        PgPool::connect_lazy(&database_url).expect("Failed to connect to test database")
     }
 
     #[tokio::test]
     async fn test_epoch_number_calculation() {
         let timestamp = Utc.with_ymd_and_hms(2025, 11, 9, 14, 30, 0).unwrap();
         let epoch_number = EpochScheduler::calculate_epoch_number(timestamp);
-        
+
         // Expected: 202511091430 (YYYYMMDDHHMM with 15-minute blocks)
         assert_eq!(epoch_number, 202511091430);
     }
@@ -550,7 +580,7 @@ mod tests {
     async fn test_next_epoch_start_calculation() {
         let now = Utc.with_ymd_and_hms(2025, 11, 9, 14, 37, 0).unwrap();
         let next_epoch_start = EpochScheduler::calculate_next_epoch_start(now);
-        
+
         // Should be 14:45 (next 15-minute block)
         let expected = Utc.with_ymd_and_hms(2025, 11, 9, 14, 45, 0).unwrap();
         assert_eq!(next_epoch_start, expected);
@@ -560,9 +590,9 @@ mod tests {
     async fn test_target_state_determination() {
         let config = EpochConfig::default();
         let scheduler = EpochScheduler::new(create_test_db().await, config);
-        
+
         let now = Utc.with_ymd_and_hms(2025, 11, 9, 14, 30, 0).unwrap();
-        
+
         // Test pending epoch
         let pending_epoch = MarketEpoch {
             id: Uuid::new_v4(),
@@ -575,10 +605,10 @@ mod tests {
             total_orders: Some(0),
             matched_orders: Some(0),
         };
-        
+
         let target_state = scheduler.determine_target_state(&pending_epoch, now);
         assert_eq!(target_state, "active");
-        
+
         // Test expired epoch
         let later_now = Utc.with_ymd_and_hms(2025, 11, 9, 14, 50, 0).unwrap();
         let target_state = scheduler.determine_target_state(&pending_epoch, later_now);
@@ -610,11 +640,11 @@ mod tests {
     async fn test_all_15_minute_boundaries() {
         // Test all four 15-minute boundaries in an hour
         let boundaries = vec![0, 15, 30, 45];
-        
+
         for minute in boundaries {
             let timestamp = Utc.with_ymd_and_hms(2025, 11, 9, 14, minute, 0).unwrap();
             let epoch_number = EpochScheduler::calculate_epoch_number(timestamp);
-            
+
             // Extract minute from epoch number
             let epoch_minute = (epoch_number % 100) as u32;
             assert_eq!(epoch_minute, minute);
@@ -625,10 +655,10 @@ mod tests {
     async fn test_state_transition_sequence() {
         let config = EpochConfig::default();
         let scheduler = EpochScheduler::new(create_test_db().await, config);
-        
+
         let epoch_start = Utc.with_ymd_and_hms(2025, 11, 9, 14, 30, 0).unwrap();
         let epoch_end = Utc.with_ymd_and_hms(2025, 11, 9, 14, 45, 0).unwrap();
-        
+
         // Test state progression
         let mut epoch = MarketEpoch {
             id: Uuid::new_v4(),
@@ -672,7 +702,7 @@ mod tests {
         for time in test_times {
             let next_start = EpochScheduler::calculate_next_epoch_start(time);
             let next_end = next_start + chrono::Duration::minutes(15);
-            
+
             let duration_secs = (next_end - next_start).num_seconds();
             assert_eq!(duration_secs, 900); // 15 minutes = 900 seconds
         }
@@ -682,18 +712,21 @@ mod tests {
     async fn test_epoch_number_monotonicity() {
         // Epoch numbers should strictly increase over time
         let mut previous_epoch_number = 0i64;
-        
+
         for hour in 0..24 {
             for minute in [0, 15, 30, 45] {
                 let timestamp = Utc.with_ymd_and_hms(2025, 11, 9, hour, minute, 0).unwrap();
                 let epoch_number = EpochScheduler::calculate_epoch_number(timestamp);
-                
+
                 if previous_epoch_number > 0 {
-                    assert!(epoch_number > previous_epoch_number, 
-                        "Epoch numbers must increase: {} should be > {}", 
-                        epoch_number, previous_epoch_number);
+                    assert!(
+                        epoch_number > previous_epoch_number,
+                        "Epoch numbers must increase: {} should be > {}",
+                        epoch_number,
+                        previous_epoch_number
+                    );
                 }
-                
+
                 previous_epoch_number = epoch_number;
             }
         }
@@ -703,18 +736,22 @@ mod tests {
     async fn test_epoch_number_format() {
         let timestamp = Utc.with_ymd_and_hms(2025, 11, 9, 14, 30, 0).unwrap();
         let epoch_number = EpochScheduler::calculate_epoch_number(timestamp);
-        
+
         // Convert to string to check format
         let epoch_str = epoch_number.to_string();
-        assert_eq!(epoch_str.len(), 12, "Epoch number should be 12 digits (YYYYMMDDHHMM)");
-        
+        assert_eq!(
+            epoch_str.len(),
+            12,
+            "Epoch number should be 12 digits (YYYYMMDDHHMM)"
+        );
+
         // Extract and verify components
         let year: i32 = epoch_str[0..4].parse().unwrap();
         let month: u32 = epoch_str[4..6].parse().unwrap();
         let day: u32 = epoch_str[6..8].parse().unwrap();
         let hour: u32 = epoch_str[8..10].parse().unwrap();
         let minute: u32 = epoch_str[10..12].parse().unwrap();
-        
+
         assert_eq!(year, 2025);
         assert_eq!(month, 11);
         assert_eq!(day, 9);
@@ -727,11 +764,11 @@ mod tests {
         // 2024 is a leap year
         let timestamp = Utc.with_ymd_and_hms(2024, 2, 29, 10, 15, 0).unwrap();
         let epoch_number = EpochScheduler::calculate_epoch_number(timestamp);
-        
+
         let epoch_str = epoch_number.to_string();
         let month: u32 = epoch_str[4..6].parse().unwrap();
         let day: u32 = epoch_str[6..8].parse().unwrap();
-        
+
         assert_eq!(month, 2);
         assert_eq!(day, 29);
     }
@@ -740,7 +777,7 @@ mod tests {
     async fn test_expired_epoch_detection() {
         let config = EpochConfig::default();
         let scheduler = EpochScheduler::new(create_test_db().await, config);
-        
+
         let epoch = MarketEpoch {
             id: Uuid::new_v4(),
             epoch_number: 202511091430,
@@ -763,7 +800,7 @@ mod tests {
     async fn test_cleared_epoch_should_settle() {
         let config = EpochConfig::default();
         let scheduler = EpochScheduler::new(create_test_db().await, config);
-        
+
         let mut epoch = MarketEpoch {
             id: Uuid::new_v4(),
             epoch_number: 202511091430,
@@ -779,7 +816,7 @@ mod tests {
         // Cleared epoch should eventually settle
         let current_time = Utc.with_ymd_and_hms(2025, 11, 9, 14, 50, 0).unwrap();
         let state = scheduler.determine_target_state(&epoch, current_time);
-        
+
         // After clearing, state should progress toward settlement
         // The exact logic depends on your settlement conditions
         assert!(state == "cleared" || state == "settled");

@@ -1,18 +1,19 @@
 use axum::{
-    extract::{Query, State},
     Json,
+    extract::{Query, State},
+    http::StatusCode,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use utoipa::ToSchema;
 use solana_sdk::signature::Signer;
+use utoipa::ToSchema;
+use uuid::Uuid;
 
 use crate::{
-    auth::{SecureAuthResponse, SecureUserInfo, Claims},
-    error::ApiError,
-    services::{token_service::TokenService, AuditEvent},
     AppState,
+    auth::{Claims, SecureAuthResponse, SecureUserInfo},
+    error::ApiError,
+    services::{AuditEvent, token_service::TokenService},
 };
 
 // ============================================================================
@@ -44,12 +45,22 @@ pub struct VerifyEmailResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ResendVerificationResponse {
     pub message: String,
-    pub email: String,
-    pub sent_at: String,
-    pub expires_in_hours: i64,
-    /// Status of the verification: "already_verified", "expired_resent", "sent"
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent_at: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_in_hours: Option<i64>,
+
+    /// Status of the verification: "already_verified", "expired_resent", "sent", "rate_limited"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after: Option<i64>,
 }
 
 // ============================================================================
@@ -101,9 +112,7 @@ pub async fn verify_email(
 ) -> Result<Json<VerifyEmailResponse>, ApiError> {
     // Validate token format (Base58 encoded, reasonable length)
     if params.token.is_empty() || params.token.len() > 128 {
-        return Err(ApiError::BadRequest(
-            "Invalid token format".to_string()
-        ));
+        return Err(ApiError::BadRequest("Invalid token format".to_string()));
     }
 
     // Hash the token to compare with database
@@ -130,39 +139,41 @@ pub async fn verify_email(
     .fetch_optional(&state.db)
     .await
     .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
-    .ok_or_else(|| ApiError::BadRequest(
-        "Invalid or expired verification token".to_string()
-    ))?;
+    .ok_or_else(|| ApiError::BadRequest("Invalid or expired verification token".to_string()))?;
 
     // Validate user has email (required for verification)
-    let user_email = user.email.as_ref()
+    let user_email = user
+        .email
+        .as_ref()
         .ok_or_else(|| ApiError::Internal("User email is missing".to_string()))?;
 
     // Check if already verified
     if user.email_verified {
-        return Err(ApiError::BadRequest(
-            "Email already verified".to_string()
-        ));
+        return Err(ApiError::BadRequest("Email already verified".to_string()));
     }
 
     // Check if token has expired
     if let Some(expires_at) = user.email_verification_expires_at {
         if expires_at < Utc::now() {
             return Err(ApiError::BadRequest(
-                "Verification token has expired. Please request a new one.".to_string()
+                "Verification token has expired. Please request a new one.".to_string(),
             ));
         }
     } else {
         return Err(ApiError::BadRequest(
-            "Invalid verification token".to_string()
+            "Invalid verification token".to_string(),
         ));
     }
 
     // Generate a new Solana wallet for the user
     let keypair = crate::services::WalletService::create_keypair();
     let wallet_address = keypair.pubkey().to_string();
-    
-    tracing::info!("Generated new wallet for user {}: {}", user.id, wallet_address);
+
+    tracing::info!(
+        "Generated new wallet for user {}: {}",
+        user.id,
+        wallet_address
+    );
 
     // Update user: set email_verified = true, clear token, set verified_at, and assign wallet
     let verified_at = Utc::now();
@@ -186,15 +197,17 @@ pub async fn verify_email(
     .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
     // Log email verification to audit logs
-    state.audit_logger.log_async(AuditEvent::EmailVerified {
-        user_id: user.id,
-    });
+    state
+        .audit_logger
+        .log_async(AuditEvent::EmailVerified { user_id: user.id });
 
     // Log wallet creation for audit trail
-    state.audit_logger.log_async(AuditEvent::BlockchainRegistration {
-        user_id: user.id,
-        wallet_address: wallet_address.clone(),
-    });
+    state
+        .audit_logger
+        .log_async(AuditEvent::BlockchainRegistration {
+            user_id: user.id,
+            wallet_address: wallet_address.clone(),
+        });
 
     // Send welcome email if email service is available
     if let Some(ref email_service) = state.email_service {
@@ -209,7 +222,7 @@ pub async fn verify_email(
     let auth_response = if state.config.email.auto_login_after_verification {
         let username_str = user.username.clone().unwrap_or_else(|| "User".to_string());
         let role_str = user.role.clone().unwrap_or_else(|| "user".to_string());
-        
+
         let claims = Claims::new(user.id, username_str.clone(), role_str.clone());
         let access_token = state.jwt_service.encode_token(&claims)?;
 
@@ -260,32 +273,30 @@ pub async fn verify_email(
         (status = 200, description = "Verification email sent successfully", body = ResendVerificationResponse),
         (status = 400, description = "Invalid email or already verified"),
         (status = 404, description = "User not found"),
-        (status = 429, description = "Too many requests - rate limit exceeded")
+        (status = 429, description = "Too many requests - rate limit exceeded", body = ResendVerificationResponse)
     )
 )]
 pub async fn resend_verification(
     State(state): State<AppState>,
     Json(payload): Json<ResendVerificationRequest>,
-) -> Result<Json<ResendVerificationResponse>, ApiError> {
+) -> Result<(StatusCode, Json<ResendVerificationResponse>), ApiError> {
     // Validate email format
     if payload.email.is_empty() || !payload.email.contains('@') {
-        return Err(ApiError::BadRequest(
-            "Invalid email format".to_string()
-        ));
+        return Err(ApiError::BadRequest("Invalid email format".to_string()));
     }
 
     // Check if email verification is enabled
     if !state.config.email.verification_enabled {
         return Err(ApiError::BadRequest(
-            "Email verification is not enabled".to_string()
+            "Email verification is not enabled".to_string(),
         ));
     }
 
     // Email service must be available
-    let email_service = state.email_service.as_ref()
-        .ok_or_else(|| ApiError::Configuration(
-            "Email service is not configured".to_string()
-        ))?;
+    let email_service = state
+        .email_service
+        .as_ref()
+        .ok_or_else(|| ApiError::Configuration("Email service is not configured".to_string()))?;
 
     // Find user by email
     let user = sqlx::query_as!(
@@ -308,24 +319,28 @@ pub async fn resend_verification(
     .fetch_optional(&state.db)
     .await
     .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
-    .ok_or_else(|| ApiError::NotFound(
-        "User not found".to_string()
-    ))?;
+    .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
 
     // Validate user has email (required for verification)
-    let user_email = user.email.as_ref()
+    let user_email = user
+        .email
+        .as_ref()
         .ok_or_else(|| ApiError::Internal("User email is missing".to_string()))?;
 
     // Check if already verified - return success immediately
     if user.email_verified {
         let verified_at = Utc::now();
-        return Ok(Json(ResendVerificationResponse {
-            message: "Email is already verified. No action needed.".to_string(),
-            email: user_email.to_string(),
-            sent_at: verified_at.to_rfc3339(),
-            expires_in_hours: 0,
-            status: Some("already_verified".to_string()),
-        }));
+        return Ok((
+            StatusCode::OK,
+            Json(ResendVerificationResponse {
+                message: "Email is already verified. No action needed.".to_string(),
+                email: Some(user_email.to_string()),
+                sent_at: Some(verified_at.to_rfc3339()),
+                expires_in_hours: Some(0),
+                status: Some("already_verified".to_string()),
+                retry_after: None,
+            }),
+        ));
     }
 
     // Check if token has expired
@@ -336,20 +351,32 @@ pub async fn resend_verification(
         true
     };
 
-    // Rate limiting: Check if last email was sent within 30 seconds (to prevent spam)
+    // Rate limiting: Check if last email was sent within 10 seconds (to prevent spam)
     // BUT: Skip rate limiting if token has expired (allow immediate resend for expired tokens)
     if !is_token_expired {
         if let Some(expires_at) = user.email_verification_expires_at {
             // Calculate when the email was sent (24 hours before expiry)
-            let sent_at = expires_at - chrono::Duration::hours(
-                state.config.email.verification_expiry_hours as i64
-            );
+            let sent_at = expires_at
+                - chrono::Duration::hours(state.config.email.verification_expiry_hours as i64);
             let time_since_sent = Utc::now() - sent_at;
-            
-            // Allow resend after 30 seconds
-            if time_since_sent < chrono::Duration::seconds(30) {
-                let wait_seconds = 30 - time_since_sent.num_seconds();
-                return Err(ApiError::RateLimitWithRetry(wait_seconds));
+
+            // Allow resend after 10 seconds
+            if time_since_sent < chrono::Duration::seconds(10) {
+                let wait_seconds = 10 - time_since_sent.num_seconds();
+                return Ok((
+                    StatusCode::TOO_MANY_REQUESTS,
+                    Json(ResendVerificationResponse {
+                        message: format!(
+                            "Rate limit exceeded. Please wait {} seconds before retrying",
+                            wait_seconds
+                        ),
+                        email: None,
+                        sent_at: None,
+                        expires_in_hours: None,
+                        status: None,
+                        retry_after: None,
+                    }),
+                ));
             }
         }
     }
@@ -360,9 +387,8 @@ pub async fn resend_verification(
 
     // Update user with new token
     let sent_at = Utc::now();
-    let expires_at = sent_at + chrono::Duration::hours(
-        state.config.email.verification_expiry_hours as i64
-    );
+    let expires_at =
+        sent_at + chrono::Duration::hours(state.config.email.verification_expiry_hours as i64);
 
     sqlx::query!(
         r#"
@@ -398,17 +424,21 @@ pub async fn resend_verification(
     } else {
         (
             "Verification email sent successfully! Please check your inbox.".to_string(),
-            Some("sent".to_string())
+            Some("sent".to_string()),
         )
     };
 
-    Ok(Json(ResendVerificationResponse {
-        message,
-        email: user_email.to_string(),
-        sent_at: sent_at.to_rfc3339(),
-        expires_in_hours: state.config.email.verification_expiry_hours as i64,
-        status,
-    }))
+    Ok((
+        StatusCode::OK,
+        Json(ResendVerificationResponse {
+            message,
+            email: Some(user_email.to_string()),
+            sent_at: Some(sent_at.to_rfc3339()),
+            expires_in_hours: Some(state.config.email.verification_expiry_hours as i64),
+            status,
+            retry_after: None,
+        }),
+    ))
 }
 
 // ============================================================================
@@ -442,7 +472,7 @@ mod tests {
             wallet_address: "5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP8".to_string(),
             auth: None,
         };
-        
+
         let json = serde_json::to_string(&response).unwrap();
         assert!(json.contains("Success"));
         assert!(json.contains("email_verified"));
@@ -453,12 +483,13 @@ mod tests {
     fn test_resend_verification_response_serialization() {
         let response = ResendVerificationResponse {
             message: "Email sent".to_string(),
-            email: "test@example.com".to_string(),
-            sent_at: "2024-01-15T10:30:00Z".to_string(),
-            expires_in_hours: 24,
+            email: Some("test@example.com".to_string()),
+            sent_at: Some("2024-01-15T10:30:00Z".to_string()),
+            expires_in_hours: Some(24),
             status: Some("sent".to_string()),
+            retry_after: None,
         };
-        
+
         let json = serde_json::to_string(&response).unwrap();
         assert!(json.contains("Email sent"));
         assert!(json.contains("test@example.com"));

@@ -156,7 +156,8 @@ impl OrderMatchingEngine {
 
             // Calculate remaining amount needed
             let remaining_buy_amount = &buy_energy_amount - &buy_filled_amount;
-            let zero = BigDecimal::from_str("0").unwrap();
+            let zero = BigDecimal::from_str("0")
+                .map_err(|_| anyhow::anyhow!("Failed to parse zero value"))?;
             if remaining_buy_amount <= zero {
                 continue; // Order already fully filled
             }
@@ -206,9 +207,10 @@ impl OrderMatchingEngine {
                 );
 
                 // Create order match - safe to unwrap since we validated both epochs above
+                let epoch_id = epoch_id.ok_or_else(|| anyhow::anyhow!("Epoch ID is required for order matching"))?;
                 match self
                     .create_order_match(
-                        epoch_id.unwrap(),
+                        epoch_id,
                         buy_order_id,
                         sell_order_id,
                         buyer_id,
@@ -356,7 +358,8 @@ mod tests {
     async fn test_engine_creation() {
         // This is a placeholder test since we need a real database for full testing
         // In production, you would use a test database
-        let pool = PgPool::connect_lazy("postgresql://localhost/test").unwrap();
+        let pool = PgPool::connect_lazy("postgresql://localhost/test")
+            .expect("Failed to connect to test database");
         let engine = OrderMatchingEngine::new(pool);
         assert_eq!(engine.match_interval_secs, 5);
     }

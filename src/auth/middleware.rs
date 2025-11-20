@@ -31,7 +31,7 @@ pub async fn auth_middleware(
             return Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
                 .body(Body::from("Missing or invalid Authorization header"))
-                .unwrap();
+                .expect("Failed to build unauthorized response");
         }
     };
 
@@ -44,7 +44,7 @@ pub async fn auth_middleware(
         Err(_) => Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .body(Body::from("Invalid or expired token"))
-            .unwrap(),
+            .expect("Failed to build unauthorized response"),
     }
 }
 
@@ -60,7 +60,7 @@ pub async fn require_admin_role(
             return Response::builder()
                 .status(StatusCode::FORBIDDEN)
                 .body(Body::from("Invalid user role"))
-                .unwrap();
+                .expect("Failed to build forbidden response");
         }
     };
 
@@ -70,7 +70,7 @@ pub async fn require_admin_role(
         Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body(Body::from("Admin access required"))
-            .unwrap()
+            .expect("Failed to build forbidden response")
     }
 }
 
