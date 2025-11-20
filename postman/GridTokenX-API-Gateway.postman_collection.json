@@ -2,7 +2,7 @@
 	"info": {
 		"_postman_id": "gridtokenx-api-gateway-2025",
 		"name": "GridTokenX API Gateway",
-		"description": "Complete API collection for GridTokenX Platform - Peer-to-peer renewable energy trading platform built on Solana blockchain.\n\n**Version**: 1.1.0\n**Updated**: 2025-11-19\n**Base URL**: Configure via environment variables\n\n## Authentication\nMost endpoints require JWT authentication. Use the login endpoint to obtain a token, which will be automatically saved to your environment.\n\n## API Structure\nAll API routes are prefixed with `/api/`. Public routes include health checks and authentication endpoints. Protected routes require JWT authentication.\n\n## Endpoints Summary\n- Health & Status: 1 endpoint\n- Authentication: 6 endpoints\n- User Management: 7 endpoints\n- Blockchain: 7 endpoints\n- Oracle: 3 endpoints\n- Governance: 3 endpoints\n- Trading: 6 endpoints\n- Tokens: 3 endpoints\n- Energy Meters: 10 endpoints\n- ERC Certificates: 6 endpoints\n- Market Data: 4 endpoints\n- Analytics: 2 endpoints\n- Admin Operations: 15 endpoints\n- Testing: 3 endpoints\n- Audit & Security: 3 endpoints\n- Epoch Management: 4 endpoints\n- WebSocket: 2 endpoints\n- Meter Verification: 4 endpoints\n\n**Total**: 75+ endpoints",
+		"description": "Complete API collection for GridTokenX Platform - Peer-to-peer renewable energy trading platform built on Solana blockchain.\\n\\n**Version**: 1.2.0\\n**Updated**: 2025-11-20\\n**Base URL**: Configure via environment variables\\n\\n## Authentication\\nMost endpoints require JWT authentication. Use the login endpoint to obtain a token, which will be automatically saved to your environment.\\n\\n## API Structure\\nAll API routes are prefixed with `/api/`. Public routes include health checks and authentication endpoints. Protected routes require JWT authentication.\\n\\n## Endpoints Summary\\n- Health & Status: 2 endpoints\\n- Authentication: 6 endpoints\\n- User Management: 7 endpoints\\n- Blockchain: 7 endpoints\\n- Oracle: 3 endpoints\\n- Governance: 3 endpoints\\n- Trading: 6 endpoints\\n- Tokens: 3 endpoints\\n- Energy Meters: 10 endpoints\\n- ERC Certificates: 6 endpoints\\n- Market Data: 4 endpoints\\n- Analytics: 2 endpoints\\n- Admin Operations: 16 endpoints\\n- Testing: 3 endpoints\\n- Audit & Security: 3 endpoints\\n- Epoch Management: 4 endpoints\\n- WebSocket: 2 endpoints\\n- Meter Verification: 4 endpoints\\n\\n**Total**: 76+ endpoints\\n\\n## Recent Updates (v1.2.0)\\n- Enhanced user management with email verification\\n- Added wallet address validation\\n- Added user activity tracking\\n- Added admin user management controls",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"auth": {
@@ -87,8 +87,12 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/health",
-							"host": ["{{base_url}}"],
-							"path": ["health"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"health"
+							]
 						},
 						"description": "Check API health status. No authentication required."
 					},
@@ -104,8 +108,12 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/metrics",
-							"host": ["{{base_url}}"],
-							"path": ["metrics"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"metrics"
+							]
 						},
 						"description": "Get Prometheus metrics endpoint."
 					},
@@ -174,8 +182,14 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/auth/login",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "login"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"login"
+							]
 						},
 						"description": "Authenticate user with username and password. Returns JWT token."
 					},
@@ -219,8 +233,14 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/auth/register",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "register"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"register"
+							]
 						},
 						"description": "Register a new user account. Email verification may be required."
 					},
@@ -245,8 +265,15 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/auth/wallet/login",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "wallet", "login"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"wallet",
+								"login"
+							]
 						},
 						"description": "Authenticate using Solana wallet signature."
 					},
@@ -271,8 +298,15 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/auth/wallet/register",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "wallet", "register"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"wallet",
+								"register"
+							]
 						},
 						"description": "Register new account using Solana wallet."
 					},
@@ -288,8 +322,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/auth/verify-email?token=verification_token_here",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "verify-email"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"verify-email"
+							],
 							"query": [
 								{
 									"key": "token",
@@ -320,8 +360,14 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/auth/resend-verification",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "resend-verification"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"resend-verification"
+							]
 						},
 						"description": "Resend email verification link."
 					},
@@ -340,8 +386,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/auth/profile",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "profile"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"profile"
+							]
 						},
 						"description": "Get current user's profile information. Requires JWT token."
 					},
@@ -363,8 +415,15 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/auth/profile/update",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "profile", "update"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"profile",
+								"update"
+							]
 						},
 						"description": "Update current user's profile information."
 					},
@@ -386,8 +445,14 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/auth/password",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "password"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"password"
+							]
 						},
 						"description": "Change user password. Requires current password."
 					},
@@ -395,6 +460,35 @@
 				},
 				{
 					"name": "Update Wallet Address",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Wallet address updated successfully\", function () {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response).to.have.property(\"wallet_address\");",
+									"    pm.expect(response.wallet_address).to.be.a(\"string\");",
+									"    ",
+									"    // Save wallet address to environment",
+									"    pm.environment.set(\"wallet_address\", response.wallet_address);",
+									"});",
+									"",
+									"pm.test(\"Response contains user info\", function () {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response).to.have.property(\"id\");",
+									"    pm.expect(response).to.have.property(\"username\");",
+									"    pm.expect(response).to.have.property(\"email\");",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "POST",
 						"header": [
@@ -409,48 +503,126 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/user/wallet",
-							"host": ["{{base_url}}"],
-							"path": ["api", "user", "wallet"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"wallet"
+							]
 						},
-						"description": "Link Solana wallet address to user account."
+						"description": "Link Solana wallet address to user account. Validates wallet format (32-44 chars, base58) and prevents duplicates."
 					},
 					"response": []
 				},
 				{
 					"name": "Remove Wallet Address",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 204 No Content\", function () {",
+									"    pm.response.to.have.status(204);",
+									"});",
+									"",
+									"pm.test(\"Wallet address removed successfully\", function () {",
+									"    // Clear wallet address from environment",
+									"    pm.environment.unset(\"wallet_address\");",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "DELETE",
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/user/wallet",
-							"host": ["{{base_url}}"],
-							"path": ["api", "user", "wallet"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"wallet"
+							]
 						},
-						"description": "Unlink wallet address from user account."
+						"description": "Unlink wallet address from user account. Returns 204 No Content on success."
 					},
 					"response": []
 				},
 				{
 					"name": "Get User Activity",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has pagination structure\", function () {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response).to.have.property(\"activities\");",
+									"    pm.expect(response).to.have.property(\"total\");",
+									"    pm.expect(response).to.have.property(\"page\");",
+									"    pm.expect(response).to.have.property(\"per_page\");",
+									"    pm.expect(response).to.have.property(\"total_pages\");",
+									"});",
+									"",
+									"pm.test(\"Activities is an array\", function () {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.activities).to.be.an(\"array\");",
+									"});",
+									"",
+									"pm.test(\"Pagination values are correct\", function () {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response.page).to.be.a(\"number\");",
+									"    pm.expect(response.per_page).to.be.a(\"number\");",
+									"    pm.expect(response.total).to.be.a(\"number\");",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "GET",
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/user/activity?page=1&per_page=20",
-							"host": ["{{base_url}}"],
-							"path": ["api", "user", "activity"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"activity"
+							],
 							"query": [
 								{
 									"key": "page",
-									"value": "1"
+									"value": "1",
+									"description": "Page number (default: 1)"
 								},
 								{
 									"key": "per_page",
-									"value": "20"
+									"value": "20",
+									"description": "Items per page (default: 20, max: 100)"
+								},
+								{
+									"key": "activity_type",
+									"value": "wallet_updated",
+									"description": "Filter by activity type (optional)",
+									"disabled": true
 								}
 							]
 						},
-						"description": "Get current user's activity history."
+						"description": "Get current user's activity history with pagination. Supports filtering by activity type."
 					},
 					"response": []
 				}
@@ -476,8 +648,14 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/blockchain/transactions",
-							"host": ["{{base_url}}"],
-							"path": ["api", "blockchain", "transactions"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"blockchain",
+								"transactions"
+							]
 						},
 						"description": "Submit a signed transaction to the blockchain."
 					},
@@ -490,8 +668,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/blockchain/transactions?limit=50",
-							"host": ["{{base_url}}"],
-							"path": ["api", "blockchain", "transactions"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"blockchain",
+								"transactions"
+							],
 							"query": [
 								{
 									"key": "limit",
@@ -510,8 +694,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/blockchain/transactions/:signature",
-							"host": ["{{base_url}}"],
-							"path": ["api", "blockchain", "transactions", ":signature"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"blockchain",
+								"transactions",
+								":signature"
+							],
 							"variable": [
 								{
 									"key": "signature",
@@ -539,8 +730,15 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/blockchain/programs/:name",
-							"host": ["{{base_url}}"],
-							"path": ["api", "blockchain", "programs", ":name"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"blockchain",
+								"programs",
+								":name"
+							],
 							"variable": [
 								{
 									"key": "name",
@@ -559,8 +757,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/blockchain/accounts/:address",
-							"host": ["{{base_url}}"],
-							"path": ["api", "blockchain", "accounts", ":address"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"blockchain",
+								"accounts",
+								":address"
+							],
 							"variable": [
 								{
 									"key": "address",
@@ -579,8 +784,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/blockchain/network",
-							"host": ["{{base_url}}"],
-							"path": ["api", "blockchain", "network"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"blockchain",
+								"network"
+							]
 						},
 						"description": "Get Solana network status and statistics."
 					},
@@ -593,8 +804,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/blockchain/users/:wallet_address",
-							"host": ["{{base_url}}"],
-							"path": ["api", "blockchain", "users", ":wallet_address"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"blockchain",
+								"users",
+								":wallet_address"
+							],
 							"variable": [
 								{
 									"key": "wallet_address",
@@ -628,8 +846,14 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/oracle/prices",
-							"host": ["{{base_url}}"],
-							"path": ["api", "oracle", "prices"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"oracle",
+								"prices"
+							]
 						},
 						"description": "Submit energy price data to oracle (admin/oracle role)."
 					},
@@ -642,8 +866,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/oracle/prices/current",
-							"host": ["{{base_url}}"],
-							"path": ["api", "oracle", "prices", "current"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"oracle",
+								"prices",
+								"current"
+							]
 						},
 						"description": "Get current energy prices from oracle."
 					},
@@ -656,8 +887,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/oracle/data",
-							"host": ["{{base_url}}"],
-							"path": ["api", "oracle", "data"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"oracle",
+								"data"
+							]
 						},
 						"description": "Get complete oracle data and statistics."
 					},
@@ -676,8 +913,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/governance/status",
-							"host": ["{{base_url}}"],
-							"path": ["api", "governance", "status"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"governance",
+								"status"
+							]
 						},
 						"description": "Get current governance status and configuration."
 					},
@@ -690,8 +933,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/governance/emergency-pause",
-							"host": ["{{base_url}}"],
-							"path": ["api", "governance", "emergency-pause"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"governance",
+								"emergency-pause"
+							]
 						},
 						"description": "Emergency pause all platform operations (admin only)."
 					},
@@ -704,8 +953,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/governance/emergency-unpause",
-							"host": ["{{base_url}}"],
-							"path": ["api", "governance", "emergency-unpause"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"governance",
+								"emergency-unpause"
+							]
 						},
 						"description": "Resume platform operations (admin only)."
 					},
@@ -733,8 +988,14 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/trading/orders",
-							"host": ["{{base_url}}"],
-							"path": ["api", "trading", "orders"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"trading",
+								"orders"
+							]
 						},
 						"description": "Create a new trading order."
 					},
@@ -747,8 +1008,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/trading/orders?status=active",
-							"host": ["{{base_url}}"],
-							"path": ["api", "trading", "orders"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"trading",
+								"orders"
+							],
 							"query": [
 								{
 									"key": "status",
@@ -767,8 +1034,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/market/orderbook",
-							"host": ["{{base_url}}"],
-							"path": ["api", "market", "orderbook"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"market",
+								"orderbook"
+							]
 						},
 						"description": "Get current market data and order book."
 					},
@@ -781,8 +1054,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/market/stats",
-							"host": ["{{base_url}}"],
-							"path": ["api", "market", "stats"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"market",
+								"stats"
+							]
 						},
 						"description": "Get trading statistics and volumes."
 					},
@@ -795,8 +1074,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/trading/market/blockchain",
-							"host": ["{{base_url}}"],
-							"path": ["api", "trading", "market", "blockchain"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"trading",
+								"market",
+								"blockchain"
+							]
 						},
 						"description": "Get market data from blockchain trading program."
 					},
@@ -818,8 +1104,15 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/trading/orders/blockchain",
-							"host": ["{{base_url}}"],
-							"path": ["api", "trading", "orders", "blockchain"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"trading",
+								"orders",
+								"blockchain"
+							]
 						},
 						"description": "Create order directly on blockchain."
 					},
@@ -838,8 +1131,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/tokens/balance/:wallet_address",
-							"host": ["{{base_url}}"],
-							"path": ["api", "tokens", "balance", ":wallet_address"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"tokens",
+								"balance",
+								":wallet_address"
+							],
 							"variable": [
 								{
 									"key": "wallet_address",
@@ -858,8 +1158,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/tokens/info",
-							"host": ["{{base_url}}"],
-							"path": ["api", "tokens", "info"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"tokens",
+								"info"
+							]
 						},
 						"description": "Get energy token information and metadata."
 					},
@@ -881,8 +1187,14 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/tokens/mint-from-reading",
-							"host": ["{{base_url}}"],
-							"path": ["api", "tokens", "mint-from-reading"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"tokens",
+								"mint-from-reading"
+							]
 						},
 						"description": "Mint tokens from a meter reading."
 					},
@@ -910,8 +1222,14 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/meters/submit-reading",
-							"host": ["{{base_url}}"],
-							"path": ["api", "meters", "submit-reading"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"meters",
+								"submit-reading"
+							]
 						},
 						"description": "Submit new energy meter reading (Prosumer role)."
 					},
@@ -924,8 +1242,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/meters/my-readings?page=1&limit=20",
-							"host": ["{{base_url}}"],
-							"path": ["api", "meters", "my-readings"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"meters",
+								"my-readings"
+							],
 							"query": [
 								{
 									"key": "page",
@@ -948,8 +1272,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/meters/readings/:wallet_address",
-							"host": ["{{base_url}}"],
-							"path": ["api", "meters", "readings", ":wallet_address"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"meters",
+								"readings",
+								":wallet_address"
+							],
 							"variable": [
 								{
 									"key": "wallet_address",
@@ -968,8 +1299,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/meters/stats",
-							"host": ["{{base_url}}"],
-							"path": ["api", "meters", "stats"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"meters",
+								"stats"
+							]
 						},
 						"description": "Get current user's energy statistics."
 					},
@@ -997,8 +1334,14 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/erc/issue",
-							"host": ["{{base_url}}"],
-							"path": ["api", "erc", "issue"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"erc",
+								"issue"
+							]
 						},
 						"description": "Issue new Energy Renewable Certificate."
 					},
@@ -1011,8 +1354,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/erc/my-certificates?status=active",
-							"host": ["{{base_url}}"],
-							"path": ["api", "erc", "my-certificates"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"erc",
+								"my-certificates"
+							],
 							"query": [
 								{
 									"key": "status",
@@ -1031,8 +1380,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/erc/my-stats",
-							"host": ["{{base_url}}"],
-							"path": ["api", "erc", "my-stats"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"erc",
+								"my-stats"
+							]
 						},
 						"description": "Get current user's certificate statistics."
 					},
@@ -1045,8 +1400,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/erc/:certificate_id",
-							"host": ["{{base_url}}"],
-							"path": ["api", "erc", ":certificate_id"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"erc",
+								":certificate_id"
+							],
 							"variable": [
 								{
 									"key": "certificate_id",
@@ -1074,8 +1435,15 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/erc/:certificate_id/retire",
-							"host": ["{{base_url}}"],
-							"path": ["api", "erc", ":certificate_id", "retire"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"erc",
+								":certificate_id",
+								"retire"
+							],
 							"variable": [
 								{
 									"key": "certificate_id",
@@ -1094,8 +1462,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/erc/wallet/:wallet_address",
-							"host": ["{{base_url}}"],
-							"path": ["api", "erc", "wallet", ":wallet_address"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"erc",
+								"wallet",
+								":wallet_address"
+							],
 							"variable": [
 								{
 									"key": "wallet_address",
@@ -1120,8 +1495,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/market-data/depth",
-							"host": ["{{base_url}}"],
-							"path": ["api", "market-data", "depth"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"market-data",
+								"depth"
+							]
 						},
 						"description": "Get order book depth data."
 					},
@@ -1134,8 +1515,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/market-data/depth-chart",
-							"host": ["{{base_url}}"],
-							"path": ["api", "market-data", "depth-chart"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"market-data",
+								"depth-chart"
+							]
 						},
 						"description": "Get market depth chart data."
 					},
@@ -1148,8 +1535,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/market-data/clearing-price",
-							"host": ["{{base_url}}"],
-							"path": ["api", "market-data", "clearing-price"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"market-data",
+								"clearing-price"
+							]
 						},
 						"description": "Get current clearing price data."
 					},
@@ -1162,8 +1555,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/market-data/trades/my-history",
-							"host": ["{{base_url}}"],
-							"path": ["api", "market-data", "trades", "my-history"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"market-data",
+								"trades",
+								"my-history"
+							]
 						},
 						"description": "Get current user's trade history."
 					},
@@ -1182,8 +1582,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/analytics/market",
-							"host": ["{{base_url}}"],
-							"path": ["api", "analytics", "market"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"analytics",
+								"market"
+							]
 						},
 						"description": "Get comprehensive market analytics."
 					},
@@ -1196,8 +1602,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/analytics/my-stats",
-							"host": ["{{base_url}}"],
-							"path": ["api", "analytics", "my-stats"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"analytics",
+								"my-stats"
+							]
 						},
 						"description": "Get current user's trading statistics."
 					},
@@ -1216,8 +1628,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/market/epoch",
-							"host": ["{{base_url}}"],
-							"path": ["api", "market", "epoch"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"market",
+								"epoch"
+							]
 						},
 						"description": "Get current epoch information."
 					},
@@ -1230,8 +1648,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/market/epoch/status",
-							"host": ["{{base_url}}"],
-							"path": ["api", "market", "epoch", "status"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"market",
+								"epoch",
+								"status"
+							]
 						},
 						"description": "Get epoch status information."
 					},
@@ -1244,8 +1669,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/admin/epochs",
-							"host": ["{{base_url}}"],
-							"path": ["api", "admin", "epochs"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"epochs"
+							]
 						},
 						"description": "Get epoch history (admin only)."
 					},
@@ -1258,8 +1689,16 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/admin/epochs/:epoch_id/trigger",
-							"host": ["{{base_url}}"],
-							"path": ["api", "admin", "epochs", ":epoch_id", "trigger"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"epochs",
+								":epoch_id",
+								"trigger"
+							],
 							"variable": [
 								{
 									"key": "epoch_id",
@@ -1293,8 +1732,14 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/meters/verify",
-							"host": ["{{base_url}}"],
-							"path": ["api", "meters", "verify"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"meters",
+								"verify"
+							]
 						},
 						"description": "Verify a new energy meter."
 					},
@@ -1307,8 +1752,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/meters/registered",
-							"host": ["{{base_url}}"],
-							"path": ["api", "meters", "registered"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"meters",
+								"registered"
+							]
 						},
 						"description": "Get list of registered meters."
 					},
@@ -1321,8 +1772,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/meters/verification-stats",
-							"host": ["{{base_url}}"],
-							"path": ["api", "meters", "verification-stats"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"meters",
+								"verification-stats"
+							]
 						},
 						"description": "Get meter verification statistics."
 					},
@@ -1335,8 +1792,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/meters/verification-health",
-							"host": ["{{base_url}}"],
-							"path": ["api", "meters", "verification-health"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"meters",
+								"verification-health"
+							]
 						},
 						"description": "Check meter verification system health."
 					},
@@ -1364,8 +1827,12 @@
 						],
 						"url": {
 							"raw": "{{base_url}}/ws",
-							"host": ["{{base_url}}"],
-							"path": ["ws"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ws"
+							]
 						},
 						"description": "General WebSocket connection for real-time updates."
 					},
@@ -1387,8 +1854,14 @@
 						],
 						"url": {
 							"raw": "{{base_url}}/api/market/ws",
-							"host": ["{{base_url}}"],
-							"path": ["api", "market", "ws"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"market",
+								"ws"
+							]
 						},
 						"description": "Market-specific WebSocket for trading updates."
 					},
@@ -1401,8 +1874,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/ws/stats",
-							"host": ["{{base_url}}"],
-							"path": ["ws", "stats"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"ws",
+								"stats"
+							]
 						},
 						"description": "Get WebSocket connection statistics."
 					},
@@ -1430,8 +1908,14 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/api/test/transactions",
-							"host": ["{{base_url}}"],
-							"path": ["api", "test", "transactions"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"test",
+								"transactions"
+							]
 						},
 						"description": "Create a test transaction for development."
 					},
@@ -1444,8 +1928,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/test/transactions/:signature",
-							"host": ["{{base_url}}"],
-							"path": ["api", "test", "transactions", ":signature"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"test",
+								"transactions",
+								":signature"
+							],
 							"variable": [
 								{
 									"key": "signature",
@@ -1464,8 +1955,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{base_url}}/api/test/statistics",
-							"host": ["{{base_url}}"],
-							"path": ["api", "test", "statistics"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"test",
+								"statistics"
+							]
 						},
 						"description": "Get testing environment statistics."
 					},
@@ -1487,8 +1984,14 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/users/:id",
-									"host": ["{{base_url}}"],
-									"path": ["api", "users", ":id"],
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"users",
+										":id"
+									],
 									"variable": [
 										{
 											"key": "id",
@@ -1516,8 +2019,14 @@
 								},
 								"url": {
 									"raw": "{{base_url}}/api/users/:id",
-									"host": ["{{base_url}}"],
-									"path": ["api", "users", ":id"],
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"users",
+										":id"
+									],
 									"variable": [
 										{
 											"key": "id",
@@ -1536,8 +2045,15 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/users/:id/deactivate",
-									"host": ["{{base_url}}"],
-									"path": ["api", "users", ":id", "deactivate"],
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"users",
+										":id",
+										"deactivate"
+									],
 									"variable": [
 										{
 											"key": "id",
@@ -1556,8 +2072,15 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/users/:id/reactivate",
-									"host": ["{{base_url}}"],
-									"path": ["api", "users", ":id", "reactivate"],
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"users",
+										":id",
+										"reactivate"
+									],
 									"variable": [
 										{
 											"key": "id",
@@ -1576,8 +2099,15 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/users/:id/activity",
-									"host": ["{{base_url}}"],
-									"path": ["api", "users", ":id", "activity"],
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"users",
+										":id",
+										"activity"
+									],
 									"variable": [
 										{
 											"key": "id",
@@ -1596,8 +2126,13 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/users?page=1&per_page=20&role=all",
-									"host": ["{{base_url}}"],
-									"path": ["api", "users"],
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"users"
+									],
 									"query": [
 										{
 											"key": "page",
@@ -1638,8 +2173,16 @@
 								},
 								"url": {
 									"raw": "{{base_url}}/api/admin/users/:id/update-role",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "users", ":id", "update-role"],
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"users",
+										":id",
+										"update-role"
+									],
 									"variable": [
 										{
 											"key": "id",
@@ -1663,8 +2206,15 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/admin/governance/emergency-pause",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "governance", "emergency-pause"]
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"governance",
+										"emergency-pause"
+									]
 								},
 								"description": "Emergency pause all platform operations (admin only)."
 							},
@@ -1677,8 +2227,15 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/admin/governance/unpause",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "governance", "unpause"]
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"governance",
+										"unpause"
+									]
 								},
 								"description": "Resume platform operations (admin only)."
 							},
@@ -1705,8 +2262,15 @@
 								},
 								"url": {
 									"raw": "{{base_url}}/api/admin/tokens/mint",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "tokens", "mint"]
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"tokens",
+										"mint"
+									]
 								},
 								"description": "Mint new energy tokens (admin only)."
 							},
@@ -1733,8 +2297,15 @@
 								},
 								"url": {
 									"raw": "{{base_url}}/api/admin/trading/match-orders",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "trading", "match-orders"]
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"trading",
+										"match-orders"
+									]
 								},
 								"description": "Manually trigger order matching (admin only)."
 							},
@@ -1747,8 +2318,15 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/admin/market/health",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "market", "health"]
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"market",
+										"health"
+									]
 								},
 								"description": "Get market health statistics (admin only)."
 							},
@@ -1761,8 +2339,15 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/admin/market/analytics",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "market", "analytics"]
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"market",
+										"analytics"
+									]
 								},
 								"description": "Get trading analytics (admin only)."
 							},
@@ -1784,8 +2369,15 @@
 								},
 								"url": {
 									"raw": "{{base_url}}/api/admin/market/control",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "market", "control"]
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"market",
+										"control"
+									]
 								},
 								"description": "Control market operations (admin only)."
 							},
@@ -1803,8 +2395,15 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/admin/meters/unminted?limit=50",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "meters", "unminted"],
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"meters",
+										"unminted"
+									],
 									"query": [
 										{
 											"key": "limit",
@@ -1832,8 +2431,15 @@
 								},
 								"url": {
 									"raw": "{{base_url}}/api/admin/meters/mint-from-reading",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "meters", "mint-from-reading"]
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"meters",
+										"mint-from-reading"
+									]
 								},
 								"description": "Mint tokens from meter reading (admin only)."
 							},
@@ -1851,8 +2457,16 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/admin/audit/user/:user_id",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "audit", "user", ":user_id"],
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"audit",
+										"user",
+										":user_id"
+									],
 									"variable": [
 										{
 											"key": "user_id",
@@ -1871,8 +2485,16 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/admin/audit/type/:event_type",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "audit", "type", ":event_type"],
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"audit",
+										"type",
+										":event_type"
+									],
 									"variable": [
 										{
 											"key": "event_type",
@@ -1891,8 +2513,15 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/admin/audit/security",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "audit", "security"]
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"audit",
+										"security"
+									]
 								},
 								"description": "Get security events (admin only)."
 							},
@@ -1910,8 +2539,16 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/admin/epochs/:epoch_id/stats",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "epochs", ":epoch_id", "stats"],
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"epochs",
+										":epoch_id",
+										"stats"
+									],
 									"variable": [
 										{
 											"key": "epoch_id",
@@ -1930,8 +2567,14 @@
 								"header": [],
 								"url": {
 									"raw": "{{base_url}}/api/admin/epochs",
-									"host": ["{{base_url}}"],
-									"path": ["api", "admin", "epochs"]
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"epochs"
+									]
 								},
 								"description": "List all epochs (admin only)."
 							},
