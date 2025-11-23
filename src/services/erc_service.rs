@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+// Removed unused import: Digest
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,

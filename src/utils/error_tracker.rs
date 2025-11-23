@@ -1,9 +1,9 @@
+use crate::error::ErrorCode;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc};
-use crate::error::ErrorCode;
 
 /// Error tracking metrics
 #[derive(Debug, Clone, Serialize)]
@@ -47,6 +47,7 @@ impl ErrorTracker {
     }
 
     /// Track an error
+    #[allow(dead_code)]
     pub async fn track_error(
         &self,
         error_code: ErrorCode,
@@ -56,17 +57,20 @@ impl ErrorTracker {
         request_id: String,
     ) {
         let mut metrics = self.metrics.write().await;
-        
+
         // Increment total errors
         metrics.total_errors += 1;
-        
+
         // Track by error code
         let code_str = format!("{:?}", error_code);
         *metrics.errors_by_code.entry(code_str).or_insert(0) += 1;
-        
+
         // Track by endpoint
-        *metrics.errors_by_endpoint.entry(endpoint.clone()).or_insert(0) += 1;
-        
+        *metrics
+            .errors_by_endpoint
+            .entry(endpoint.clone())
+            .or_insert(0) += 1;
+
         // Add to last errors (keep only last N)
         let entry = ErrorEntry {
             timestamp: Utc::now(),
@@ -76,9 +80,9 @@ impl ErrorTracker {
             message,
             request_id,
         };
-        
+
         metrics.last_errors.push(entry);
-        
+
         // Keep only the last N errors
         if metrics.last_errors.len() > self.max_last_errors {
             metrics.last_errors.remove(0);
@@ -86,11 +90,13 @@ impl ErrorTracker {
     }
 
     /// Get current metrics
+    #[allow(dead_code)]
     pub async fn get_metrics(&self) -> ErrorMetrics {
         self.metrics.read().await.clone()
     }
 
     /// Get error rate for specific endpoint
+    #[allow(dead_code)]
     pub async fn get_endpoint_error_rate(&self, endpoint: &str) -> u64 {
         self.metrics
             .read()
@@ -102,6 +108,7 @@ impl ErrorTracker {
     }
 
     /// Get top error codes
+    #[allow(dead_code)]
     pub async fn get_top_error_codes(&self, limit: usize) -> Vec<(String, u64)> {
         let metrics = self.metrics.read().await;
         let mut codes: Vec<_> = metrics.errors_by_code.iter().collect();
@@ -114,6 +121,7 @@ impl ErrorTracker {
     }
 
     /// Get top error endpoints
+    #[allow(dead_code)]
     pub async fn get_top_error_endpoints(&self, limit: usize) -> Vec<(String, u64)> {
         let metrics = self.metrics.read().await;
         let mut endpoints: Vec<_> = metrics.errors_by_endpoint.iter().collect();
@@ -126,6 +134,7 @@ impl ErrorTracker {
     }
 
     /// Reset metrics
+    #[allow(dead_code)]
     pub async fn reset_metrics(&self) {
         let mut metrics = self.metrics.write().await;
         metrics.total_errors = 0;
@@ -135,6 +144,7 @@ impl ErrorTracker {
     }
 
     /// Get recent errors
+    #[allow(dead_code)]
     pub async fn get_recent_errors(&self, limit: usize) -> Vec<ErrorEntry> {
         let metrics = self.metrics.read().await;
         let start = if metrics.last_errors.len() > limit {
@@ -151,6 +161,7 @@ static ERROR_TRACKER: once_cell::sync::Lazy<ErrorTracker> =
     once_cell::sync::Lazy::new(|| ErrorTracker::new(100));
 
 /// Get the global error tracker
+#[allow(dead_code)]
 pub fn get_error_tracker() -> &'static ErrorTracker {
     &ERROR_TRACKER
 }

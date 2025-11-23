@@ -340,7 +340,7 @@ pub enum ValidationError {
     #[error("Amount cannot be negative")]
     NegativeAmount,
 
-    #[error("Amount {0} kWh exceeds maximum allowed {1} kWh")]
+    #[error("Amount {0} kWh exceeds maximum allowed value")]
     AmountTooHigh(f64),
 
     #[error("Amount exceeds maximum representable value")]
@@ -447,10 +447,12 @@ mod tests {
     #[test]
     fn test_config_from_env() {
         // Set some environment variables
-        env::set_var("TOKENIZATION_KWH_TO_TOKEN_RATIO", "2.5");
-        env::set_var("TOKENIZATION_DECIMALS", "18");
-        env::set_var("TOKENIZATION_MAX_READING_KWH", "200.0");
-        env::set_var("TOKENIZATION_AUTO_MINT_ENABLED", "false");
+        unsafe {
+            env::set_var("TOKENIZATION_KWH_TO_TOKEN_RATIO", "2.5");
+            env::set_var("TOKENIZATION_DECIMALS", "18");
+            env::set_var("TOKENIZATION_MAX_READING_KWH", "200.0");
+            env::set_var("TOKENIZATION_AUTO_MINT_ENABLED", "false");
+        }
 
         // Load config
         let config = TokenizationConfig::from_env().unwrap();
@@ -462,23 +464,29 @@ mod tests {
         assert!(!config.auto_mint_enabled);
 
         // Clean up
-        env::remove_var("TOKENIZATION_KWH_TO_TOKEN_RATIO");
-        env::remove_var("TOKENIZATION_DECIMALS");
-        env::remove_var("TOKENIZATION_MAX_READING_KWH");
-        env::remove_var("TOKENIZATION_AUTO_MINT_ENABLED");
+        unsafe {
+            env::remove_var("TOKENIZATION_KWH_TO_TOKEN_RATIO");
+            env::remove_var("TOKENIZATION_DECIMALS");
+            env::remove_var("TOKENIZATION_MAX_READING_KWH");
+            env::remove_var("TOKENIZATION_AUTO_MINT_ENABLED");
+        }
     }
 
     #[test]
     fn test_config_validation() {
         // Test invalid configuration
-        env::set_var("TOKENIZATION_POLLING_INTERVAL_SECS", "5"); // Too low
-        env::set_var("TOKENIZATION_AUTO_MINT_ENABLED", "true");
+        unsafe {
+            env::set_var("TOKENIZATION_POLLING_INTERVAL_SECS", "5"); // Too low
+            env::set_var("TOKENIZATION_AUTO_MINT_ENABLED", "true");
+        }
 
         // Should return an error
         assert!(TokenizationConfig::from_env().is_err());
 
         // Clean up
-        env::remove_var("TOKENIZATION_POLLING_INTERVAL_SECS");
-        env::remove_var("TOKENIZATION_AUTO_MINT_ENABLED");
+        unsafe {
+            env::remove_var("TOKENIZATION_POLLING_INTERVAL_SECS");
+            env::remove_var("TOKENIZATION_AUTO_MINT_ENABLED");
+        }
     }
 }

@@ -1,10 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
+use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
-use bigdecimal::BigDecimal;
 
 /// Smart meter reading data
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -52,7 +52,8 @@ impl MeterService {
         user_id: Uuid,
         request: SubmitMeterReadingRequest,
     ) -> Result<MeterReading> {
-        self.submit_reading_with_verification(user_id, request, None, "legacy_unverified").await
+        self.submit_reading_with_verification(user_id, request, None, "legacy_unverified")
+            .await
     }
 
     /// Submit a new meter reading with verification status
@@ -76,22 +77,23 @@ impl MeterService {
         }
 
         // Check for duplicate readings (same user, similar timestamp)
-        self.check_duplicate_reading(user_id, &request.reading_timestamp).await?;
+        self.check_duplicate_reading(user_id, &request.reading_timestamp)
+            .await?;
 
         // Insert reading into database
         let reading_id = Uuid::new_v4();
         let row = sqlx::query(
             r#"
             INSERT INTO meter_readings (
-                id, user_id, wallet_address, kwh_amount, 
+                id, user_id, wallet_address, kwh_amount,
                 reading_timestamp, submitted_at, minted, meter_id, verification_status
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            RETURNING 
-                id, user_id, wallet_address, 
-                kwh_amount, reading_timestamp, submitted_at, 
+            RETURNING
+                id, user_id, wallet_address,
+                kwh_amount, reading_timestamp, submitted_at,
                 minted, mint_tx_signature, meter_id, verification_status
-            "#
+            "#,
         )
         .bind(reading_id)
         .bind(user_id)
@@ -173,12 +175,12 @@ impl MeterService {
         minted_filter: Option<bool>,
     ) -> Result<Vec<MeterReading>> {
         // Build query with dynamic sorting and filtering
-        let query = if let Some(minted) = minted_filter {
-                format!(
+        let query = if let Some(_minted) = minted_filter {
+            format!(
                 r#"
-                SELECT 
-                    id, user_id, wallet_address, 
-                    kwh_amount, reading_timestamp, submitted_at, 
+                SELECT
+                    id, user_id, wallet_address,
+                    kwh_amount, reading_timestamp, submitted_at,
                     minted, mint_tx_signature, meter_id, verification_status
                 FROM meter_readings
                 WHERE user_id = $1 AND minted = $2
@@ -190,9 +192,9 @@ impl MeterService {
         } else {
             format!(
                 r#"
-                SELECT 
-                    id, user_id, wallet_address, 
-                    kwh_amount, reading_timestamp, submitted_at, 
+                SELECT
+                    id, user_id, wallet_address,
+                    kwh_amount, reading_timestamp, submitted_at,
                     minted, mint_tx_signature, meter_id, verification_status
                 FROM meter_readings
                 WHERE user_id = $1
@@ -222,20 +224,23 @@ impl MeterService {
                 .map_err(|e| anyhow!("Failed to fetch user readings: {}", e))?
         };
 
-        let readings: Result<Vec<MeterReading>, anyhow::Error> = rows.into_iter().map(|row| {
-            Ok(MeterReading {
-                id: row.get("id"),
-                user_id: row.get("user_id"),
-                wallet_address: row.get("wallet_address"),
-                kwh_amount: row.get("kwh_amount"),
-                reading_timestamp: row.get("reading_timestamp"),
-                submitted_at: row.get("submitted_at"),
-                minted: row.get("minted"),
-                mint_tx_signature: row.get("mint_tx_signature"),
-                meter_id: row.get("meter_id"),
-                verification_status: row.get("verification_status"),
+        let readings: Result<Vec<MeterReading>, anyhow::Error> = rows
+            .into_iter()
+            .map(|row| {
+                Ok(MeterReading {
+                    id: row.get("id"),
+                    user_id: row.get("user_id"),
+                    wallet_address: row.get("wallet_address"),
+                    kwh_amount: row.get("kwh_amount"),
+                    reading_timestamp: row.get("reading_timestamp"),
+                    submitted_at: row.get("submitted_at"),
+                    minted: row.get("minted"),
+                    mint_tx_signature: row.get("mint_tx_signature"),
+                    meter_id: row.get("meter_id"),
+                    verification_status: row.get("verification_status"),
+                })
             })
-        }).collect();
+            .collect();
 
         let readings = readings.map_err(|e| anyhow!("Failed to parse user readings: {}", e))?;
 
@@ -252,7 +257,7 @@ impl MeterService {
     ) -> Result<i64> {
         let count = if let Some(minted) = minted_filter {
             sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM meter_readings WHERE user_id = $1 AND minted = $2"
+                "SELECT COUNT(*) FROM meter_readings WHERE user_id = $1 AND minted = $2",
             )
             .bind(user_id)
             .bind(minted)
@@ -260,13 +265,11 @@ impl MeterService {
             .await
             .map_err(|e| anyhow!("Failed to count user readings: {}", e))?
         } else {
-            sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM meter_readings WHERE user_id = $1"
-            )
-            .bind(user_id)
-            .fetch_one(&self.db_pool)
-            .await
-            .map_err(|e| anyhow!("Failed to count user readings: {}", e))?
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM meter_readings WHERE user_id = $1")
+                .bind(user_id)
+                .fetch_one(&self.db_pool)
+                .await
+                .map_err(|e| anyhow!("Failed to count user readings: {}", e))?
         };
 
         Ok(count)
@@ -283,12 +286,12 @@ impl MeterService {
         minted_filter: Option<bool>,
     ) -> Result<Vec<MeterReading>> {
         // Build query with dynamic sorting and filtering
-        let query = if let Some(minted) = minted_filter {
+        let query = if let Some(_minted) = minted_filter {
             format!(
                 r#"
-                SELECT 
-                    id, user_id, wallet_address, 
-                    kwh_amount, reading_timestamp, submitted_at, 
+                SELECT
+                    id, user_id, wallet_address,
+                    kwh_amount, reading_timestamp, submitted_at,
                     minted, mint_tx_signature, meter_id, verification_status
                 FROM meter_readings
                 WHERE wallet_address = $1 AND minted = $2
@@ -300,9 +303,9 @@ impl MeterService {
         } else {
             format!(
                 r#"
-                SELECT 
-                    id, user_id, wallet_address, 
-                    kwh_amount, reading_timestamp, submitted_at, 
+                SELECT
+                    id, user_id, wallet_address,
+                    kwh_amount, reading_timestamp, submitted_at,
                     minted, mint_tx_signature, meter_id, verification_status
                 FROM meter_readings
                 WHERE wallet_address = $1
@@ -332,24 +335,31 @@ impl MeterService {
                 .map_err(|e| anyhow!("Failed to fetch wallet readings: {}", e))?
         };
 
-        let readings: Result<Vec<MeterReading>, anyhow::Error> = rows.into_iter().map(|row| {
-            Ok(MeterReading {
-                id: row.get("id"),
-                user_id: row.get("user_id"),
-                wallet_address: row.get("wallet_address"),
-                kwh_amount: row.get("kwh_amount"),
-                reading_timestamp: row.get("reading_timestamp"),
-                submitted_at: row.get("submitted_at"),
-                minted: row.get("minted"),
-                mint_tx_signature: row.get("mint_tx_signature"),
-                meter_id: row.get("meter_id"),
-                verification_status: row.get("verification_status"),
+        let readings: Result<Vec<MeterReading>, anyhow::Error> = rows
+            .into_iter()
+            .map(|row| {
+                Ok(MeterReading {
+                    id: row.get("id"),
+                    user_id: row.get("user_id"),
+                    wallet_address: row.get("wallet_address"),
+                    kwh_amount: row.get("kwh_amount"),
+                    reading_timestamp: row.get("reading_timestamp"),
+                    submitted_at: row.get("submitted_at"),
+                    minted: row.get("minted"),
+                    mint_tx_signature: row.get("mint_tx_signature"),
+                    meter_id: row.get("meter_id"),
+                    verification_status: row.get("verification_status"),
+                })
             })
-        }).collect();
+            .collect();
 
         let readings = readings.map_err(|e| anyhow!("Failed to parse wallet readings: {}", e))?;
 
-        debug!("Retrieved {} readings for wallet {}", readings.len(), wallet_address);
+        debug!(
+            "Retrieved {} readings for wallet {}",
+            readings.len(),
+            wallet_address
+        );
 
         Ok(readings)
     }
@@ -362,7 +372,7 @@ impl MeterService {
     ) -> Result<i64> {
         let count = if let Some(minted) = minted_filter {
             sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM meter_readings WHERE wallet_address = $1 AND minted = $2"
+                "SELECT COUNT(*) FROM meter_readings WHERE wallet_address = $1 AND minted = $2",
             )
             .bind(wallet_address)
             .bind(minted)
@@ -371,7 +381,7 @@ impl MeterService {
             .map_err(|e| anyhow!("Failed to count wallet readings: {}", e))?
         } else {
             sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM meter_readings WHERE wallet_address = $1"
+                "SELECT COUNT(*) FROM meter_readings WHERE wallet_address = $1",
             )
             .bind(wallet_address)
             .fetch_one(&self.db_pool)
@@ -386,35 +396,38 @@ impl MeterService {
     pub async fn get_unminted_readings(&self, limit: i64) -> Result<Vec<MeterReading>> {
         let rows = sqlx::query(
             r#"
-            SELECT 
-                id, user_id, wallet_address, 
-                kwh_amount, reading_timestamp, submitted_at, 
+            SELECT
+                id, user_id, wallet_address,
+                kwh_amount, reading_timestamp, submitted_at,
                 minted, mint_tx_signature, meter_id, verification_status
             FROM meter_readings
             WHERE minted = false
             ORDER BY submitted_at ASC
             LIMIT $1
-            "#
+            "#,
         )
         .bind(limit)
         .fetch_all(&self.db_pool)
         .await
         .map_err(|e| anyhow!("Failed to fetch unminted readings: {}", e))?;
 
-        let readings: Result<Vec<MeterReading>, anyhow::Error> = rows.into_iter().map(|row| {
-            Ok(MeterReading {
-                id: row.get("id"),
-                user_id: row.get("user_id"),
-                wallet_address: row.get("wallet_address"),
-                kwh_amount: row.get("kwh_amount"),
-                reading_timestamp: row.get("reading_timestamp"),
-                submitted_at: row.get("submitted_at"),
-                minted: row.get("minted"),
-                mint_tx_signature: row.get("mint_tx_signature"),
-                meter_id: row.get("meter_id"),
-                verification_status: row.get("verification_status"),
+        let readings: Result<Vec<MeterReading>, anyhow::Error> = rows
+            .into_iter()
+            .map(|row| {
+                Ok(MeterReading {
+                    id: row.get("id"),
+                    user_id: row.get("user_id"),
+                    wallet_address: row.get("wallet_address"),
+                    kwh_amount: row.get("kwh_amount"),
+                    reading_timestamp: row.get("reading_timestamp"),
+                    submitted_at: row.get("submitted_at"),
+                    minted: row.get("minted"),
+                    mint_tx_signature: row.get("mint_tx_signature"),
+                    meter_id: row.get("meter_id"),
+                    verification_status: row.get("verification_status"),
+                })
             })
-        }).collect();
+            .collect();
 
         let readings = readings.map_err(|e| anyhow!("Failed to parse unminted readings: {}", e))?;
         debug!("Retrieved {} unminted readings", readings.len());
@@ -433,11 +446,11 @@ impl MeterService {
             UPDATE meter_readings
             SET minted = true, mint_tx_signature = $2
             WHERE id = $1
-            RETURNING 
-                id, user_id, wallet_address, 
-                kwh_amount, reading_timestamp, submitted_at, 
+            RETURNING
+                id, user_id, wallet_address,
+                kwh_amount, reading_timestamp, submitted_at,
                 minted, mint_tx_signature, meter_id, verification_status
-            "#
+            "#,
         )
         .bind(reading_id)
         .bind(tx_signature)
@@ -470,13 +483,13 @@ impl MeterService {
     pub async fn get_reading_by_id(&self, reading_id: Uuid) -> Result<MeterReading> {
         let row = sqlx::query(
             r#"
-            SELECT 
-                id, user_id, wallet_address, 
-                kwh_amount, reading_timestamp, submitted_at, 
+            SELECT
+                id, user_id, wallet_address,
+                kwh_amount, reading_timestamp, submitted_at,
                 minted, mint_tx_signature, meter_id, verification_status
             FROM meter_readings
             WHERE id = $1
-            "#
+            "#,
         )
         .bind(reading_id)
         .fetch_optional(&self.db_pool)
@@ -548,10 +561,7 @@ impl MeterService {
         let max_kwh = BigDecimal::from(100);
         if request.kwh_amount > max_kwh {
             warn!("Unusually high kWh reading: {}", request.kwh_amount);
-            return Err(anyhow!(
-                "kWh amount exceeds maximum ({} kWh)",
-                max_kwh
-            ));
+            return Err(anyhow!("kWh amount exceeds maximum ({} kWh)", max_kwh));
         }
 
         // Timestamp validation

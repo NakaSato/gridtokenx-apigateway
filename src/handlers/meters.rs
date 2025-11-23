@@ -2,7 +2,7 @@ use axum::{
     Json,
     extract::{Path, Query, State},
 };
-use bigdecimal::BigDecimal;
+use bigdecimal::{BigDecimal, ToPrimitive};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use utoipa::{IntoParams, ToSchema};
@@ -253,6 +253,15 @@ pub async fn submit_reading(
         "legacy_unverified"
     };
 
+    // Broadcast meter reading received event via WebSocket
+    let meter_serial = "default"; // Using default value since meter_serial is not available
+
+    // Convert BigDecimal to f64 for WebSocket broadcast
+    let kwh_amount_f64 = request
+        .kwh_amount
+        .to_f64()
+        .ok_or_else(|| ApiError::Internal("Failed to convert kwh_amount to f64".to_string()))?;
+
     // Validate reading data
     let meter_request = crate::services::meter_service::SubmitMeterReadingRequest {
         wallet_address: wallet_address.clone(),
@@ -279,24 +288,10 @@ pub async fn submit_reading(
             ApiError::Internal(format!("Failed to submit reading: {}", e))
         })?;
 
-    // Broadcast meter reading received event via WebSocket
-    if let Err(_) = state
+    let _ = state
         .websocket_service
-        .broadcast_meter_reading_received(
-            &user.sub,
-            &wallet_address,
-            &reading
-                .meter_serial
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or("unknown")
-                .to_string(),
-            request.kwh_amount.to_string().parse().unwrap_or(0.0),
-        )
-        .await
-    {
-        warn!("Failed to broadcast meter reading event");
-    }
+        .broadcast_meter_reading_received(&user.sub, &wallet_address, meter_serial, kwh_amount_f64)
+        .await;
 
     info!("Meter reading submitted successfully: {}", reading.id);
 

@@ -638,6 +638,7 @@ impl IntoResponse for ApiError {
 }
 
 impl ApiError {
+    #[allow(dead_code)]
     fn error_type(&self) -> &'static str {
         match self {
             ApiError::Authentication(_) => "authentication_error",

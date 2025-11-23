@@ -4,7 +4,7 @@
 use anyhow::Result;
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
-use futures::TryFutureExt;
+// Removed unused import: TryFutureExt
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -378,7 +378,7 @@ impl SettlementService {
 
         let row = sqlx::query(
             r#"
-            SELECT 
+            SELECT
                 id, buyer_id, seller_id, energy_amount,
                 price_per_kwh, total_amount, fee_amount, net_amount,
                 status, transaction_hash, created_at, processed_at
@@ -406,11 +406,31 @@ impl SettlementService {
             trade_id: Uuid::new_v4(), // Not stored in this simplified version
             buyer_id: row.get("buyer_id"),
             seller_id: row.get("seller_id"),
-            energy_amount: row.get::<BigDecimal, _>("energy_amount").to_string().parse().unwrap_or(Decimal::ZERO),
-            price: row.get::<BigDecimal, _>("price_per_kwh").to_string().parse().unwrap_or(Decimal::ZERO),
-            total_value: row.get::<BigDecimal, _>("total_amount").to_string().parse().unwrap_or(Decimal::ZERO),
-            fee_amount: row.get::<BigDecimal, _>("fee_amount").to_string().parse().unwrap_or(Decimal::ZERO),
-            net_amount: row.get::<BigDecimal, _>("net_amount").to_string().parse().unwrap_or(Decimal::ZERO),
+            energy_amount: row
+                .get::<BigDecimal, _>("energy_amount")
+                .to_string()
+                .parse()
+                .unwrap_or(Decimal::ZERO),
+            price: row
+                .get::<BigDecimal, _>("price_per_kwh")
+                .to_string()
+                .parse()
+                .unwrap_or(Decimal::ZERO),
+            total_value: row
+                .get::<BigDecimal, _>("total_amount")
+                .to_string()
+                .parse()
+                .unwrap_or(Decimal::ZERO),
+            fee_amount: row
+                .get::<BigDecimal, _>("fee_amount")
+                .to_string()
+                .parse()
+                .unwrap_or(Decimal::ZERO),
+            net_amount: row
+                .get::<BigDecimal, _>("net_amount")
+                .to_string()
+                .parse()
+                .unwrap_or(Decimal::ZERO),
             status,
             blockchain_tx: row.get("transaction_hash"),
             created_at: row.get("created_at"),
@@ -543,7 +563,7 @@ impl SettlementService {
 
         let row = sqlx::query(
             r#"
-            SELECT 
+            SELECT
                 COUNT(*) FILTER (WHERE status = 'pending') as pending_count,
                 COUNT(*) FILTER (WHERE status = 'processing') as processing_count,
                 COUNT(*) FILTER (WHERE status = 'completed') as confirmed_count,
@@ -562,7 +582,11 @@ impl SettlementService {
             processing_count: row.get::<i64, _>("processing_count"),
             confirmed_count: row.get::<i64, _>("confirmed_count"),
             failed_count: row.get::<i64, _>("failed_count"),
-            total_settled_value: row.get::<BigDecimal, _>("total_settled_value").to_string().parse().unwrap_or(Decimal::ZERO),
+            total_settled_value: row
+                .get::<BigDecimal, _>("total_settled_value")
+                .to_string()
+                .parse()
+                .unwrap_or(Decimal::ZERO),
         })
     }
 }

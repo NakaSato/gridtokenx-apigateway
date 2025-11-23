@@ -7,7 +7,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::collections::{BTreeMap, HashMap};
-use std::str::FromStr;
+// Removed unused import: FromStr
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
@@ -540,8 +540,8 @@ impl MarketClearingEngine {
             ),
         >(
             r#"
-            SELECT 
-                id, user_id, side::text, energy_amount::text, 
+            SELECT
+                id, user_id, side::text, energy_amount::text,
                 price_per_kwh::text, filled_amount::text,
                 created_at, expires_at
             FROM trading_orders
@@ -899,9 +899,9 @@ impl MarketClearingEngine {
             // Update buy order with proper partial fill handling
             let buy_result = sqlx::query(
                 r#"
-                UPDATE trading_orders 
+                UPDATE trading_orders
                 SET filled_amount = filled_amount + $1,
-                    status = CASE 
+                    status = CASE
                         WHEN filled_amount + $1 >= energy_amount THEN 'Filled'::order_status
                         ELSE 'PartiallyFilled'::order_status
                     END,
@@ -933,9 +933,9 @@ impl MarketClearingEngine {
             // Update sell order with proper partial fill handling
             let sell_result = sqlx::query(
                 r#"
-                UPDATE trading_orders 
+                UPDATE trading_orders
                 SET filled_amount = filled_amount + $1,
-                    status = CASE 
+                    status = CASE
                         WHEN filled_amount + $1 >= energy_amount THEN 'Filled'::order_status
                         ELSE 'PartiallyFilled'::order_status
                     END,
@@ -1018,6 +1018,7 @@ impl MarketClearingEngine {
                     trade.quantity.to_string(),
                     trade.price.to_string(),
                     trade.total_value.to_string(),
+                    chrono::Utc::now().to_string(),
                 )
                 .await;
             }

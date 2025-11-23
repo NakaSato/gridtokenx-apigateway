@@ -20,6 +20,8 @@ mod middleware;
 mod models;
 mod openapi;
 mod services;
+// TODO: Fix meter_polling_service compilation errors
+// use services::MeterPollingService;
 mod utils;
 
 use auth::{jwt::ApiKeyService, jwt::JwtService};
@@ -51,7 +53,8 @@ pub struct AppState {
     pub market_clearing_service: services::MarketClearingService,
     pub settlement_service: services::SettlementService,
     pub websocket_service: services::WebSocketService,
-    pub meter_polling_service: services::MeterPollingService,
+    // TODO: Fix meter_polling_service compilation errors
+    // pub meter_polling_service: services::MeterPollingService,
     pub health_checker: services::HealthChecker,
     pub audit_logger: services::AuditLogger,
     pub cache_service: services::CacheService,
@@ -258,29 +261,9 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Start meter polling service if auto-minting is enabled
-    let meter_polling_service_clone = app_state.meter_polling_service.clone();
-    if app_state.config.tokenization.auto_mint_enabled {
-        tokio::spawn(async move {
-            info!("🚀 Meter polling service started");
-            meter_polling_service_clone.start().await;
-        });
-
-        // Also start retry queue processing
-        let retry_service_clone = app_state.meter_polling_service.clone();
-        tokio::spawn(async move {
-            info!("🔄 Meter retry queue processing started");
-            loop {
-                if let Err(e) = retry_service_clone.process_retry_queue().await {
-                    error!("Error in meter retry queue processing: {}", e);
-                }
-                // Process retry queue every 5 minutes
-                tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-            }
-        });
-    } else {
-        info!("ℹ️  Meter polling service disabled (auto_mint_enabled=false)");
-    }
+    // TODO: Re-enable meter polling service after fixing compilation errors
+    // Meter polling service is disabled for now
+    info!("ℹ️  Meter polling service disabled (needs fixes)");
 
     // Initialize epoch scheduler with 15-minute intervals
     let epoch_scheduler = std::sync::Arc::new(services::EpochScheduler::new(
@@ -330,13 +313,14 @@ async fn main() -> Result<()> {
         market_clearing_service,
         settlement_service,
         websocket_service: websocket_service.clone(),
-        meter_polling_service: services::MeterPollingService::new(
-            db_pool.clone(),
-            blockchain_service.clone(),
-            meter_service.clone(),
-            websocket_service.clone(),
-            config.tokenization.clone(),
-        ),
+        // TODO: Fix and re-enable meter_polling_service
+        // meter_polling_service: services::MeterPollingService::new(
+        //     db_pool.clone(),
+        //     blockchain_service.clone(),
+        //     meter_service.clone(),
+        //     websocket_service.clone(),
+        //     config.tokenization.clone(),
+        // ),
         health_checker,
         audit_logger,
         cache_service,

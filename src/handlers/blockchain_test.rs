@@ -10,11 +10,7 @@ use tracing::info;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::{
-    auth::middleware::AuthenticatedUser,
-    error::ApiError,
-    AppState,
-};
+use crate::{AppState, auth::middleware::AuthenticatedUser, error::ApiError};
 
 /// Test transaction request
 #[derive(Debug, Deserialize, ToSchema)]
@@ -46,7 +42,7 @@ pub struct TestStatisticsResponse {
 
 /// Create a test transaction
 /// POST /api/test/transactions
-/// 
+///
 /// For testing blockchain functionality in non-production environments
 #[utoipa::path(
     post,
@@ -62,7 +58,7 @@ pub struct TestStatisticsResponse {
     )
 )]
 pub async fn create_test_transaction(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<CreateTestTransactionRequest>,
 ) -> Result<Json<TestTransactionResponse>, ApiError> {
