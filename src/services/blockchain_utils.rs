@@ -70,43 +70,24 @@ impl BlockchainUtils {
         // Convert kWh to token amount (with 9 decimals)
         let amount_lamports = (amount_kwh * 1_000_000_000.0) as u64;
 
-        // Derive token_info PDA
-        let energy_token_program = Self::energy_token_program_id()?;
-        let (token_info_pda, _bump) =
-            Pubkey::find_program_address(&[b"token_info"], &energy_token_program);
-
-        info!("Token info PDA: {}", token_info_pda);
         info!("Mint: {}", mint);
         info!("Amount (lamports): {}", amount_lamports);
 
-        // Build the instruction data: discriminator (8 bytes) + amount (8 bytes)
-        // For Anchor, the discriminator is the first 8 bytes of sha256("global:mint_tokens_direct")
-        let mut instruction_data = Vec::with_capacity(16);
+        // Use SPL Token program directly
+        let token_program_id = spl_token::id();
 
-        // Calculate Anchor discriminator for "mint_tokens_direct"
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(b"global:mint_tokens_direct");
-        let hash = hasher.finalize();
-        instruction_data.extend_from_slice(&hash[0..8]);
+        // Create mint_to instruction
+        let instruction = spl_token::instruction::mint_to(
+            &token_program_id,
+            mint,
+            user_token_account,
+            &authority.pubkey(),
+            &[], // single signer
+            amount_lamports,
+        )
+        .map_err(|e| anyhow!("Failed to create mint instruction: {}", e))?;
 
-        // Add amount as u64 (little-endian)
-        instruction_data.extend_from_slice(&amount_lamports.to_le_bytes());
-
-        // Token program ID
-        let token_program_id = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
-            .expect("Valid token program ID");
-
-        // Build accounts for the instruction
-        let accounts = vec![
-            solana_sdk::instruction::AccountMeta::new(token_info_pda, false),
-            solana_sdk::instruction::AccountMeta::new(*mint, false),
-            solana_sdk::instruction::AccountMeta::new(*user_token_account, false),
-            solana_sdk::instruction::AccountMeta::new_readonly(authority.pubkey(), true),
-            solana_sdk::instruction::AccountMeta::new_readonly(token_program_id, false),
-        ];
-
-        Ok(Instruction::new_with_bytes(energy_token_program, &instruction_data, accounts))
+        Ok(instruction)
     }
 
     /// Ensures user has an Associated Token Account for the token mint
@@ -140,16 +121,15 @@ impl BlockchainUtils {
 
         // Accounts for the instruction
         let accounts = vec![
-            solana_sdk::instruction::AccountMeta::new(ata_address, false), // ATA account (writable)
-            solana_sdk::instruction::AccountMeta::new(*user_wallet, false), // Wallet owner
             solana_sdk::instruction::AccountMeta::new(authority.pubkey(), true), // Payer (signer)
-            solana_sdk::instruction::AccountMeta::new(*mint, false),       // Mint
+            solana_sdk::instruction::AccountMeta::new(ata_address, false), // ATA account (writable)
+            solana_sdk::instruction::AccountMeta::new_readonly(*user_wallet, false), // Wallet owner (readonly)
+            solana_sdk::instruction::AccountMeta::new_readonly(*mint, false), // Mint (readonly)
             solana_sdk::instruction::AccountMeta::new_readonly(
                 solana_sdk::pubkey!("11111111111111111111111111111111"),
                 false,
             ), // System program
             solana_sdk::instruction::AccountMeta::new_readonly(token_program_id, false), // Token program
-            solana_sdk::instruction::AccountMeta::new_readonly(ata_program_id, false), // ATA program
         ];
 
         Ok(Instruction {
@@ -205,7 +185,10 @@ impl BlockchainUtils {
         user_type: u8, // 0: Prosumer, 1: Consumer
         location: &str,
     ) -> Result<Instruction> {
-        info!("Creating register user instruction for: {}", authority.pubkey());
+        info!(
+            "Creating register user instruction for: {}",
+            authority.pubkey()
+        );
 
         let registry_program_id = Self::registry_program_id()?;
 
@@ -242,7 +225,11 @@ impl BlockchainUtils {
             ),
         ];
 
-        Ok(Instruction::new_with_bytes(registry_program_id, &instruction_data, accounts))
+        Ok(Instruction::new_with_bytes(
+            registry_program_id,
+            &instruction_data,
+            accounts,
+        ))
     }
 
     /// Register a meter on-chain
@@ -291,7 +278,11 @@ impl BlockchainUtils {
             ),
         ];
 
-        Ok(Instruction::new_with_bytes(registry_program_id, &instruction_data, accounts))
+        Ok(Instruction::new_with_bytes(
+            registry_program_id,
+            &instruction_data,
+            accounts,
+        ))
     }
 
     /// Submit meter reading on-chain (via Oracle)
@@ -302,7 +293,10 @@ impl BlockchainUtils {
         consumed: u64,
         timestamp: i64,
     ) -> Result<Instruction> {
-        info!("Creating submit meter reading instruction for: {}", meter_id);
+        info!(
+            "Creating submit meter reading instruction for: {}",
+            meter_id
+        );
 
         let oracle_program_id = Self::oracle_program_id()?;
         let registry_program_id = Self::registry_program_id()?;
@@ -332,7 +326,11 @@ impl BlockchainUtils {
             solana_sdk::instruction::AccountMeta::new_readonly(authority.pubkey(), true),
         ];
 
-        Ok(Instruction::new_with_bytes(oracle_program_id, &instruction_data, accounts))
+        Ok(Instruction::new_with_bytes(
+            oracle_program_id,
+            &instruction_data,
+            accounts,
+        ))
     }
 
     // Helper methods for program IDs
@@ -378,10 +376,10 @@ impl BlockchainUtils {
 /// Helper functions for transaction building
 pub mod transaction_utils {
     use super::*;
-    use solana_sdk::instruction::Instruction;
-    use solana_sdk::transaction::Transaction;
-    use solana_sdk::signature::Keypair;
     use solana_sdk::hash::Hash;
+    use solana_sdk::instruction::Instruction;
+    use solana_sdk::signature::Keypair;
+    use solana_sdk::transaction::Transaction;
 
     /// Build a transaction from instructions
     pub fn build_transaction(
