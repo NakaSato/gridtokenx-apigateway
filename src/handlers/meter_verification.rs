@@ -257,11 +257,9 @@ pub async fn verify_meter_handler(
         .await
         .map_err(|e| {
             error!("Meter verification failed: {}", e);
-            if e.to_string().contains("Rate limit exceeded") {
-                ApiError::RateLimitExceeded { retry_after_seconds: 3600 }
-            } else if e.to_string().contains("already registered") || 
-                     e.to_string().contains("already verified") ||
-                     e.to_string().contains("Meter key must be") {
+            if e.to_string().contains("already registered") || 
+               e.to_string().contains("already verified") ||
+               e.to_string().contains("Meter key must be") {
                 ApiError::BadRequest(e.to_string())
             } else {
                 ApiError::Internal(format!("Meter verification failed: {}", e))

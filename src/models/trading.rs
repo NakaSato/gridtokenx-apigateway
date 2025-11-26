@@ -1,14 +1,15 @@
+use crate::database::schema::types::{OrderSide, OrderStatus, OrderType};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::types::BigDecimal;
-use uuid::Uuid;
 use utoipa::ToSchema;
-use crate::database::schema::types::{OrderType, OrderSide, OrderStatus};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
 pub struct TradingOrder {
     pub id: Uuid,
     pub user_id: Uuid,
+    pub epoch_id: Option<Uuid>,
     pub order_type: OrderType,
     pub side: OrderSide,
     #[schema(value_type = f64)]
@@ -28,6 +29,7 @@ pub struct TradingOrder {
 pub struct TradingOrderDb {
     pub id: Uuid,
     pub user_id: Uuid,
+    pub epoch_id: Option<Uuid>,
     pub order_type: OrderType,
     pub side: OrderSide,
     pub energy_amount: BigDecimal,
@@ -42,15 +44,19 @@ pub struct TradingOrderDb {
 impl From<TradingOrderDb> for TradingOrder {
     fn from(db_order: TradingOrderDb) -> Self {
         use std::str::FromStr;
-        
+
         TradingOrder {
             id: db_order.id,
             user_id: db_order.user_id,
+            epoch_id: db_order.epoch_id,
             order_type: db_order.order_type,
             side: db_order.side,
-            energy_amount: rust_decimal::Decimal::from_str(&db_order.energy_amount.to_string()).unwrap_or_default(),
-            price_per_kwh: rust_decimal::Decimal::from_str(&db_order.price_per_kwh.to_string()).unwrap_or_default(),
-            filled_amount: rust_decimal::Decimal::from_str(&db_order.filled_amount.to_string()).unwrap_or_default(),
+            energy_amount: rust_decimal::Decimal::from_str(&db_order.energy_amount.to_string())
+                .unwrap_or_default(),
+            price_per_kwh: rust_decimal::Decimal::from_str(&db_order.price_per_kwh.to_string())
+                .unwrap_or_default(),
+            filled_amount: rust_decimal::Decimal::from_str(&db_order.filled_amount.to_string())
+                .unwrap_or_default(),
             status: db_order.status,
             expires_at: db_order.expires_at,
             created_at: db_order.created_at,

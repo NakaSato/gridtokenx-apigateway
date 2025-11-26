@@ -1972,7 +1972,239 @@
 			"description": "Testing and development endpoints"
 		},
 		{
-			"name": "16. Admin Operations",
+			"name": "16. Transaction Management",
+			"item": [
+				{
+					"name": "Get Transaction Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/transactions/:id/status",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"transactions",
+								":id",
+								"status"
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "transaction_id_here"
+								}
+							]
+						},
+						"description": "Get current status and details of a specific blockchain transaction"
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Transactions",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/transactions/user?operation_type=token_mint&limit=50&offset=0",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"transactions",
+								"user"
+							],
+							"query": [
+								{
+									"key": "operation_type",
+									"value": "token_mint",
+									"description": "Filter by operation type"
+								},
+								{
+									"key": "tx_type",
+									"value": "blockchain",
+									"description": "Filter by transaction type"
+								},
+								{
+									"key": "status",
+									"value": "pending",
+									"description": "Filter by status"
+								},
+								{
+									"key": "date_from",
+									"value": "2025-11-01T00:00:00Z",
+									"description": "Filter by start date (ISO 8601)"
+								},
+								{
+									"key": "date_to",
+									"value": "2025-11-30T23:59:59Z",
+									"description": "Filter by end date (ISO 8601)"
+								},
+								{
+									"key": "limit",
+									"value": "50",
+									"description": "Maximum results to return"
+								},
+								{
+									"key": "offset",
+									"value": "0",
+									"description": "Results to skip for pagination"
+								}
+							]
+						},
+						"description": "Get paginated list of transactions for authenticated user with filters"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Transaction History (Admin)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/transactions/history?limit=100&offset=0",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"transactions",
+								"history"
+							],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "",
+									"description": "Filter by user ID (admin only)"
+								},
+								{
+									"key": "operation_type",
+									"value": "",
+									"description": "Filter by operation type"
+								},
+								{
+									"key": "tx_type",
+									"value": "",
+									"description": "Filter by transaction type"
+								},
+								{
+									"key": "status",
+									"value": "",
+									"description": "Filter by status"
+								},
+								{
+									"key": "date_from",
+									"value": "",
+									"description": "Filter by start date (ISO 8601)"
+								},
+								{
+									"key": "date_to",
+									"value": "",
+									"description": "Filter by end date (ISO 8601)"
+								},
+								{
+									"key": "limit",
+									"value": "100",
+									"description": "Maximum results to return"
+								},
+								{
+									"key": "offset",
+									"value": "0",
+									"description": "Results to skip for pagination"
+								}
+							]
+						},
+						"description": "Get paginated list of all transactions (admin only)"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Transaction Statistics (Admin)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/v1/transactions/stats",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"transactions",
+								"stats"
+							]
+						},
+						"description": "Get transaction statistics including counts and success rates (admin only)"
+					},
+					"response": []
+				},
+				{
+					"name": "Retry Transaction",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Transaction retry initiated\", function () {",
+									"    const response = pm.response.json();",
+									"    pm.expect(response).to.have.property(\"success\");",
+									"    pm.expect(response).to.have.property(\"attempts\");",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"operation_type\": \"token_mint\",\n  \"max_attempts\": 3\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/transactions/:id/retry",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"transactions",
+								":id",
+								"retry"
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "failed_transaction_id_here"
+								}
+							]
+						},
+						"description": "Retry a failed blockchain transaction with optional attempt limit"
+					},
+					"response": []
+				}
+			],
+			"description": "Unified blockchain transaction tracking and management"
+		},
+		{
+			"name": "17. Admin Operations",
 			"item": [
 				{
 					"name": "User Management",
@@ -2098,7 +2330,7 @@
 								"method": "GET",
 								"header": [],
 								"url": {
-									"raw": "{{base_url}}/api/users/:id/activity",
+									"raw": "{{base_url}}/api/users/:id/activity?page=1&per_page=20",
 									"host": [
 										"{{base_url}}"
 									],
@@ -2113,6 +2345,16 @@
 											"key": "id",
 											"value": "{{user_id}}"
 										}
+									],
+									"query": [
+										{
+											"key": "page",
+											"value": "1"
+										},
+										{
+											"key": "per_page",
+											"value": "20"
+										}
 									]
 								},
 								"description": "Get user activity history (admin only)."
@@ -2125,7 +2367,7 @@
 								"method": "GET",
 								"header": [],
 								"url": {
-									"raw": "{{base_url}}/api/users?page=1&per_page=20&role=all",
+									"raw": "{{base_url}}/api/users?page=1&per_page=20&role=all&sort_by=created_at&sort_order=desc",
 									"host": [
 										"{{base_url}}"
 									],
@@ -2135,6 +2377,16 @@
 									],
 									"query": [
 										{
+											"key": "search",
+											"value": "",
+											"description": "Search term for username, email, first name, or last name"
+										},
+										{
+											"key": "role",
+											"value": "all",
+											"description": "Filter by role"
+										},
+										{
 											"key": "page",
 											"value": "1"
 										},
@@ -2143,12 +2395,18 @@
 											"value": "20"
 										},
 										{
-											"key": "role",
-											"value": "all"
+											"key": "sort_by",
+											"value": "created_at",
+											"description": "Sort field: created_at, username, email"
+										},
+										{
+											"key": "sort_order",
+											"value": "desc",
+											"description": "Sort direction: asc or desc"
 										}
 									]
 								},
-								"description": "List all users (admin only)."
+								"description": "List all users with search and pagination (admin only)."
 							},
 							"response": []
 						}
@@ -2583,9 +2841,518 @@
 					]
 				}
 			],
-			"description": "Administrative operations (admin role required)"
-		}
-	],
+		"description": "Administrative operations (admin role required)"
+	},
+	{
+		"name": "18. Enhanced Trading v1",
+		"item": [
+			{
+				"name": "Create Order v1",
+				"event": [
+					{
+						"listen": "test",
+						"script": {
+							"exec": [
+								"pm.test(\"Status code is 200\", function () {",
+								"    pm.response.to.have.status(200);",
+								"});",
+								"",
+								"pm.test(\"Order created successfully\", function () {",
+								"    const response = pm.response.json();",
+								"    pm.expect(response).to.have.property(\"id\");",
+								"    pm.expect(response).to.have.property(\"status\");",
+								"    pm.expect(response).to.have.property(\"created_at\");",
+								"});"
+							],
+							"type": "text/javascript"
+						}
+					}
+				],
+				"request": {
+					"method": "POST",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"body": {
+						"mode": "raw",
+						"raw": "{\n  \"energy_amount\": 100.5,\n  \"price_per_kwh\": 0.15,\n  \"order_type\": \"buy\",\n  \"expiry_time\": \"2025-11-20T12:00:00Z\"\n}"
+					},
+					"url": {
+						"raw": "{{base_url}}/api/v1/trading/orders",
+						"host": [
+							"{{base_url}}"
+						],
+						"path": [
+							"api",
+							"v1",
+							"trading",
+							"orders"
+						]
+					},
+					"description": "Create a new trading order with enhanced parameters (v1 API)"
+				},
+				"response": []
+			},
+			{
+				"name": "Get User Orders v1",
+				"request": {
+					"method": "GET",
+					"header": [],
+					"url": {
+						"raw": "{{base_url}}/api/v1/trading/orders?status=Pending&side=Buy&page=1&page_size=20&sort_by=created_at&sort_order=desc",
+						"host": [
+							"{{base_url}}"
+						],
+						"path": [
+							"api",
+							"v1",
+							"trading",
+							"orders"
+						],
+						"query": [
+							{
+								"key": "status",
+								"value": "Pending",
+								"description": "Filter by order status"
+							},
+							{
+								"key": "side",
+								"value": "Buy",
+								"description": "Filter by order side (buy/sell)"
+							},
+							{
+								"key": "page",
+								"value": "1",
+								"description": "Page number (1-indexed)"
+							},
+							{
+								"key": "page_size",
+								"value": "20",
+								"description": "Number of items per page (max 100)"
+							},
+							{
+								"key": "sort_by",
+								"value": "created_at",
+								"description": "Sort field: created_at, price_per_kwh, energy_amount"
+							},
+							{
+								"key": "sort_order",
+								"value": "desc",
+								"description": "Sort direction: asc or desc"
+							}
+						]
+					},
+					"description": "Get user's trading orders with advanced filtering (v1 API)"
+				},
+				"response": []
+			},
+			{
+				"name": "Get Market Data v1",
+				"request": {
+					"method": "GET",
+					"header": [],
+					"url": {
+						"raw": "{{base_url}}/api/v1/trading/market",
+						"host": [
+							"{{base_url}}"
+						],
+						"path": [
+							"api",
+							"v1",
+							"trading",
+							"market"
+						]
+					},
+					"description": "Get current market data including order book (v1 API)"
+				},
+				"response": []
+			},
+			{
+				"name": "Get Trading Stats v1",
+				"request": {
+					"method": "GET",
+					"header": [],
+					"url": {
+						"raw": "{{base_url}}/api/v1/trading/stats",
+						"host": [
+							"{{base_url}}"
+						],
+						"path": [
+							"api",
+							"v1",
+							"trading",
+							"stats"
+						]
+					},
+					"description": "Get trading statistics for authenticated user (v1 API)"
+				},
+				"response": []
+			}
+		],
+		"description": "Enhanced trading endpoints with v1 API structure"
+	},
+	{
+		"name": "19. Enhanced Blockchain v1",
+		"item": [
+			{
+				"name": "Get Account Info v1",
+				"request": {
+					"method": "GET",
+					"header": [],
+					"url": {
+						"raw": "{{base_url}}/api/v1/blockchain/accounts/:address",
+						"host": [
+							"{{base_url}}"
+						],
+						"path": [
+							"api",
+							"v1",
+							"blockchain",
+							"accounts",
+							":address"
+						],
+						"variable": [
+							{
+								"key": "address",
+								"value": "account_address_here"
+							}
+						]
+					},
+					"description": "Get blockchain account information (v1 API)"
+				},
+				"response": []
+			},
+			{
+				"name": "Get Network Status v1",
+				"request": {
+					"method": "GET",
+					"header": [],
+					"url": {
+						"raw": "{{base_url}}/api/v1/blockchain/network",
+						"host": [
+							"{{base_url}}"
+						],
+						"path": [
+							"api",
+							"v1",
+							"blockchain",
+							"network"
+						]
+					},
+					"description": "Get current blockchain network status (v1 API)"
+				},
+				"response": []
+			},
+			{
+				"name": "Interact with Program v1",
+				"event": [
+					{
+						"listen": "test",
+						"script": {
+							"exec": [
+								"pm.test(\"Status code is 200\", function () {",
+								"    pm.response.to.have.status(200);",
+								"});",
+								"",
+								"pm.test(\"Program interaction submitted\", function () {",
+								"    const response = pm.response.json();",
+								"    pm.expect(response).to.have.property(\"signature\");",
+								"    pm.expect(response).to.have.property(\"status\");",
+								"});"
+							],
+							"type": "text/javascript"
+						}
+					}
+				],
+				"request": {
+					"method": "POST",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"body": {
+						"mode": "raw",
+						"raw": "{\n  \"instruction\": \"transfer\",\n  \"accounts\": [\"account1\", \"account2\"],\n  \"data\": {\"amount\": 100},\n  \"compute_units\": 200000\n}"
+					},
+					"url": {
+						"raw": "{{base_url}}/api/v1/blockchain/programs/:name",
+						"host": [
+							"{{base_url}}"
+						],
+						"path": [
+							"api",
+							"v1",
+							"blockchain",
+							"programs",
+							":name"
+						],
+						"variable": [
+							{
+								"key": "name",
+								"value": "energy-token"
+							}
+						]
+					},
+					"description": "Interact with a specific smart contract program (v1 API)"
+				},
+				"response": []
+			},
+			{
+				"name": "Submit Transaction v1",
+				"request": {
+					"method": "POST",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"body": {
+						"mode": "raw",
+						"raw": "{\n  \"transaction\": \"base58_encoded_transaction\",\n  \"program_id\": \"energy-token\",\n  \"priority_fee\": 0.001,\n  \"compute_units\": 200000\n}"
+					},
+					"url": {
+						"raw": "{{base_url}}/api/v1/blockchain/transactions",
+						"host": [
+							"{{base_url}}"
+						],
+						"path": [
+							"api",
+							"v1",
+							"blockchain",
+							"transactions"
+						]
+					},
+					"description": "Submit a blockchain transaction with enhanced parameters (v1 API)"
+				},
+				"response": []
+			},
+			{
+				"name": "Get Transaction History v1",
+				"request": {
+					"method": "GET",
+					"header": [],
+					"url": {
+						"raw": "{{base_url}}/api/v1/blockchain/transactions?program_id=energy-token&status=confirmed&limit=50&offset=0",
+						"host": [
+							"{{base_url}}"
+						],
+						"path": [
+							"api",
+							"v1",
+							"blockchain",
+							"transactions"
+						],
+						"query": [
+							{
+								"key": "program_id",
+								"value": "energy-token",
+								"description": "Filter by program ID"
+							},
+							{
+								"key": "status",
+								"value": "confirmed",
+								"description": "Filter by transaction status"
+							},
+							{
+								"key": "start_time",
+								"value": "2025-11-01T00:00:00Z",
+								"description": "Filter by start time (ISO 8601)"
+							},
+							{
+								"key": "end_time",
+								"value": "2025-11-30T23:59:59Z",
+								"description": "Filter by end time (ISO 8601)"
+							},
+							{
+								"key": "limit",
+								"value": "50",
+								"description": "Maximum results to return"
+							},
+							{
+								"key": "offset",
+								"value": "0",
+								"description": "Results to skip for pagination"
+							}
+						]
+					},
+					"description": "Get transaction history for authenticated user (v1 API)"
+				},
+				"response": []
+			},
+			{
+				"name": "Get Transaction Status v1",
+				"request": {
+					"method": "GET",
+					"header": [],
+					"url": {
+						"raw": "{{base_url}}/api/v1/blockchain/transactions/:signature",
+						"host": [
+							"{{base_url}}"
+						],
+						"path": [
+							"api",
+							"v1",
+							"blockchain",
+							"transactions",
+							":signature"
+						],
+						"variable": [
+							{
+								"key": "signature",
+								"value": "transaction_signature_here"
+							}
+						]
+					},
+					"description": "Get specific transaction status by signature (v1 API)"
+				},
+				"response": []
+			}
+		],
+		"description": "Enhanced blockchain interaction endpoints with v1 API structure"
+	},
+	{
+		"name": "20. Enhanced Meter Endpoints",
+		"item": [
+			{
+				"name": "Submit Enhanced Reading",
+				"request": {
+					"method": "POST",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json"
+						}
+					],
+					"body": {
+						"mode": "raw",
+						"raw": "{\n  \"kwh_amount\": \"125.5\",\n  \"reading_timestamp\": \"2025-11-19T12:00:00Z\",\n  \"meter_signature\": \"base58_signature_here\",\n  \"meter_id\": \"METER-001\"\n}"
+					},
+					"url": {
+						"raw": "{{base_url}}/api/meters/submit-reading",
+						"host": [
+							"{{base_url}}"
+						],
+						"path": [
+							"api",
+							"meters",
+							"submit-reading"
+						]
+					},
+					"description": "Submit enhanced energy meter reading with signature support"
+				},
+				"response": []
+			},
+			{
+				"name": "Get My Enhanced Readings",
+				"request": {
+					"method": "GET",
+					"header": [],
+					"url": {
+						"raw": "{{base_url}}/api/meters/my-readings?page=1&page_size=20&sort_by=reading_timestamp&sort_order=desc&minted=false",
+						"host": [
+							"{{base_url}}"
+						],
+						"path": [
+							"api",
+							"meters",
+							"my-readings"
+						],
+						"query": [
+							{
+								"key": "page",
+								"value": "1",
+								"description": "Page number (1-indexed)"
+							},
+							{
+								"key": "page_size",
+								"value": "20",
+								"description": "Number of items per page (max 100)"
+							},
+							{
+								"key": "sort_by",
+								"value": "reading_timestamp",
+								"description": "Sort field: submitted_at, reading_timestamp, kwh_amount"
+							},
+							{
+								"key": "sort_order",
+								"value": "desc",
+								"description": "Sort direction: asc or desc"
+							},
+							{
+								"key": "minted",
+								"value": "false",
+								"description": "Filter by minted status"
+							}
+						]
+					},
+					"description": "Get current user's meter readings with enhanced filtering"
+				},
+				"response": []
+			},
+			{
+				"name": "Get Enhanced Readings by Wallet",
+				"request": {
+					"method": "GET",
+					"header": [],
+					"url": {
+						"raw": "{{base_url}}/api/meters/readings/:wallet_address?page=1&page_size=20&sort_by=reading_timestamp&sort_order=desc",
+						"host": [
+							"{{base_url}}"
+						],
+						"path": [
+							"api",
+							"meters",
+							"readings",
+							":wallet_address"
+						],
+						"variable": [
+							{
+								"key": "wallet_address",
+								"value": "{{wallet_address}}"
+							}
+						],
+						"query": [
+							{
+								"key": "page",
+								"value": "1",
+								"description": "Page number (1-indexed)"
+							},
+							{
+								"key": "page_size",
+								"value": "20",
+								"description": "Number of items per page (max 100)"
+							},
+							{
+								"key": "sort_by",
+								"value": "reading_timestamp",
+								"description": "Sort field: submitted_at, reading_timestamp, kwh_amount"
+							},
+							{
+								"key": "sort_order",
+								"value": "desc",
+								"description": "Sort direction: asc or desc"
+							},
+							{
+								"key": "minted",
+								"value": "",
+								"description": "Filter by minted status"
+							}
+						]
+					},
+					"description": "Get meter readings for specific wallet with enhanced filtering"
+				},
+				"response": []
+			}
+		],
+		"description": "Enhanced meter reading endpoints with advanced filtering"
+	}
+],
 	"variable": [
 		{
 			"key": "base_url",

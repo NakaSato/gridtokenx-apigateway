@@ -93,14 +93,9 @@ pub async fn get_token_balance(
         let wallet_bytes = wallet_pubkey.to_bytes();
         let mint_bytes = token_mint.to_bytes();
 
-        // Convert to spl_associated_token_account pubkey types
-        let wallet_spl =
-            spl_associated_token_account::solana_program::pubkey::Pubkey::new_from_array(
-                wallet_bytes,
-            );
-        let mint_spl = spl_associated_token_account::solana_program::pubkey::Pubkey::new_from_array(
-            mint_bytes,
-        );
+        // Use spl_token::solana_program for pubkey types
+        let wallet_spl = spl_token::solana_program::pubkey::Pubkey::new_from_array(wallet_bytes);
+        let mint_spl = spl_token::solana_program::pubkey::Pubkey::new_from_array(mint_bytes);
 
         let ata_spl =
             spl_associated_token_account::get_associated_token_address(&wallet_spl, &mint_spl);
@@ -515,14 +510,9 @@ pub async fn mint_from_reading(
         let wallet_bytes = wallet_pubkey.to_bytes();
         let mint_bytes = token_mint.to_bytes();
 
-        // Convert to spl_associated_token_account pubkey types
-        let wallet_spl =
-            spl_associated_token_account::solana_program::pubkey::Pubkey::new_from_array(
-                wallet_bytes,
-            );
-        let mint_spl = spl_associated_token_account::solana_program::pubkey::Pubkey::new_from_array(
-            mint_bytes,
-        );
+        // Use spl_associated_token_account with correct types
+        let wallet_spl = spl_token::solana_program::pubkey::Pubkey::new_from_array(wallet_bytes);
+        let mint_spl = spl_token::solana_program::pubkey::Pubkey::new_from_array(mint_bytes);
 
         let ata_spl =
             spl_associated_token_account::get_associated_token_address(&wallet_spl, &mint_spl);

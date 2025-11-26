@@ -7,6 +7,7 @@ use crate::error::ApiError as AppError;
 /// Transaction service for handling blockchain operations
 #[derive(Debug, Clone)]
 pub struct TransactionService {
+    #[allow(dead_code)]
     rpc_url: String,
 }
 
@@ -122,6 +123,7 @@ impl TransactionService {
     }
 
     /// Parse transaction from string
+    #[allow(dead_code)]
     fn parse_transaction(&self, transaction: &str) -> Result<Vec<u8>, AppError> {
         // Simplified implementation - would parse base64 or JSON
         if transaction.is_empty() {

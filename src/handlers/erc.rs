@@ -61,6 +61,7 @@ pub struct GetCertificatesQuery {
 fn default_page() -> u32 { 1 }
 fn default_page_size() -> u32 { 20 }
 fn default_sort_order() -> SortOrder { SortOrder::Desc }
+#[allow(dead_code)]
 fn default_limit() -> i64 { 50 }
 
 impl GetCertificatesQuery {

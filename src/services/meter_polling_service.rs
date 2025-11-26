@@ -23,10 +23,14 @@ pub struct MintResult {
 }
 
 /// Automated polling service for meter readings
+#[derive(Clone)]
 pub struct MeterPollingService {
+    #[allow(dead_code)]
     db: Arc<PgPool>,
+    #[allow(dead_code)]
     blockchain_service: Arc<BlockchainService>,
     meter_service: Arc<MeterService>,
+    #[allow(dead_code)]
     websocket_service: Arc<WebSocketService>,
     config: TokenizationConfig,
 }
@@ -167,10 +171,21 @@ impl MeterPollingService {
             return Err(crate::config::ValidationError::AmountTooHigh(kwh_amount));
         }
 
-        // Check verification status
+        // Check verification status - allow both verified and legacy_unverified
         if let Some(verification_status) = &reading.verification_status {
-            if verification_status != "verified" {
-                return Err(crate::config::ValidationError::InvalidConversion);
+            match verification_status.as_str() {
+                "verified" => {
+                    debug!("Processing verified reading: {}", reading.id);
+                }
+                "legacy_unverified" => {
+                    warn!(
+                        "Processing legacy unverified reading: {} - consider requiring meter verification",
+                        reading.id
+                    );
+                }
+                _ => {
+                    return Err(crate::config::ValidationError::InvalidConversion);
+                }
             }
         } else {
             return Err(crate::config::ValidationError::InvalidConversion);
@@ -199,11 +214,41 @@ impl MeterPollingService {
         // Calculate token amount
         let token_amount = self.config.kwh_to_tokens(kwh_amount);
 
-        // Create and submit transaction
-        // For now, we'll just return a mock signature
-        // In a real implementation, we would call the blockchain service
-        let mock_signature = "mock_signature".to_string();
-        let result: Result<String, ApiError> = Ok(mock_signature);
+        // Mint tokens - use real blockchain or mock based on configuration
+        let result: Result<String, ApiError> = if self.config.enable_real_blockchain {
+            // Real blockchain minting
+            info!(
+                "Minting {} tokens on blockchain for reading {}",
+                match token_amount {
+                    Ok(amount) => amount.to_string(),
+                    Err(_) => "conversion_error".to_string(),
+                },
+                reading.id
+            );
+
+            // TODO: Implement real blockchain call
+            // This requires:
+            // 1. Authority keypair
+            // 2. User's token account
+            // 3. Mint account
+            // 4. Proper account initialization
+            //
+            // Example implementation:
+            // self.blockchain_service
+            //     .mint_energy_tokens(&authority, &user_token_account, &mint, kwh_amount)
+            //     .await
+            //     .map(|sig| sig.to_string())
+            //     .map_err(|e| ApiError::Internal(format!("Blockchain minting failed: {}", e)))
+
+            // For now, return an error to indicate it's not implemented
+            Err(ApiError::Internal(
+                "Real blockchain minting not yet configured. Set TOKENIZATION_ENABLE_REAL_BLOCKCHAIN=false to use mock.".to_string()
+            ))
+        } else {
+            // Mock implementation for testing
+            debug!("Using mock blockchain signature for reading {}", reading.id);
+            Ok("mock_signature".to_string())
+        };
 
         match result {
             Ok(tx_signature) => {
@@ -324,6 +369,7 @@ mod tests {
             max_retry_delay_secs: 3600,
             transaction_timeout_secs: 60,
             max_transactions_per_batch: 20,
+            enable_real_blockchain: false, // Use mock for tests
         }
     }
 

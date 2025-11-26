@@ -68,10 +68,10 @@ pub struct ProgramInteractionRequest {
 }
 
 /// Submit a blockchain transaction
-/// POST /api/v1/blockchain/transactions
+/// POST /api/blockchain/transactions
 #[utoipa::path(
     post,
-    path = "/api/v1/blockchain/transactions",
+    path = "/api/blockchain/transactions",
     tag = "blockchain",
     request_body = TransactionSubmission,
     security(("bearer_auth" = [])),
@@ -132,11 +132,11 @@ pub async fn submit_transaction(
     Ok(Json(response))
 }
 
-/// Get transaction history for the authenticated user
-/// GET /api/v1/blockchain/transactions
+/// Get transaction history for authenticated user
+/// GET /api/blockchain/transactions
 #[utoipa::path(
     get,
-    path = "/api/v1/blockchain/transactions",
+    path = "/api/blockchain/transactions",
     tag = "blockchain",
     params(TransactionQuery),
     security(("bearer_auth" = [])),
@@ -201,10 +201,10 @@ pub async fn get_transaction_history(
 }
 
 /// Get specific transaction status by signature
-/// GET /api/v1/blockchain/transactions/:signature
+/// GET /api/blockchain/transactions/:signature
 #[utoipa::path(
     get,
-    path = "/api/v1/blockchain/transactions/{signature}",
+    path = "/api/blockchain/transactions/{signature}",
     tag = "blockchain",
     security(("bearer_auth" = [])),
     params(
@@ -257,10 +257,10 @@ pub async fn get_transaction_status(
 }
 
 /// Interact with a specific smart contract program
-/// POST /api/v1/blockchain/programs/:name
+/// POST /api/blockchain/programs/:name
 #[utoipa::path(
     post,
-    path = "/api/v1/blockchain/programs/{name}",
+    path = "/api/blockchain/programs/{name}",
     tag = "blockchain",
     request_body = ProgramInteractionRequest,
     security(("bearer_auth" = [])),
@@ -328,10 +328,10 @@ pub async fn interact_with_program(
 }
 
 /// Get account information for a given address
-/// GET /api/v1/blockchain/accounts/:address
+/// GET /api/blockchain/accounts/:address
 #[utoipa::path(
     get,
-    path = "/api/v1/blockchain/accounts/{address}",
+    path = "/api/blockchain/accounts/{address}",
     tag = "blockchain",
     security(("bearer_auth" = [])),
     params(
@@ -370,10 +370,10 @@ pub async fn get_account_info(
 }
 
 /// Get current network status
-/// GET /api/v1/blockchain/network
+/// GET /api/blockchain/network
 #[utoipa::path(
     get,
-    path = "/api/v1/blockchain/network",
+    path = "/api/blockchain/network",
     tag = "blockchain",
     security(("bearer_auth" = [])),
     responses(

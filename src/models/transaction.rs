@@ -3,12 +3,11 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use std::str::FromStr;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 /// Types of blockchain transactions
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, ToSchema, PartialEq, Eq)]
 #[sqlx(type_name = "varchar", rename_all = "snake_case")]
 pub enum TransactionType {
     EnergyTrade,
@@ -44,6 +43,20 @@ impl std::str::FromStr for TransactionType {
             "oracle_update" => Ok(Self::OracleUpdate),
             "registry_update" => Ok(Self::RegistryUpdate),
             _ => Err(format!("Unknown transaction type: {}", s)),
+        }
+    }
+}
+
+impl TransactionType {
+    /// Convert to string representation
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::EnergyTrade => "energy_trade",
+            Self::TokenMint => "token_mint",
+            Self::TokenTransfer => "token_transfer",
+            Self::GovernanceVote => "governance_vote",
+            Self::OracleUpdate => "oracle_update",
+            Self::RegistryUpdate => "registry_update",
         }
     }
 }
@@ -198,6 +211,7 @@ pub struct TransactionStats {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TransactionFilters {
     pub operation_type: Option<TransactionType>,
+    pub tx_type: Option<TransactionType>,
     pub status: Option<TransactionStatus>,
     pub user_id: Option<Uuid>,
     pub date_from: Option<DateTime<Utc>>,
@@ -212,6 +226,7 @@ impl Default for TransactionFilters {
     fn default() -> Self {
         Self {
             operation_type: None,
+            tx_type: None,
             status: None,
             user_id: None,
             date_from: None,
@@ -237,8 +252,9 @@ pub struct TransactionRetryRequest {
 pub struct TransactionRetryResponse {
     pub success: bool,
     pub attempts: i32,
-    pub new_signature: Option<String>,
-    pub message: String,
+    pub last_error: Option<String>,
+    pub signature: Option<String>,
+    pub status: TransactionStatus,
 }
 
 /// Transaction monitoring configuration
@@ -272,8 +288,10 @@ impl Default for TransactionMonitoringConfig {
 pub struct BlockchainOperation {
     pub operation_id: Uuid,
     pub operation_type: TransactionType,
+    pub tx_type: Option<String>,
     pub user_id: Option<Uuid>,
     pub status: TransactionStatus,
+    pub operation_status: Option<String>,
     pub signature: Option<String>,
     pub attempts: i32,
     pub last_error: Option<String>,
@@ -297,8 +315,10 @@ impl BlockchainOperation {
         Self {
             operation_id,
             operation_type,
+            tx_type: None,
             user_id,
             status: TransactionStatus::Pending,
+            operation_status: None,
             signature: None,
             attempts: 0,
             last_error: None,
@@ -373,6 +393,20 @@ pub struct OracleUpdatePayload {
 pub struct RegistryUpdatePayload {
     pub participant_id: String,
     pub update_data: serde_json::Value,
+}
+
+/// Trade record for energy trading transactions
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TradeRecord {
+    pub sell_order: String,
+    pub buy_order: String,
+    pub seller: String,
+    pub buyer: String,
+    pub amount: u64,
+    pub price_per_kwh: u64,
+    pub total_value: u64,
+    pub fee_amount: u64,
+    pub executed_at: i64,
 }
 
 /// Transaction validation error

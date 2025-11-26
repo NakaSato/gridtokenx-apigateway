@@ -1,0 +1,65 @@
+    Checking api-gateway v0.1.1 (/Users/chanthawat/Developments/weekend/gridtokenx-apigateway)
+warning: unused import: `std::str::FromStr`
+ --> src/error.rs:8:5
+  |
+8 | use std::str::FromStr;
+  |     ^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::sync::Arc`
+ --> src/handlers/dashboard.rs:4:5
+  |
+4 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `EncodedConfirmedTransactionWithStatusMeta`
+ --> src/services/event_processor_service.rs:5:33
+  |
+5 | use solana_transaction_status::{EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding};
+  |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Duration`
+ --> src/services/meter_verification_service.rs:3:24
+  |
+3 | use chrono::{DateTime, Duration, Utc};
+  |                        ^^^^^^^^
+
+error[E0599]: no variant or associated item named `InternalServerError` found for enum `ApiError` in the current scope
+   --> src/handlers/dashboard.rs:22:32
+    |
+ 22 |         .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
+    |                                ^^^^^^^^^^^^^^^^^^^ variant or associated item not found in `ApiError`
+    |
+   ::: src/error.rs:307:1
+    |
+307 | pub enum ApiError {
+    | ----------------- variant or associated item `InternalServerError` not found for this enum
+    |
+note: if you're trying to build a new `ApiError` consider using one of the following associated functions:
+      ApiError::with_code
+      ApiError::with_details
+      ApiError::validation_field
+      ApiError::validation_error
+      and 7 others
+   --> src/error.rs:367:5
+    |
+367 |       pub fn with_code(code: ErrorCode, message: impl Into<String>) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+372 | /     pub fn with_details(
+373 | |         code: ErrorCode,
+374 | |         message: impl Into<String>,
+375 | |         details: impl Into<String>,
+376 | |     ) -> Self {
+    | |_____________^
+...
+381 |       pub fn validation_field(field: impl Into<String>, message: impl Into<String>) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+390 |       pub fn validation_error(message: impl Into<String>, field: Option<&str>) -> Self {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `api-gateway` (lib) generated 4 warnings
+error: could not compile `api-gateway` (lib) due to 1 previous error; 4 warnings emitted

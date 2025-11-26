@@ -1,7 +1,7 @@
 // Metrics for transaction tracking
 // Provides metrics collection for transaction monitoring and performance analysis
 
-use crate::models::transaction::BlockchainTransactionType;
+use crate::models::transaction::TransactionType;
 use std::collections::HashMap;
 use std::sync::RwLock;
 use tokio::sync::OnceCell;
@@ -26,7 +26,7 @@ pub struct TransactionMetrics;
 
 impl TransactionMetrics {
     /// Record a new transaction submission
-    pub fn record_submission(tx_type: &BlockchainTransactionType) {
+    pub fn record_submission(tx_type: &TransactionType) {
         let tx_type_str = tx_type.to_string();
 
         // Increment pending counter
@@ -38,7 +38,7 @@ impl TransactionMetrics {
     }
 
     /// Record a transaction confirmation with duration
-    pub fn record_confirmation(tx_type: &BlockchainTransactionType, duration_seconds: f64) {
+    pub fn record_confirmation(tx_type: &TransactionType, duration_seconds: f64) {
         let tx_type_str = tx_type.to_string();
 
         // Decrement pending counter
@@ -57,7 +57,7 @@ impl TransactionMetrics {
     }
 
     /// Record a transaction failure
-    pub fn record_failure(tx_type: &BlockchainTransactionType, error_type: &str) {
+    pub fn record_failure(tx_type: &TransactionType, error_type: &str) {
         let tx_type_str = tx_type.to_string();
 
         // Decrement pending counter if it was pending
@@ -76,7 +76,7 @@ impl TransactionMetrics {
     }
 
     /// Record a retry attempt
-    pub fn record_retry(tx_type: &BlockchainTransactionType) {
+    pub fn record_retry(tx_type: &TransactionType) {
         let tx_type_str = tx_type.to_string();
         tracing::debug!("Recorded transaction retry for type: {}", tx_type_str);
     }
@@ -175,28 +175,34 @@ impl MetricsExporter {
 
         output
     }
+
+    /// Get structured transaction statistics
+    pub fn get_transaction_stats() -> HashMap<String, i64> {
+        let pending_counts = PENDING_TX_COUNTS.read().unwrap();
+        pending_counts.clone()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::transaction::BlockchainTransactionType;
+    use crate::models::transaction::TransactionType;
 
     #[test]
     fn test_metrics_recording() {
         init_metrics();
 
         // Test submission
-        TransactionMetrics::record_submission(&BlockchainTransactionType::Settlement);
+        TransactionMetrics::record_submission(&TransactionType::EnergyTrade);
 
         // Test confirmation
-        TransactionMetrics::record_confirmation(&BlockchainTransactionType::Settlement, 15.5);
+        TransactionMetrics::record_confirmation(&TransactionType::EnergyTrade, 15.5);
 
         // Test failure
-        TransactionMetrics::record_failure(&BlockchainTransactionType::Settlement, "network_error");
+        TransactionMetrics::record_failure(&TransactionType::EnergyTrade, "network_error");
 
         // Test retry
-        TransactionMetrics::record_retry(&BlockchainTransactionType::Settlement);
+        TransactionMetrics::record_retry(&TransactionType::EnergyTrade);
 
         // Check metrics collection
         let metrics = MetricsExporter::get_metrics();

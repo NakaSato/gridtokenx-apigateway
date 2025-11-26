@@ -3,7 +3,6 @@
 
 use anyhow::Result;
 use chrono::Utc;
-use serde_json::json;
 use sqlx::{PgPool, Row};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -12,23 +11,13 @@ use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::models::transaction::{
-    BlockchainOperation, CreateTransactionRequest, EnergyTradePayload, GovernanceVotePayload,
-    OracleUpdatePayload, OrderType, RegistryUpdatePayload, TokenMintPayload, TokenTransferPayload,
-    TransactionFilters, TransactionMonitoringConfig, TransactionPayload, TransactionResponse,
+    BlockchainOperation, TransactionFilters, TransactionMonitoringConfig, TransactionResponse,
     TransactionRetryRequest, TransactionRetryResponse, TransactionStats, TransactionStatus,
     TransactionType,
 };
 use crate::services::BlockchainService;
 use crate::services::settlement_service::SettlementService;
 use crate::services::validation::TransactionValidationService;
-use solana_sdk::{
-    instruction::Instruction,
-    pubkey::Pubkey,
-    signature::Signature,
-    signer::{Signer, keypair::Keypair},
-    transaction::Transaction,
-};
-use std::str;
 
 /// Transaction Coordinator for unified tracking and monitoring
 #[derive(Clone)]
@@ -36,6 +25,7 @@ pub struct TransactionCoordinator {
     db: PgPool,
     blockchain_service: Arc<BlockchainService>,
     settlement_service: Arc<SettlementService>,
+    #[allow(dead_code)]
     validation_service: Arc<TransactionValidationService>,
     config: TransactionMonitoringConfig,
 }
@@ -81,25 +71,18 @@ impl TransactionCoordinator {
     ) -> Result<TransactionResponse, ApiError> {
         let operation = self.get_blockchain_operation(operation_id).await?;
 
-        let tx_type = operation
-            .transaction_type()
-            .and_then(|result| result.ok())
-            .map(|tx_type| tx_type);
-
-        let status = operation.status().unwrap_or(TransactionStatus::Pending);
-
         Ok(TransactionResponse {
-            operation_type: operation.operation_type,
+            transaction_type: operation.operation_type,
             operation_id: operation.operation_id,
             user_id: operation.user_id,
-            tx_type,
-            status,
+            status: operation.status,
             signature: operation.signature,
             attempts: operation.attempts,
             last_error: operation.last_error,
             created_at: operation.created_at,
             submitted_at: operation.submitted_at,
             confirmed_at: operation.confirmed_at,
+            settled_at: None,
         })
     }
 
@@ -197,36 +180,18 @@ impl TransactionCoordinator {
         // Convert to TransactionResponse objects
         let mut responses = Vec::new();
         for operation in operations {
-            let tx_type = operation
-                .transaction_type()
-                .and_then(|result| result.ok())
-                .map(|tx_type| tx_type);
-
-            let status = operation.status().unwrap_or(TransactionStatus::Pending);
-
-            // Clone the operation before using it
-            let op_type = operation.operation_type.clone();
-            let op_id = operation.operation_id;
-            let op_user_id = operation.user_id;
-            let op_sig = operation.signature.clone();
-            let op_attempts = operation.attempts;
-            let op_last_error = operation.last_error.clone();
-            let op_created_at = operation.created_at;
-            let op_submitted_at = operation.submitted_at;
-            let op_confirmed_at = operation.confirmed_at;
-
             responses.push(TransactionResponse {
-                operation_type: op_type,
-                operation_id: op_id,
-                user_id: op_user_id,
-                tx_type,
-                status,
-                signature: op_sig,
-                attempts: op_attempts,
-                last_error: op_last_error,
-                created_at: op_created_at,
-                submitted_at: op_submitted_at,
-                confirmed_at: op_confirmed_at,
+                transaction_type: operation.operation_type,
+                operation_id: operation.operation_id,
+                user_id: operation.user_id,
+                status: operation.status,
+                signature: operation.signature,
+                attempts: operation.attempts,
+                last_error: operation.last_error,
+                created_at: operation.created_at,
+                submitted_at: operation.submitted_at,
+                confirmed_at: operation.confirmed_at,
+                settled_at: None,
             });
         }
 
@@ -297,6 +262,7 @@ impl TransactionCoordinator {
             submitted_count,
             confirmed_count,
             failed_count,
+            settled_count: 0, // Add settled_count tracking if needed
             processing_count,
             avg_confirmation_time_seconds: avg_seconds,
             success_rate,
@@ -345,9 +311,14 @@ impl TransactionCoordinator {
                     user_id: row.try_get("user_id")?,
                     signature: row.try_get("signature")?,
                     tx_type: row.try_get("tx_type")?,
+                    status: row.try_get::<Option<String>, _>("operation_status")?
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(TransactionStatus::Pending),
                     operation_status: row.try_get("operation_status")?,
                     attempts: row.try_get::<Option<i32>, _>("attempts")?.unwrap_or(0),
                     last_error: row.try_get("last_error")?,
+                    payload: serde_json::Value::Null,
+                    max_priority_fee: None,
                     submitted_at: row.try_get("submitted_at")?,
                     confirmed_at: row.try_get("confirmed_at")?,
                     created_at: row.try_get("created_at")?,
@@ -362,19 +333,30 @@ impl TransactionCoordinator {
 
         for operation in pending_operations {
             // Check if the transaction has been pending for too long
-            let pending_duration = operation
-                .time_since_submission_seconds()
-                .unwrap_or(operation.age_seconds());
+            let now = Utc::now();
+            let pending_duration = if let Some(submitted_at) = operation.submitted_at {
+                now.signed_duration_since(submitted_at).num_seconds()
+            } else {
+                now.signed_duration_since(operation.created_at).num_seconds()
+            };
 
-            if pending_duration > self.config.max_pending_duration_seconds as i64 {
+            if pending_duration > self.config.transaction_expiry_seconds as i64 {
                 warn!(
                     "Transaction {} ({}) has been pending for {} seconds, marking as failed",
                     operation.operation_id, operation.operation_type, pending_duration
                 );
 
-                // Mark as failed
+                // Mark as failed - determine table name from operation type
+                let table_name = match operation.operation_type {
+                    TransactionType::EnergyTrade => "energy_trades",
+                    TransactionType::TokenMint => "token_mints",
+                    TransactionType::TokenTransfer => "token_transfers",
+                    TransactionType::GovernanceVote => "governance_votes",
+                    TransactionType::OracleUpdate => "oracle_updates",
+                    TransactionType::RegistryUpdate => "registry_updates",
+                };
                 self.mark_transaction_failed(
-                    &operation.operation_type,
+                    table_name,
                     operation.operation_id,
                     Some("Transaction pending too long"),
                 )
@@ -385,7 +367,7 @@ impl TransactionCoordinator {
             }
 
             // Check transaction status if it has been submitted
-            if operation.is_submitted() {
+            if operation.status == TransactionStatus::Submitted && operation.signature.is_some() {
                 if let Some(signature) = &operation.signature {
                     // Parse signature
                     let signature = match solana_sdk::signature::Signature::from_str(signature) {
@@ -412,9 +394,17 @@ impl TransactionCoordinator {
                                 operation.operation_id, operation.operation_type
                             );
 
+                            let table_name = match operation.operation_type {
+                                TransactionType::EnergyTrade => "energy_trades",
+                                TransactionType::TokenMint => "token_mints",
+                                TransactionType::TokenTransfer => "token_transfers",
+                                TransactionType::GovernanceVote => "governance_votes",
+                                TransactionType::OracleUpdate => "oracle_updates",
+                                TransactionType::RegistryUpdate => "registry_updates",
+                            };
                             if self
                                 .mark_transaction_confirmed(
-                                    &operation.operation_type,
+                                    table_name,
                                     operation.operation_id,
                                     signature,
                                 )
@@ -430,9 +420,17 @@ impl TransactionCoordinator {
                                 operation.operation_id, operation.operation_type
                             );
 
+                            let table_name = match operation.operation_type {
+                                TransactionType::EnergyTrade => "energy_trades",
+                                TransactionType::TokenMint => "token_mints",
+                                TransactionType::TokenTransfer => "token_transfers",
+                                TransactionType::GovernanceVote => "governance_votes",
+                                TransactionType::OracleUpdate => "oracle_updates",
+                                TransactionType::RegistryUpdate => "registry_updates",
+                            };
                             if self
                                 .mark_transaction_failed(
-                                    &operation.operation_type,
+                                    table_name,
                                     operation.operation_id,
                                     Some("Transaction failed on blockchain"),
                                 )
@@ -506,9 +504,14 @@ impl TransactionCoordinator {
                     user_id: row.try_get("user_id")?,
                     signature: row.try_get("signature")?,
                     tx_type: row.try_get("tx_type")?,
+                    status: row.try_get::<Option<String>, _>("operation_status")?
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(TransactionStatus::Failed),
                     operation_status: row.try_get("operation_status")?,
                     attempts: row.try_get::<Option<i32>, _>("attempts")?.unwrap_or(0),
                     last_error: row.try_get("last_error")?,
+                    payload: serde_json::Value::Null,
+                    max_priority_fee: None,
                     submitted_at: row.try_get("submitted_at")?,
                     confirmed_at: row.try_get("confirmed_at")?,
                     created_at: row.try_get("created_at")?,
@@ -580,17 +583,19 @@ impl TransactionCoordinator {
         let op_type = operation.operation_type.clone();
         let op_attempts = operation.attempts;
         let op_sig = operation.signature.clone();
-        let op_status = operation.status().unwrap_or(TransactionStatus::Failed);
+        let op_status = operation.status.clone();
 
-        // Verify operation type matches
-        if op_type != request.operation_type {
-            return Ok(TransactionRetryResponse {
-                success: false,
-                attempts: op_attempts,
-                last_error: Some("Operation type mismatch".to_string()),
-                signature: op_sig.clone(),
-                status: op_status,
-            });
+        // Verify operation type matches if specified
+        if let Some(ref requested_type) = request.operation_type {
+            if op_type.as_str() != requested_type {
+                return Ok(TransactionRetryResponse {
+                    success: false,
+                    attempts: op_attempts,
+                    last_error: Some("Operation type mismatch".to_string()),
+                    signature: op_sig.clone(),
+                    status: op_status,
+                });
+            }
         }
 
         // Check if retry attempts exceeded
@@ -612,7 +617,7 @@ impl TransactionCoordinator {
         let op_type = operation.operation_type.clone();
         let op_attempts = operation.attempts;
         let op_sig = operation.signature.clone();
-        let op_status = operation.status().unwrap_or(TransactionStatus::Failed);
+        let op_status = operation.status.clone();
 
         // Route to appropriate service based on operation type
         match op_type.as_str() {
@@ -640,9 +645,7 @@ impl TransactionCoordinator {
         let updated_attempts = updated_operation.attempts;
         let updated_last_error = updated_operation.last_error.clone();
         let updated_sig = updated_operation.signature.clone();
-        let updated_status = updated_operation
-            .status()
-            .unwrap_or(TransactionStatus::Failed);
+        let updated_status = updated_operation.status.clone();
 
         Ok(TransactionRetryResponse {
             success: true,
@@ -689,9 +692,14 @@ impl TransactionCoordinator {
             user_id: row.get("user_id"),
             signature: row.get("signature"),
             tx_type: row.get("tx_type"),
+            status: row.get::<Option<String>, _>("operation_status")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(TransactionStatus::Pending),
             operation_status: row.get("operation_status"),
             attempts: row.get::<Option<i32>, _>("attempts").unwrap_or(0),
             last_error: row.get("last_error"),
+            payload: serde_json::Value::Null,
+            max_priority_fee: None,
             submitted_at: row.get("submitted_at"),
             confirmed_at: row.get("confirmed_at"),
             created_at: row.get("created_at"),
@@ -932,9 +940,14 @@ impl TransactionCoordinator {
                     user_id: row.try_get("user_id")?,
                     signature: row.try_get("signature")?,
                     tx_type: row.try_get("tx_type")?,
+                    status: row.try_get::<Option<String>, _>("operation_status")?
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(TransactionStatus::Pending),
                     operation_status: row.try_get("operation_status")?,
                     attempts: row.try_get::<Option<i32>, _>("attempts")?.unwrap_or(0),
                     last_error: row.try_get("last_error")?,
+                    payload: serde_json::Value::Null,
+                    max_priority_fee: None,
                     submitted_at: row.try_get("submitted_at")?,
                     confirmed_at: row.try_get("confirmed_at")?,
                     created_at: row.try_get("created_at")?,

@@ -1,11 +1,13 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc};
+
+use utoipa::ToSchema;
 
 /// System metrics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SystemMetrics {
     pub cpu_usage: Option<f64>,
     pub memory_used_mb: Option<u64>,
@@ -16,7 +18,7 @@ pub struct SystemMetrics {
 }
 
 /// Detailed health status with metrics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DetailedHealthStatus {
     pub status: String,
     pub timestamp: DateTime<Utc>,
@@ -28,7 +30,7 @@ pub struct DetailedHealthStatus {
 }
 
 /// Dependency health information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DependencyHealth {
     pub name: String,
     pub status: HealthCheckStatus,
@@ -38,7 +40,7 @@ pub struct DependencyHealth {
     pub details: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum HealthCheckStatus {
     Healthy,
@@ -58,11 +60,7 @@ pub struct HealthChecker {
 }
 
 impl HealthChecker {
-    pub fn new(
-        db_pool: sqlx::PgPool,
-        redis_client: redis::Client,
-        blockchain_url: String,
-    ) -> Self {
+    pub fn new(db_pool: sqlx::PgPool, redis_client: redis::Client, blockchain_url: String) -> Self {
         Self {
             start_time: Arc::new(Instant::now()),
             db_pool,
@@ -80,11 +78,8 @@ impl HealthChecker {
     /// Check database health
     async fn check_database(&self) -> DependencyHealth {
         let start = Instant::now();
-        
-        match sqlx::query("SELECT 1")
-            .fetch_one(&self.db_pool)
-            .await
-        {
+
+        match sqlx::query("SELECT 1").fetch_one(&self.db_pool).await {
             Ok(_) => DependencyHealth {
                 name: "PostgreSQL".to_string(),
                 status: HealthCheckStatus::Healthy,
@@ -107,7 +102,7 @@ impl HealthChecker {
     /// Check Redis health
     async fn check_redis(&self) -> DependencyHealth {
         let start = Instant::now();
-        
+
         match self.redis_client.get_multiplexed_async_connection().await {
             Ok(mut conn) => {
                 use redis::AsyncCommands;
@@ -144,7 +139,7 @@ impl HealthChecker {
     /// Check blockchain RPC health
     async fn check_blockchain(&self) -> DependencyHealth {
         let start = Instant::now();
-        
+
         match reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
             .build()
@@ -226,9 +221,15 @@ impl HealthChecker {
         let dependencies = vec![db_health, redis_health, blockchain_health];
 
         // Determine overall status
-        let overall_status = if dependencies.iter().all(|d| d.status == HealthCheckStatus::Healthy) {
+        let overall_status = if dependencies
+            .iter()
+            .all(|d| d.status == HealthCheckStatus::Healthy)
+        {
             "healthy"
-        } else if dependencies.iter().any(|d| d.status == HealthCheckStatus::Unhealthy) {
+        } else if dependencies
+            .iter()
+            .any(|d| d.status == HealthCheckStatus::Unhealthy)
+        {
             "unhealthy"
         } else {
             "degraded"

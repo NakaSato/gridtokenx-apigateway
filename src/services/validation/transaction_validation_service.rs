@@ -5,7 +5,7 @@ use crate::error::ApiError;
 use crate::models::transaction::{
     CreateTransactionRequest, EnergyTradePayload, GovernanceVotePayload, OracleUpdatePayload,
     RegistryUpdatePayload, TokenMintPayload, TokenTransferPayload, TransactionPayload,
-    TransactionType, ValidationError,
+    ValidationError,
 };
 use std::sync::Arc;
 use tracing::{debug, warn};
@@ -68,24 +68,54 @@ impl TransactionValidationService {
         }
 
         match &request.payload {
-            TransactionPayload::EnergyTrade(payload) => {
-                self.validate_energy_trade(request.user_id, payload).await
+            TransactionPayload::EnergyTrade { market_pubkey, energy_amount, price_per_kwh, order_type, erc_certificate_id } => {
+                let payload = EnergyTradePayload {
+                    market_pubkey: market_pubkey.clone(),
+                    energy_amount: *energy_amount,
+                    price_per_kwh: *price_per_kwh,
+                    order_type: order_type.clone(),
+                    erc_certificate_id: erc_certificate_id.clone(),
+                };
+                self.validate_energy_trade(request.user_id, &payload).await
             }
-            TransactionPayload::TokenMint(payload) => {
-                self.validate_token_mint(request.user_id, payload).await
+            TransactionPayload::TokenMint { recipient, amount } => {
+                let payload = TokenMintPayload {
+                    recipient: recipient.clone(),
+                    amount: *amount,
+                };
+                self.validate_token_mint(request.user_id, &payload).await
             }
-            TransactionPayload::TokenTransfer(payload) => {
-                self.validate_token_transfer(request.user_id, payload).await
+            TransactionPayload::TokenTransfer { from, to, amount, token_mint } => {
+                let payload = TokenTransferPayload {
+                    from: from.clone(),
+                    to: to.clone(),
+                    amount: *amount,
+                    token_mint: token_mint.clone(),
+                };
+                self.validate_token_transfer(request.user_id, &payload).await
             }
-            TransactionPayload::GovernanceVote(payload) => {
-                self.validate_governance_vote(request.user_id, payload)
+            TransactionPayload::GovernanceVote { proposal_id, vote } => {
+                let payload = GovernanceVotePayload {
+                    proposal_id: *proposal_id,
+                    vote: *vote,
+                };
+                self.validate_governance_vote(request.user_id, &payload)
                     .await
             }
-            TransactionPayload::OracleUpdate(payload) => {
-                self.validate_oracle_update(request.user_id, payload).await
+            TransactionPayload::OracleUpdate { price_feed_id, price, confidence } => {
+                let payload = OracleUpdatePayload {
+                    price_feed_id: price_feed_id.clone(),
+                    price: *price,
+                    confidence: *confidence,
+                };
+                self.validate_oracle_update(request.user_id, &payload).await
             }
-            TransactionPayload::RegistryUpdate(payload) => {
-                self.validate_registry_update(request.user_id, payload)
+            TransactionPayload::RegistryUpdate { participant_id, update_data } => {
+                let payload = RegistryUpdatePayload {
+                    participant_id: participant_id.clone(),
+                    update_data: update_data.clone(),
+                };
+                self.validate_registry_update(request.user_id, &payload)
                     .await
             }
         }
@@ -94,7 +124,7 @@ impl TransactionValidationService {
     /// Validate energy trade transaction
     async fn validate_energy_trade(
         &self,
-        user_id: Uuid,
+        _user_id: Uuid,
         payload: &EnergyTradePayload,
     ) -> Result<(), ValidationError> {
         // Validate energy amount
@@ -208,7 +238,7 @@ impl TransactionValidationService {
     /// Validate token transfer transaction
     async fn validate_token_transfer(
         &self,
-        user_id: Uuid,
+        _user_id: Uuid,
         payload: &TokenTransferPayload,
     ) -> Result<(), ValidationError> {
         // Validate addresses

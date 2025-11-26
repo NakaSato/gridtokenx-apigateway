@@ -132,6 +132,7 @@ async fn verify_api_key(state: &AppState, key: &str) -> Result<crate::auth::ApiK
     Err(ApiError::Unauthorized("Invalid API key".to_string()))
 }
 
+#[allow(dead_code)]
 #[derive(sqlx::FromRow)]
 struct ApiKeyRow {
     id: uuid::Uuid,

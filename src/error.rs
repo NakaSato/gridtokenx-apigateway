@@ -5,14 +5,16 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use thiserror::Error;
 use tracing::{error, warn};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 pub type Result<T> = std::result::Result<T, ApiError>;
 
 /// Error codes for categorizing errors
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, ToSchema)]
 pub enum ErrorCode {
     // Authentication errors (1xxx)
     #[serde(rename = "AUTH_1001")]
@@ -116,7 +118,7 @@ pub enum ErrorCode {
     #[serde(rename = "EXT_8005")]
     ServiceUnavailable,
 
-    // Rate limiting errors (9xxx)
+    // Rate Limiting (9xxx)
     #[serde(rename = "RATE_9001")]
     RateLimitExceeded,
     #[serde(rename = "RATE_9002")]
@@ -284,14 +286,14 @@ impl ErrorCode {
 }
 
 /// Structured error response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorResponse {
     pub error: ErrorDetail,
     pub request_id: String,
     pub timestamp: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorDetail {
     pub code: ErrorCode,
     pub code_number: u16,
@@ -299,8 +301,6 @@ pub struct ErrorDetail {
     pub details: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retry_after: Option<u64>,
 }
 
 #[derive(Debug, Error)]
@@ -343,15 +343,6 @@ pub enum ApiError {
 
     #[error("Conflict: {0}")]
     Conflict(String),
-
-    #[error("Rate limit exceeded")]
-    RateLimit,
-
-    #[error("Rate limit exceeded. Please wait {0} seconds before retrying")]
-    RateLimitWithRetry(i64),
-
-    #[error("Rate limit exceeded. Retry after {retry_after_seconds} seconds")]
-    RateLimitExceeded { retry_after_seconds: u64 },
 
     #[error("Internal server error: {0}")]
     Internal(String),
@@ -461,9 +452,6 @@ impl ApiError {
             ApiError::Validation(_) => ErrorCode::InvalidInput,
             ApiError::NotFound(_) => ErrorCode::NotFound,
             ApiError::Conflict(_) => ErrorCode::Conflict,
-            ApiError::RateLimit => ErrorCode::RateLimitExceeded,
-            ApiError::RateLimitWithRetry(_) => ErrorCode::RateLimitExceeded,
-            ApiError::RateLimitExceeded { .. } => ErrorCode::RateLimitExceeded,
             ApiError::Database(_) => ErrorCode::QueryFailed,
             ApiError::Redis(_) => ErrorCode::ExternalServiceError,
             ApiError::Blockchain(_) => ErrorCode::BlockchainTransactionFailed,
@@ -522,12 +510,6 @@ impl ApiError {
             | ApiError::WithCode(ErrorCode::Conflict, _)
             | ApiError::WithCode(ErrorCode::AlreadyExists, _) => StatusCode::CONFLICT,
 
-            ApiError::RateLimit
-            | ApiError::RateLimitWithRetry(_)
-            | ApiError::RateLimitExceeded { .. }
-            | ApiError::WithCode(ErrorCode::RateLimitExceeded, _)
-            | ApiError::WithCode(ErrorCode::TooManyRequests, _) => StatusCode::TOO_MANY_REQUESTS,
-
             ApiError::Blockchain(_)
             | ApiError::ExternalService(_)
             | ApiError::WithCode(ErrorCode::BlockchainConnectionFailed, _)
@@ -583,57 +565,18 @@ impl IntoResponse for ApiError {
                     ApiError::WithCode(_, msg) | ApiError::WithCodeAndDetails(_, msg, _) => {
                         msg.clone()
                     }
+                    ApiError::BadRequest(msg) => msg.clone(),
                     ApiError::ValidationWithField { message, .. } => message.clone(),
-                    ApiError::RateLimitWithRetry(seconds) => {
-                        format!(
-                            "Rate limit exceeded. Please wait {} seconds before retrying",
-                            seconds
-                        )
-                    }
-                    ApiError::RateLimitExceeded { .. } => code.message().to_string(),
                     _ => code.message().to_string(),
                 },
                 details: self.error_details(),
                 field: self.error_field(),
-                retry_after: match &self {
-                    ApiError::RateLimitWithRetry(seconds) => Some(*seconds as u64),
-                    ApiError::RateLimitExceeded {
-                        retry_after_seconds,
-                    } => Some(*retry_after_seconds),
-                    _ => None,
-                },
             },
             request_id,
             timestamp: chrono::Utc::now().to_rfc3339(),
         };
 
-        // Add Retry-After header for rate limit errors
-        let mut response = (status, Json(error_response)).into_response();
-        match &self {
-            ApiError::RateLimitWithRetry(seconds) => {
-                response.headers_mut().insert(
-                    "Retry-After",
-                    seconds
-                        .to_string()
-                        .parse()
-                        .expect("Failed to parse retry-after seconds"),
-                );
-            }
-            ApiError::RateLimitExceeded {
-                retry_after_seconds,
-            } => {
-                response.headers_mut().insert(
-                    "Retry-After",
-                    retry_after_seconds
-                        .to_string()
-                        .parse()
-                        .expect("Failed to parse retry-after seconds"),
-                );
-            }
-            _ => {}
-        }
-
-        response
+        (status, Json(error_response)).into_response()
     }
 }
 
@@ -654,9 +597,6 @@ impl ApiError {
             ApiError::Configuration(_) => "configuration_error",
             ApiError::NotFound(_) => "not_found",
             ApiError::Conflict(_) => "conflict",
-            ApiError::RateLimit => "rate_limit_exceeded",
-            ApiError::RateLimitWithRetry(_) => "rate_limit_exceeded",
-            ApiError::RateLimitExceeded { .. } => "rate_limit_exceeded",
             ApiError::Internal(_) => "internal_error",
             ApiError::WithCode(code, _) => match code {
                 ErrorCode::InvalidCredentials => "authentication_error",

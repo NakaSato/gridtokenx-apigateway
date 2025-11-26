@@ -8,6 +8,7 @@ use uuid::Uuid;
 /// Redis-based caching service for performance optimization
 #[derive(Clone)]
 pub struct CacheService {
+    #[allow(dead_code)]
     client: Client,
     connection_manager: ConnectionManager,
     default_ttl: u64, // Default TTL in seconds
@@ -243,15 +244,6 @@ impl CacheKeys {
         format!("token:balance:{}:{}", wallet_address, mint)
     }
 
-    /// Meter verification rate limit key
-    pub fn meter_verification_rate_limit(user_id: &Uuid) -> String {
-        format!("rate_limit:meter_verify:{}", user_id)
-    }
-
-    /// API rate limit key
-    pub fn api_rate_limit(ip: &str, endpoint: &str) -> String {
-        format!("rate_limit:api:{}:{}", ip, endpoint)
-    }
 
     /// Settlement cache key
     pub fn settlement(settlement_id: &Uuid) -> String {

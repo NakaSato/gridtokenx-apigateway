@@ -73,8 +73,10 @@ struct UserVerificationRecord {
     email: Option<String>,
     username: Option<String>,
     email_verified: bool,
+    #[allow(dead_code)]
     email_verification_token: Option<String>,
     email_verification_expires_at: Option<chrono::DateTime<Utc>>,
+    #[allow(dead_code)]
     wallet_address: Option<String>,
     role: Option<String>,
 }

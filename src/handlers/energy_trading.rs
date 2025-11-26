@@ -4,16 +4,17 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::types::BigDecimal;
 use sqlx::Row;
-use utoipa::{ToSchema, IntoParams};
+use sqlx::types::BigDecimal;
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::auth::middleware::AuthenticatedUser;
-use crate::error::{ApiError, Result};
-use crate::utils::{PaginationParams, PaginationMeta, SortOrder, validation::Validator};
 use crate::AppState;
+use crate::auth::middleware::AuthenticatedUser;
+use crate::database::schema::types::OrderSide;
+use crate::error::{ApiError, Result};
+use crate::utils::{PaginationMeta, PaginationParams, SortOrder, validation::Validator};
 
 // Helper to parse BigDecimal from string
 use std::str::FromStr;
@@ -35,16 +36,16 @@ impl CreateOrderRequest {
         if !["buy", "sell"].contains(&self.order_type.as_str()) {
             return Err(ApiError::validation_field(
                 "order_type",
-                "order_type must be 'buy' or 'sell'"
+                "order_type must be 'buy' or 'sell'",
             ));
         }
-        
+
         // Validate energy amount
         Validator::validate_energy_reading(self.energy_amount)?;
-        
+
         // Validate price
         Validator::validate_price(self.price_per_kwh)?;
-        
+
         Ok(())
     }
 }
@@ -98,9 +99,15 @@ pub struct OrderQuery {
     pub sort_order: SortOrder,
 }
 
-fn default_page() -> u32 { 1 }
-fn default_page_size() -> u32 { 20 }
-fn default_sort_order() -> SortOrder { SortOrder::Desc }
+fn default_page() -> u32 {
+    1
+}
+fn default_page_size() -> u32 {
+    20
+}
+fn default_sort_order() -> SortOrder {
+    SortOrder::Desc
+}
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct OrdersResponse {
@@ -135,9 +142,10 @@ pub async fn create_order(
     Json(payload): Json<CreateOrderRequest>,
 ) -> Result<Json<TradingOrder>> {
     // Validate struct constraints
-    payload.validate()
+    payload
+        .validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
-    
+
     // Validate business rules
     payload.validate_business_rules()?;
 
@@ -150,23 +158,49 @@ pub async fn create_order(
     let price_bd = BigDecimal::from_str(&payload.price_per_kwh.to_string())
         .map_err(|_| ApiError::BadRequest("Invalid price".to_string()))?;
 
+    // Determine order side based on payload
+    let order_side = match payload.order_type.as_str() {
+        "buy" => OrderSide::Buy,
+        "sell" => OrderSide::Sell,
+        _ => return Err(ApiError::BadRequest("Invalid order type".to_string())),
+    };
+
+    // Get or create current market epoch
+    let epoch = state
+        .market_clearing_service
+        .get_or_create_epoch(Utc::now())
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get/create epoch: {}", e);
+            ApiError::Internal(e.to_string())
+        })?;
+
+    // Set expiration to 24 hours from now
+    let expires_at = now + chrono::Duration::hours(24);
+
     sqlx::query(
         r#"
         INSERT INTO trading_orders (
-            id, user_id, order_type, energy_amount, price_per_kwh,
-            filled_amount, status, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, 0, 'pending', $6, $6)
+            id, user_id, order_type, side, energy_amount, price_per_kwh,
+            filled_amount, status, created_at, updated_at, epoch_id, expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, 0, 'pending', $7, $7, $8, $9)
         "#,
     )
     .bind(order_id)
     .bind(user.0.sub)
-    .bind(&payload.order_type)
+    .bind("limit")
+    .bind(order_side as OrderSide)
     .bind(energy_amount_bd)
     .bind(price_bd)
     .bind(now)
+    .bind(epoch.id)
+    .bind(expires_at)
     .execute(&state.db)
     .await
-    .map_err(|e| ApiError::Database(e))?;
+    .map_err(|e| {
+        tracing::error!("Failed to create trading order: {}", e);
+        ApiError::Database(e)
+    })?;
 
     // Trigger order matching engine
     tokio::spawn({
@@ -213,7 +247,7 @@ pub async fn list_orders(
 
     // Build WHERE conditions
     let mut where_conditions = vec!["1=1".to_string()];
-    
+
     if let Some(order_type) = &params.order_type {
         where_conditions.push(format!("order_type = '{}'", order_type));
     }
@@ -313,9 +347,7 @@ pub async fn list_orders(
         (status = 200, description = "Order book data"),
     )
 )]
-pub async fn get_orderbook(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>> {
+pub async fn get_orderbook(State(state): State<AppState>) -> Result<Json<serde_json::Value>> {
     // Get buy orders
     let buy_orders = sqlx::query(
         r#"
@@ -325,7 +357,7 @@ pub async fn get_orderbook(
         WHERE o.order_type = 'buy' AND o.status::TEXT = 'pending'
         ORDER BY o.price_per_kwh DESC, o.created_at ASC
         LIMIT 50
-        "#
+        "#,
     )
     .fetch_all(&state.db)
     .await
@@ -340,31 +372,37 @@ pub async fn get_orderbook(
         WHERE o.order_type = 'sell' AND o.status::TEXT = 'pending'
         ORDER BY o.price_per_kwh ASC, o.created_at ASC
         LIMIT 50
-        "#
+        "#,
     )
     .fetch_all(&state.db)
     .await
     .map_err(|e| ApiError::Database(e))?;
 
-    let buys: Vec<serde_json::Value> = buy_orders.iter().map(|row| {
-        let energy_amount: BigDecimal = row.get("energy_amount");
-        let price_per_kwh: BigDecimal = row.get("price_per_kwh");
-        serde_json::json!({
-            "energy_amount": energy_amount.to_string().parse::<f64>().unwrap_or(0.0),
-            "price_per_kwh": price_per_kwh.to_string().parse::<f64>().unwrap_or(0.0),
-            "username": row.get::<Option<String>, _>("username")
+    let buys: Vec<serde_json::Value> = buy_orders
+        .iter()
+        .map(|row| {
+            let energy_amount: BigDecimal = row.get("energy_amount");
+            let price_per_kwh: BigDecimal = row.get("price_per_kwh");
+            serde_json::json!({
+                "energy_amount": energy_amount.to_string().parse::<f64>().unwrap_or(0.0),
+                "price_per_kwh": price_per_kwh.to_string().parse::<f64>().unwrap_or(0.0),
+                "username": row.get::<Option<String>, _>("username")
+            })
         })
-    }).collect::<Vec<_>>();
+        .collect::<Vec<_>>();
 
-    let sells: Vec<serde_json::Value> = sell_orders.iter().map(|row| {
-        let energy_amount: BigDecimal = row.get("energy_amount");
-        let price_per_kwh: BigDecimal = row.get("price_per_kwh");
-        serde_json::json!({
-            "energy_amount": energy_amount.to_string().parse::<f64>().unwrap_or(0.0),
-            "price_per_kwh": price_per_kwh.to_string().parse::<f64>().unwrap_or(0.0),
-            "username": row.get::<Option<String>, _>("username")
+    let sells: Vec<serde_json::Value> = sell_orders
+        .iter()
+        .map(|row| {
+            let energy_amount: BigDecimal = row.get("energy_amount");
+            let price_per_kwh: BigDecimal = row.get("price_per_kwh");
+            serde_json::json!({
+                "energy_amount": energy_amount.to_string().parse::<f64>().unwrap_or(0.0),
+                "price_per_kwh": price_per_kwh.to_string().parse::<f64>().unwrap_or(0.0),
+                "username": row.get::<Option<String>, _>("username")
+            })
         })
-    }).collect::<Vec<_>>();
+        .collect::<Vec<_>>();
 
     Ok(Json(serde_json::json!({
         "buy_orders": buys,
@@ -383,9 +421,7 @@ pub async fn get_orderbook(
         (status = 200, description = "Market statistics", body = MarketStats),
     )
 )]
-pub async fn get_market_stats(
-    State(state): State<AppState>,
-) -> Result<Json<MarketStats>> {
+pub async fn get_market_stats(State(state): State<AppState>) -> Result<Json<MarketStats>> {
     // Get average price from recent matches
     let stats_row = sqlx::query(
         r#"
@@ -395,28 +431,34 @@ pub async fn get_market_stats(
             COUNT(*) as completed_matches
         FROM order_matches
         WHERE created_at > NOW() - INTERVAL '24 hours'
-        "#
+        "#,
     )
     .fetch_one(&state.db)
     .await
     .map_err(|e| ApiError::Database(e))?;
 
-    let avg_price: BigDecimal = stats_row.try_get("avg_price").unwrap_or(BigDecimal::from_str("0").unwrap());
-    let total_volume: BigDecimal = stats_row.try_get("total_volume").unwrap_or(BigDecimal::from_str("0").unwrap());
+    let avg_price: BigDecimal = stats_row
+        .try_get("avg_price")
+        .unwrap_or(BigDecimal::from_str("0").unwrap());
+    let total_volume: BigDecimal = stats_row
+        .try_get("total_volume")
+        .unwrap_or(BigDecimal::from_str("0").unwrap());
     let completed_matches: i64 = stats_row.try_get("completed_matches").unwrap_or(0);
 
     // Get active orders count
-    let active_orders_row = sqlx::query("SELECT COUNT(*) as count FROM trading_orders WHERE status::TEXT = 'active'")
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| ApiError::Database(e))?;
+    let active_orders_row =
+        sqlx::query("SELECT COUNT(*) as count FROM trading_orders WHERE status::TEXT = 'active'")
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| ApiError::Database(e))?;
     let active_orders: i64 = active_orders_row.try_get("count").unwrap_or(0);
 
     // Get pending orders count
-    let pending_orders_row = sqlx::query("SELECT COUNT(*) as count FROM trading_orders WHERE status::TEXT = 'pending'")
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| ApiError::Database(e))?;
+    let pending_orders_row =
+        sqlx::query("SELECT COUNT(*) as count FROM trading_orders WHERE status::TEXT = 'pending'")
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| ApiError::Database(e))?;
     let pending_orders: i64 = pending_orders_row.try_get("count").unwrap_or(0);
 
     Ok(Json(MarketStats {
@@ -427,4 +469,3 @@ pub async fn get_market_stats(
         completed_matches,
     }))
 }
-

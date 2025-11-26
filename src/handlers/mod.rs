@@ -4,6 +4,7 @@ pub mod audit;
 pub mod auth;
 pub mod blockchain;
 pub mod blockchain_test;
+pub mod dashboard;
 pub mod email_verification;
 pub mod energy_trading;
 pub mod epochs;

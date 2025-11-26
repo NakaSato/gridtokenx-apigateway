@@ -1,12 +1,10 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
-
 use anyhow::Result;
 use axum::{
     Router,
     middleware::from_fn_with_state,
     routing::{get, post},
 };
+use std::net::SocketAddr;
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::{error, info, warn};
@@ -24,8 +22,7 @@ mod middleware;
 mod models;
 mod openapi;
 mod services;
-// TODO: Fix meter_polling_service compilation errors
-// use services::MeterPollingService;
+
 mod utils;
 
 use auth::{jwt::ApiKeyService, jwt::JwtService};
@@ -57,12 +54,20 @@ pub struct AppState {
     pub market_clearing_service: services::MarketClearingService,
     pub settlement_service: services::SettlementService,
     pub websocket_service: services::WebSocketService,
-    pub transaction_coordinator: services::TransactionCoordinator,
-    // TODO: Fix meter_polling_service compilation errors
-    // pub meter_polling_service: services::MeterPollingService,
+    // TODO: Re-enable when ValidationServices implementation is available
+    // pub transaction_coordinator: services::TransactionCoordinator,
+    pub meter_polling_service: services::MeterPollingService,
+    pub event_processor_service: services::EventProcessorService,
     pub health_checker: services::HealthChecker,
     pub audit_logger: services::AuditLogger,
     pub cache_service: services::CacheService,
+    pub dashboard_service: services::DashboardService,
+}
+
+impl axum::extract::FromRef<AppState> for services::DashboardService {
+    fn from_ref(app_state: &AppState) -> Self {
+        app_state.dashboard_service.clone()
+    }
 }
 
 #[tokio::main]
@@ -220,17 +225,9 @@ async fn main() -> Result<()> {
         services::SettlementService::new(db_pool.clone(), blockchain_service.clone());
     info!("✅ Settlement service initialized");
 
-    // Initialize transaction coordinator for unified tracking
-    let transaction_coordinator = services::TransactionCoordinator::new(
-        db_pool.clone(),
-        Arc::new(blockchain_service.clone()),
-        Arc::new(settlement_service.clone()),
-    );
-
     // Initialize metrics
     services::transaction_metrics::init_metrics();
     info!("Prometheus metrics initialized");
-    info!("✅ Transaction coordinator initialized for unified tracking");
 
     // Initialize market clearing service (Phase 5) for epoch-based order management
     let market_clearing_service = services::MarketClearingService::new(db_pool.clone());
@@ -279,46 +276,44 @@ async fn main() -> Result<()> {
     });
 
     // Start transaction monitoring (every 5 seconds)
-    let tx_coordinator_clone = transaction_coordinator.clone();
-    tokio::spawn(async move {
-        info!("🔍 Transaction monitoring loop started");
-        loop {
-            match tx_coordinator_clone.monitor_pending_transactions().await {
-                Ok(count) => {
-                    if count > 0 {
-                        info!("Updated {} transaction statuses", count);
-                    }
-                }
-                Err(e) => {
-                    error!("Transaction monitoring failed: {}", e);
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        }
-    });
+    // TODO: Re-enable when transaction_coordinator is available
+    // let tx_coordinator_clone = transaction_coordinator.clone();
+    // tokio::spawn(async move {
+    //     info!("🔍 Transaction monitoring loop started");
+    //     loop {
+    //         match tx_coordinator_clone.monitor_pending_transactions().await {
+    //             Ok(count) => {
+    //                 if count > 0 {
+    //                     info!("Updated {} transaction statuses", count);
+    //                 }
+    //             }
+    //             Err(e) => {
+    //                 error!("Transaction monitoring failed: {}", e);
+    //             }
+    //         }
+    //         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    //     }
+    // });
 
     // Start failed transaction retry (every 30 seconds)
-    let tx_coordinator_clone2 = transaction_coordinator.clone();
-    tokio::spawn(async move {
-        info!("🔄 Failed transaction retry loop started");
-        loop {
-            match tx_coordinator_clone2.retry_failed_transactions(3).await {
-                Ok(count) => {
-                    if count > 0 {
-                        info!("Retried {} failed transactions", count);
-                    }
-                }
-                Err(e) => {
-                    error!("Failed transaction retry failed: {}", e);
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-        }
-    });
-
-    // TODO: Re-enable meter polling service after fixing compilation errors
-    // Meter polling service is disabled for now
-    info!("ℹ️  Meter polling service disabled (needs fixes)");
+    // TODO: Re-enable when transaction_coordinator is available
+    // let tx_coordinator_clone2 = transaction_coordinator.clone();
+    // tokio::spawn(async move {
+    //     info!("🔄 Failed transaction retry loop started");
+    //     loop {
+    //         match tx_coordinator_clone2.retry_failed_transactions(3).await {
+    //             Ok(count) => {
+    //                 if count > 0 {
+    //                     info!("Retried {} failed transactions", count);
+    //                 }
+    //             }
+    //             Err(e) => {
+    //                 error!("Failed transaction retry failed: {}", e);
+    //             }
+    //         }
+    //         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    //     }
+    // });
 
     // Initialize epoch scheduler with 15-minute intervals
     let epoch_scheduler = std::sync::Arc::new(services::EpochScheduler::new(
@@ -349,18 +344,32 @@ async fn main() -> Result<()> {
     let cache_service = services::CacheService::new(&config.redis_url).await?;
     info!("✅ Cache service initialized for performance optimization");
 
+    // Initialize event processor service for blockchain event synchronization
+    let event_processor_service = services::EventProcessorService::new(
+        std::sync::Arc::new(db_pool.clone()),
+        config.solana_rpc_url.clone(),
+        config.event_processor.clone(),
+        config.energy_token_mint.clone(),
+    );
+    info!("✅ Event processor service initialized for blockchain event sync");
+
+    // Initialize dashboard service
+    let dashboard_service =
+        services::DashboardService::new(health_checker.clone(), event_processor_service.clone());
+    info!("✅ Dashboard service initialized");
+
     // Create application state
     let app_state = AppState {
-        db: db_pool,
+        db: db_pool.clone(),
         timescale_db: timescale_pool,
         redis: redis_client,
         config: config.clone(),
         jwt_service,
         api_key_service,
         email_service,
-        blockchain_service,
+        blockchain_service: blockchain_service.clone(),
         wallet_service,
-        meter_service,
+        meter_service: meter_service.clone(),
         meter_verification_service,
         erc_service,
         order_matching_engine,
@@ -368,19 +377,34 @@ async fn main() -> Result<()> {
         market_clearing_service,
         settlement_service,
         websocket_service: websocket_service.clone(),
-        transaction_coordinator,
-        // TODO: Fix and re-enable meter_polling_service
-        // meter_polling_service: services::MeterPollingService::new(
-        //     db_pool.clone(),
-        //     blockchain_service.clone(),
-        //     meter_service.clone(),
-        //     websocket_service.clone(),
-        //     config.tokenization.clone(),
-        // ),
+        // transaction_coordinator,
+        meter_polling_service: services::MeterPollingService::new(
+            std::sync::Arc::new(db_pool.clone()),
+            std::sync::Arc::new(blockchain_service.clone()),
+            std::sync::Arc::new(meter_service.clone()),
+            std::sync::Arc::new(websocket_service.clone()),
+            config.tokenization.clone(),
+        ),
+        event_processor_service,
         health_checker,
         audit_logger,
         cache_service,
+        dashboard_service,
     };
+
+    // Start meter polling service
+    let meter_polling_service = app_state.meter_polling_service.clone();
+    tokio::spawn(async move {
+        info!("🚀 Meter polling service started");
+        meter_polling_service.start().await;
+    });
+
+    // Start event processor service
+    let event_processor_service = app_state.event_processor_service.clone();
+    tokio::spawn(async move {
+        info!("🚀 Event processor service started");
+        event_processor_service.start().await;
+    });
 
     // Build API routes
 
@@ -392,6 +416,14 @@ async fn main() -> Result<()> {
         .route(
             "/health/metrics",
             get(handlers::metrics::get_health_with_metrics),
+        )
+        .route(
+            "/health/event-processor",
+            get(health::get_event_processor_stats),
+        )
+        .route(
+            "/api/dashboard/metrics",
+            get(handlers::dashboard::get_dashboard_metrics),
         )
         // Public API routes
         .route("/api/auth/login", post(auth_handlers::login))
@@ -539,6 +571,11 @@ async fn main() -> Result<()> {
                 .route("/market/health", get(admin::get_market_health))
                 .route("/market/analytics", get(admin::get_trading_analytics))
                 .route("/market/control", post(admin::market_control))
+                // Event Processor routes
+                .route(
+                    "/event-processor/replay",
+                    post(admin::trigger_event_replay).get(admin::get_replay_status),
+                )
                 // Audit log routes
                 .route("/audit/user/{user_id}", get(audit::get_user_audit_logs))
                 .route(
@@ -675,7 +712,10 @@ async fn main() -> Result<()> {
                     middleware::request_logger_middleware,
                 ))
                 .layer(TraceLayer::new_for_http())
-                .layer(TimeoutLayer::new(std::time::Duration::from_secs(30)))
+                .layer(TimeoutLayer::with_status_code(
+                    axum::http::StatusCode::REQUEST_TIMEOUT,
+                    std::time::Duration::from_secs(30),
+                ))
                 .layer(CorsLayer::permissive()),
         )
         .with_state(app_state);

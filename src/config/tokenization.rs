@@ -44,6 +44,9 @@ pub struct TokenizationConfig {
 
     /// Maximum number of transactions per batch (default: 20)
     pub max_transactions_per_batch: usize,
+
+    /// Whether to use real blockchain transactions or mocks (default: false)
+    pub enable_real_blockchain: bool,
 }
 
 impl Default for TokenizationConfig {
@@ -62,6 +65,7 @@ impl Default for TokenizationConfig {
             max_retry_delay_secs: 3600, // 1 hour
             transaction_timeout_secs: 60,
             max_transactions_per_batch: 20,
+            enable_real_blockchain: false, // Default to mock for safety
         }
     }
 }
@@ -174,6 +178,7 @@ impl TokenizationConfig {
 
         if let Ok(val) = env::var("TOKENIZATION_MAX_RETRY_ATTEMPTS") {
             match val.parse::<u32>() {
+                #[allow(unused_comparisons)]
                 Ok(attempts) if attempts >= 0 => {
                     config.max_retry_attempts = attempts;
                     info!("Using custom max retry attempts: {}", attempts);
@@ -266,6 +271,19 @@ impl TokenizationConfig {
                 ),
                 Err(_) => warn!(
                     "Failed to parse max transactions per batch: {}, using default",
+                    val
+                ),
+            }
+        }
+
+        if let Ok(val) = env::var("TOKENIZATION_ENABLE_REAL_BLOCKCHAIN") {
+            match val.parse::<bool>() {
+                Ok(enabled) => {
+                    config.enable_real_blockchain = enabled;
+                    info!("Using real blockchain transactions: {}", enabled);
+                }
+                Err(_) => warn!(
+                    "Failed to parse enable real blockchain: {}, using default",
                     val
                 ),
             }

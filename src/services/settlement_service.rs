@@ -92,6 +92,7 @@ pub struct SettlementService {
     db: PgPool,
     blockchain: BlockchainService,
     config: SettlementConfig,
+    #[allow(dead_code)]
     pending_settlements: Arc<RwLock<Vec<Uuid>>>,
 }
 

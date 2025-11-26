@@ -88,9 +88,9 @@ impl MeterService {
             r#"
             INSERT INTO meter_readings (
                 id, user_id, wallet_address, kwh_amount,
-                reading_timestamp, submitted_at, minted, meter_id, verification_status
+                reading_timestamp, timestamp, submitted_at, minted, meter_id, verification_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING
                 id, user_id, wallet_address,
                 kwh_amount, reading_timestamp, submitted_at,
@@ -102,6 +102,7 @@ impl MeterService {
         .bind(&request.wallet_address)
         .bind(&request.kwh_amount)
         .bind(&request.reading_timestamp)
+        .bind(&request.reading_timestamp) // Use reading_timestamp for timestamp column
         .bind(&Utc::now())
         .bind(&false)
         .bind(&meter_id)
@@ -120,7 +121,7 @@ impl MeterService {
             minted: row.get("minted"),
             mint_tx_signature: row.get("mint_tx_signature"),
             meter_id: row.get("meter_id"),
-            meter_serial: row.get("meter_serial"),
+            meter_serial: None, // Not included in RETURNING clause
             verification_status: row.get("verification_status"),
         };
 
@@ -404,7 +405,8 @@ impl MeterService {
             SELECT
                 id, user_id, wallet_address,
                 kwh_amount, reading_timestamp, submitted_at,
-                minted, mint_tx_signature, meter_id, verification_status
+                minted, mint_tx_signature, meter_id, verification_status,
+                meter_serial
             FROM meter_readings
             WHERE minted = false
             ORDER BY submitted_at ASC
@@ -455,7 +457,8 @@ impl MeterService {
             RETURNING
                 id, user_id, wallet_address,
                 kwh_amount, reading_timestamp, submitted_at,
-                minted, mint_tx_signature, meter_id, verification_status
+                minted, mint_tx_signature, meter_id, verification_status,
+                meter_serial
             "#,
         )
         .bind(reading_id)
@@ -493,7 +496,8 @@ impl MeterService {
             SELECT
                 id, user_id, wallet_address,
                 kwh_amount, reading_timestamp, submitted_at,
-                minted, mint_tx_signature, meter_id, verification_status
+                minted, mint_tx_signature, meter_id, verification_status,
+                meter_serial
             FROM meter_readings
             WHERE id = $1
             "#,

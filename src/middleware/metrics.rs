@@ -161,11 +161,6 @@ pub fn track_meter_reading(success: bool) {
     counter!("meter_readings_total", "success" => success.to_string()).increment(1);
 }
 
-/// Track API rate limits
-pub fn track_rate_limit_hit(endpoint: &str) {
-    counter!("rate_limit_hits_total", "endpoint" => endpoint.to_string()).increment(1);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

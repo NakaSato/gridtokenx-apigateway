@@ -1,12 +1,12 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc, Duration, Timelike, Datelike};
 use bigdecimal::BigDecimal;
+use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
 use sqlx::PgPool;
 use std::str::FromStr;
 use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::database::schema::types::{OrderSide, OrderStatus, EpochStatus};
+use crate::database::schema::types::{EpochStatus, OrderSide, OrderStatus};
 use crate::error::ApiError;
 
 #[derive(Debug, Clone)]
@@ -161,7 +161,8 @@ impl MarketClearingService {
             INSERT INTO market_epochs (
                 id, epoch_number, start_time, end_time, status
             ) VALUES ($1, $2, $3, $4, '{}'::epoch_status)
-            "#, status_str
+            "#,
+            status_str
         ))
         .bind(epoch.id)
         .bind(epoch.epoch_number)
@@ -170,7 +171,10 @@ impl MarketClearingService {
         .execute(&self.db)
         .await?;
 
-        info!("Created new market epoch: {} ({})", epoch.id, epoch.epoch_number);
+        info!(
+            "Created new market epoch: {} ({})",
+            epoch.id, epoch.epoch_number
+        );
         Ok(epoch)
     }
 
@@ -194,9 +198,12 @@ impl MarketClearingService {
     }
 
     /// Get current order book for an epoch
-    pub async fn get_order_book(&self, epoch_id: Uuid) -> Result<(Vec<OrderBookEntry>, Vec<OrderBookEntry>)> {
+    pub async fn get_order_book(
+        &self,
+        epoch_id: Uuid,
+    ) -> Result<(Vec<OrderBookEntry>, Vec<OrderBookEntry>)> {
         info!("Getting order book for epoch: {}", epoch_id);
-        
+
         // Get pending buy orders (sorted by price descending, then time ascending)
         let buy_orders = sqlx::query_as!(
             OrderBookEntry,
@@ -205,7 +212,7 @@ impl MarketClearingService {
                 id as order_id, user_id, side as "side: OrderSide", 
                 energy_amount, price_per_kwh, created_at
             FROM trading_orders 
-            WHERE status = 'pending' AND order_type = 'buy' AND epoch_id = $1
+            WHERE status = 'pending' AND side = 'buy' AND epoch_id = $1
             ORDER BY price_per_kwh DESC, created_at ASC
             "#,
             epoch_id
@@ -213,7 +220,11 @@ impl MarketClearingService {
         .fetch_all(&self.db)
         .await?;
 
-        info!("Found {} buy orders for epoch {}", buy_orders.len(), epoch_id);
+        info!(
+            "Found {} buy orders for epoch {}",
+            buy_orders.len(),
+            epoch_id
+        );
 
         // Get pending sell orders (sorted by price ascending, then time ascending)
         let sell_orders = sqlx::query_as!(
@@ -223,7 +234,7 @@ impl MarketClearingService {
                 id as order_id, user_id, side as "side: OrderSide", 
                 energy_amount, price_per_kwh, created_at
             FROM trading_orders 
-            WHERE status = 'pending' AND order_type = 'sell' AND epoch_id = $1
+            WHERE status = 'pending' AND side = 'sell' AND epoch_id = $1
             ORDER BY price_per_kwh ASC, created_at ASC
             "#,
             epoch_id
@@ -231,7 +242,11 @@ impl MarketClearingService {
         .fetch_all(&self.db)
         .await?;
 
-        info!("Found {} sell orders for epoch {}", sell_orders.len(), epoch_id);
+        info!(
+            "Found {} sell orders for epoch {}",
+            sell_orders.len(),
+            epoch_id
+        );
 
         Ok((buy_orders, sell_orders))
     }
@@ -259,14 +274,17 @@ impl MarketClearingService {
                 if buy_order.price_per_kwh >= sell_order.price_per_kwh {
                     // Determine match price (use sell order price for simplicity)
                     let match_price = sell_order.price_per_kwh.clone(); // Market clearing price
-                    
+
                     // Calculate match amount (minimum of remaining amounts)
-                    let match_amount = buy_order.energy_amount.clone().min(sell_order.energy_amount.clone());
+                    let match_amount = buy_order
+                        .energy_amount
+                        .clone()
+                        .min(sell_order.energy_amount.clone());
 
                     if match_amount > BigDecimal::from_str("0").unwrap() {
                         let match_amount_clone = match_amount.clone();
                         let match_price_clone = match_price.clone();
-                        
+
                         // Create order match
                         let order_match = OrderMatch {
                             id: Uuid::new_v4(),
@@ -293,28 +311,59 @@ impl MarketClearingService {
 
                         info!(
                             "Matched orders: Buy {} vs Sell {} at {} for {} kWh",
-                            buy_order.order_id, sell_order.order_id, match_price_clone, match_amount_clone
+                            buy_order.order_id,
+                            sell_order.order_id,
+                            match_price_clone,
+                            match_amount_clone
                         );
 
                         // Remove fully filled orders
-                        info!("Buy order {} remaining amount: {}", buy_order.order_id, buy_order.energy_amount);
+                        info!(
+                            "Buy order {} remaining amount: {}",
+                            buy_order.order_id, buy_order.energy_amount
+                        );
                         if buy_order.energy_amount <= BigDecimal::from_str("0").unwrap() {
-                            info!("Buy order {} is fully filled, updating status", buy_order.order_id);
-                            self.update_order_status(buy_order.order_id, OrderStatus::Filled).await?;
+                            info!(
+                                "Buy order {} is fully filled, updating status",
+                                buy_order.order_id
+                            );
+                            self.update_order_status(buy_order.order_id, OrderStatus::Filled)
+                                .await?;
                             buy_orders.remove(0);
                         } else {
-                            info!("Buy order {} is partially filled, updating amount", buy_order.order_id);
-                            self.update_order_filled_amount(buy_order.order_id, match_amount_clone.clone()).await?;
+                            info!(
+                                "Buy order {} is partially filled, updating amount",
+                                buy_order.order_id
+                            );
+                            self.update_order_filled_amount(
+                                buy_order.order_id,
+                                match_amount_clone.clone(),
+                            )
+                            .await?;
                         }
 
-                        info!("Sell order {} remaining amount: {}", sell_order.order_id, sell_order.energy_amount);
+                        info!(
+                            "Sell order {} remaining amount: {}",
+                            sell_order.order_id, sell_order.energy_amount
+                        );
                         if sell_order.energy_amount <= BigDecimal::from_str("0").unwrap() {
-                            info!("Sell order {} is fully filled, updating status", sell_order.order_id);
-                            self.update_order_status(sell_order.order_id, OrderStatus::Filled).await?;
+                            info!(
+                                "Sell order {} is fully filled, updating status",
+                                sell_order.order_id
+                            );
+                            self.update_order_status(sell_order.order_id, OrderStatus::Filled)
+                                .await?;
                             sell_orders.remove(0);
                         } else {
-                            info!("Sell order {} is partially filled, updating amount", sell_order.order_id);
-                            self.update_order_filled_amount(sell_order.order_id, match_amount_clone.clone()).await?;
+                            info!(
+                                "Sell order {} is partially filled, updating amount",
+                                sell_order.order_id
+                            );
+                            self.update_order_filled_amount(
+                                sell_order.order_id,
+                                match_amount_clone.clone(),
+                            )
+                            .await?;
                         }
                     }
                 } else {
@@ -327,15 +376,17 @@ impl MarketClearingService {
         }
 
         // Update epoch statistics
-        self.update_epoch_statistics(epoch_id, total_volume.clone(), total_match_count).await?;
+        self.update_epoch_statistics(epoch_id, total_volume.clone(), total_match_count)
+            .await?;
 
         // Calculate and set clearing price (average of match prices)
         if !matches.is_empty() {
-            let total_match_value: BigDecimal = matches.iter()
+            let total_match_value: BigDecimal = matches
+                .iter()
                 .map(|m| m.matched_amount.clone() * m.match_price.clone())
                 .fold(BigDecimal::from_str("0").unwrap(), |acc, val| acc + val);
             let clearing_price = total_match_value / total_volume.clone();
-            
+
             sqlx::query!(
                 "UPDATE market_epochs SET clearing_price = $1 WHERE id = $2",
                 clearing_price,
@@ -348,13 +399,18 @@ impl MarketClearingService {
         // Create settlements for all matches
         for order_match in &matches {
             if let Err(e) = self.create_settlement(order_match).await {
-                error!("Failed to create settlement for match {}: {}", order_match.id, e);
+                error!(
+                    "Failed to create settlement for match {}: {}",
+                    order_match.id, e
+                );
             }
         }
 
         info!(
             "Order matching completed for epoch: {} - {} matches, {} kWh",
-            epoch_id, matches.len(), total_volume
+            epoch_id,
+            matches.len(),
+            total_volume
         );
 
         Ok(matches)
@@ -395,18 +451,22 @@ impl MarketClearingService {
             OrderStatus::Cancelled => "cancelled",
             OrderStatus::Expired => "expired",
         };
-        
+
         info!("Updating order {} status to: {}", order_id, status_str);
-        
+
         let result = sqlx::query(
-            "UPDATE trading_orders SET status = $1::order_status, filled_at = NOW() WHERE id = $2"
+            "UPDATE trading_orders SET status = $1::order_status, filled_at = NOW() WHERE id = $2",
         )
         .bind(status_str)
         .bind(order_id)
         .execute(&self.db)
         .await?;
 
-        info!("Updated order {} status, rows affected: {}", order_id, result.rows_affected());
+        info!(
+            "Updated order {} status, rows affected: {}",
+            order_id,
+            result.rows_affected()
+        );
 
         Ok(())
     }
@@ -425,7 +485,12 @@ impl MarketClearingService {
     }
 
     /// Update epoch statistics
-    async fn update_epoch_statistics(&self, epoch_id: Uuid, total_volume: BigDecimal, matched_orders: i64) -> Result<()> {
+    async fn update_epoch_statistics(
+        &self,
+        epoch_id: Uuid,
+        total_volume: BigDecimal,
+        matched_orders: i64,
+    ) -> Result<()> {
         // Get total orders count for this epoch
         let total_orders = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM trading_orders WHERE epoch_id = $1 AND status IN ('pending', 'filled')",
@@ -535,7 +600,9 @@ impl MarketClearingService {
 
         if let Some(order) = order {
             if order.user_id != user_id {
-                return Err(ApiError::Forbidden("Order does not belong to user".to_string()).into());
+                return Err(
+                    ApiError::Forbidden("Order does not belong to user".to_string()).into(),
+                );
             }
 
             if !matches!(order.status, OrderStatus::Pending) {
@@ -561,7 +628,12 @@ impl MarketClearingService {
     }
 
     /// Get trading history for a user
-    pub async fn get_trading_history(&self, user_id: Uuid, limit: i64, offset: i64) -> Result<Vec<Settlement>> {
+    pub async fn get_trading_history(
+        &self,
+        user_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Settlement>> {
         let settlements = sqlx::query_as!(
             Settlement,
             r#"

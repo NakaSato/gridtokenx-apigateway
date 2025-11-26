@@ -1,5 +1,92 @@
 # Postman Collection Changelog
 
+## Version 1.3.0 (2025-11-25)
+
+### 🎉 Major Update - Complete API Coverage
+
+This major update adds comprehensive coverage of all GridTokenX API endpoints, bringing the total from 76+ to **95+ endpoints** across 20 categories.
+
+#### New Endpoint Categories Added
+
+**1. Transaction Management (Category 16)**
+- `GET /api/v1/transactions/:id/status` - Get specific transaction status
+- `GET /api/v1/transactions/user` - Get user transactions with advanced filtering
+- `GET /api/v1/transactions/history` - Get all transactions (admin only)
+- `GET /api/v1/transactions/stats` - Get transaction statistics (admin only)
+- `POST /api/v1/transactions/:id/retry` - Retry failed transactions
+
+**2. Enhanced Trading v1 API (Category 18)**
+- `POST /api/v1/trading/orders` - Create orders with enhanced parameters
+- `GET /api/v1/trading/orders` - Get user orders with advanced filtering
+- `GET /api/v1/trading/market` - Get market data with order book
+- `GET /api/v1/trading/stats` - Get trading statistics
+
+**3. Enhanced Blockchain v1 API (Category 19)**
+- `GET /api/v1/blockchain/accounts/:address` - Get account info
+- `GET /api/v1/blockchain/network` - Get network status
+- `POST /api/v1/blockchain/programs/:name` - Interact with smart contracts
+- `POST /api/v1/blockchain/transactions` - Submit enhanced transactions
+- `GET /api/v1/blockchain/transactions` - Get transaction history with filtering
+- `GET /api/v1/blockchain/transactions/:signature` - Get transaction status
+
+**4. Enhanced Meter Endpoints (Category 20)**
+- `POST /api/meters/submit-reading` - Enhanced reading submission with signature support
+- `GET /api/meters/my-readings` - Enhanced reading retrieval with advanced filtering
+- `GET /api/meters/readings/:wallet_address` - Enhanced wallet-based reading queries
+
+#### Enhanced Admin Operations
+
+**Complete Admin Restructure:**
+- **User Management**: Get by ID, update, deactivate, reactivate, get activity, list all
+- **Registry Admin**: Update user roles on blockchain
+- **Governance Admin**: Emergency pause/unpause controls
+- **Token Admin**: Mint tokens with enhanced parameters
+- **Trading Admin**: Match orders, market health, analytics, control operations
+- **Meter Admin**: Get unminted readings, mint from readings
+- **Audit & Security**: User audit logs, type-based logs, security events
+- **Epoch Management Admin**: Epoch statistics, list all, manual clearing triggers
+
+#### 🧪 Advanced Test Scripts
+
+**New Test Features:**
+- Transaction retry validation with attempt tracking
+- Enhanced pagination validation for all list endpoints
+- Smart contract interaction testing
+- Advanced query parameter validation
+- Admin privilege testing in test scripts
+
+#### 📊 Collection Statistics
+
+- **Total Endpoints**: 95+ (increased from 76+)
+- **New Categories**: 4 additional categories (16-20)
+- **Version**: Updated to 1.3.0
+- **Updated Date**: 2025-11-25
+
+#### 🔧 Technical Improvements
+
+**Enhanced Request Bodies:**
+- Added `expiry_time` parameter for order creation
+- Enhanced `energy_amount` and `price_per_kwh` validation
+- Added `meter_signature` support for meter readings
+- Smart contract `compute_units` and priority fee parameters
+
+**Advanced Query Parameters:**
+- Comprehensive filtering options for all list endpoints
+- Date range filtering with ISO 8601 support
+- Pagination with configurable page sizes
+- Multiple sort fields and directions
+- Status and type-based filtering
+
+#### 📝 Documentation Enhancements
+
+- Updated all endpoint descriptions with v1 API details
+- Added comprehensive parameter documentation
+- Enhanced error response examples
+- Added authentication requirement notes
+- Updated collection metadata with new endpoint counts
+
+---
+
 ## Version 1.2.0 (2025-11-20)
 
 ### 🎉 New Features

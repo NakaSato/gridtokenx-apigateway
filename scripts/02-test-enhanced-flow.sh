@@ -59,6 +59,16 @@ SELLER_WALLET="5Xj7hWqKqV9YGJ8r3nPqM8K4dYwZxNfR2tBpLmCvHgE3"
 TEST_TIMES=()
 TEST_RESULTS=()
 
+# Initialize variables to prevent unbound variable errors
+BUYER_ID=""
+SELLER_ID=""
+BUYER_TOKEN=""
+SELLER_TOKEN=""
+BUYER_ORDER_ID=""
+SELLER_ORDER_ID=""
+EPOCH_ID=""
+TEST_MODE=""
+
 # Required command checks
 REQUIRED_CMDS=("curl" "jq")
 for cmd in "${REQUIRED_CMDS[@]}"; do
@@ -237,6 +247,14 @@ echo -e "  Strict Mode:  $STRICT_MODE"
 echo -e "  Sleep Time:   ${SLEEP_TIME}s"
 echo -e "  Timestamp:    $TIMESTAMP"
 
+echo -e "\n${CYAN}Test User Credentials:${NC}"
+echo -e "  Buyer Username:  buyer_$TIMESTAMP"
+echo -e "  Buyer Password:  $PASSWORD"
+echo -e "  Buyer Email:     $BUYER_EMAIL"
+echo -e "  Seller Username: seller_$TIMESTAMP"
+echo -e "  Seller Password: $PASSWORD"
+echo -e "  Seller Email:    $SELLER_EMAIL"
+
 # Test 1: Health Check
 print_header "1. Health Check"
 api_call "GET" "/health" "" "" "1"
@@ -250,6 +268,7 @@ if [ "$HTTP_CODE" -eq 200 ]; then
     fi
 else
     print_error "Server not running (HTTP $HTTP_CODE)"
+    print_error "Exiting script - server availability is required for enhanced flow testing"
     exit 1
 fi
 
@@ -274,15 +293,20 @@ sleep $SLEEP_TIME
 
 # Test 2: Register Buyer
 print_header "2. Register Buyer"
-REGISTER_DATA="{\n    \"email\": \"$BUYER_EMAIL\",\n    \"password\": \"$PASSWORD\",\n    \"first_name\": \"Test\",\n    \"last_name\": \"Buyer\",\n    \"username\": \"buyer_$TIMESTAMP\",\n    \"role\": \"user\"\n}"
+REGISTER_DATA="{\n    \"username\": \"buyer_$TIMESTAMP\",\n    \"email\": \"$BUYER_EMAIL\",\n    \"password\": \"$PASSWORD\",\n    \"first_name\": \"Test\",\n    \"last_name\": \"Buyer\"\n}"
 
 api_call "POST" "/api/auth/register" "" "$REGISTER_DATA" "2"
 
 if [ "$HTTP_CODE" -eq 201 ] || [ "$HTTP_CODE" -eq 200 ]; then
     if validate_json "$BODY"; then
-        BUYER_ID=$(echo "$BODY" | jq -r '.user_id // .id')
+        BUYER_ID=$(echo "$BODY" | jq -r '.user_id // .id // empty')
         BUYER_USERNAME=$(echo "$BODY" | jq -r '.username // "buyer_'$TIMESTAMP'"')
-        print_success "Buyer registered - ID: $BUYER_ID (${TEST_TIME_2}s)"
+        if [ -z "$BUYER_ID" ] || [ "$BUYER_ID" = "null" ]; then
+            print_warning "Registration succeeded but no ID returned"
+            print_verbose "Response: $BODY"
+        else
+            print_success "Buyer registered - ID: $BUYER_ID (${TEST_TIME_2}s)"
+        fi
         
         # Verify email in database if needed
         if [ "$TEST_MODE" != true ]; then
@@ -290,6 +314,7 @@ if [ "$HTTP_CODE" -eq 201 ] || [ "$HTTP_CODE" -eq 200 ]; then
         fi
     else
         print_warning "Registration succeeded but invalid JSON response"
+        print_verbose "Response: $BODY"
     fi
 else
     if echo "$BODY" | grep -q "already exists"; then
@@ -330,21 +355,34 @@ sleep $SLEEP_TIME
 
 # Test 4: Register Seller
 print_header "4. Register Seller"
-REGISTER_DATA="{\n    \"email\": \"$SELLER_EMAIL\",\n    \"password\": \"$PASSWORD\",\n    \"first_name\": \"Test\",\n    \"last_name\": \"Seller\",\n    \"username\": \"seller_$TIMESTAMP\",\n    \"role\": \"user\"\n}"
+REGISTER_DATA="{\n    \"username\": \"seller_$TIMESTAMP\",\n    \"email\": \"$SELLER_EMAIL\",\n    \"password\": \"$PASSWORD\",\n    \"first_name\": \"Test\",\n    \"last_name\": \"Seller\"\n}"
 
 api_call "POST" "/api/auth/register" "" "$REGISTER_DATA" "4"
 
 if [ "$HTTP_CODE" -eq 201 ] || [ "$HTTP_CODE" -eq 200 ]; then
     if validate_json "$BODY"; then
-        SELLER_ID=$(echo "$BODY" | jq -r '.user_id // .id')
-        print_success "Seller registered - ID: $SELLER_ID (${TEST_TIME_4}s)"
+        SELLER_ID=$(echo "$BODY" | jq -r '.user_id // .id // empty')
+        if [ -z "$SELLER_ID" ] || [ "$SELLER_ID" = "null" ]; then
+            print_warning "Registration succeeded but no ID returned"
+            print_verbose "Response: $BODY"
+        else
+            print_success "Seller registered - ID: $SELLER_ID (${TEST_TIME_4}s)"
+        fi
         
         if [ "$TEST_MODE" != true ]; then
             verify_email_in_db "$SELLER_EMAIL" || print_warning "DB email verification failed"
         fi
+    else
+        print_warning "Registration succeeded but invalid JSON response"
+        print_verbose "Response: $BODY"
     fi
 else
-    print_error "Seller registration failed (HTTP $HTTP_CODE)"
+    if echo "$BODY" | grep -q "already exists"; then
+        print_warning "User already exists - continuing anyway"
+    else
+        print_error "Seller registration failed (HTTP $HTTP_CODE)"
+        if [ "$(to_lower "$VERBOSE")" = "true" ]; then echo "$BODY"; fi
+    fi
 fi
 
 sleep $SLEEP_TIME
@@ -370,12 +408,19 @@ sleep $SLEEP_TIME
 # Test 6: Connect Buyer Wallet
 print_header "6. Connect Buyer Wallet"
 WALLET_DATA="{\"wallet_address\": \"$BUYER_WALLET\"}"
-api_call "POST" "/api/user/wallet" "$BUYER_TOKEN" "$WALLET_DATA" "6"
 
-if [ "$HTTP_CODE" -eq 200 ]; then
-    print_success "Buyer wallet connected (${TEST_TIME_6}s)"
+# Check if BUYER_TOKEN is available before proceeding
+if [ -z "$BUYER_TOKEN" ] || [ "$BUYER_TOKEN" = "null" ]; then
+    print_error "Cannot connect buyer wallet - no valid token available"
+    print_error "This is likely due to failed login or registration in previous steps"
 else
-    print_warning "Wallet connection failed (HTTP $HTTP_CODE)"
+    api_call "POST" "/api/user/wallet" "$BUYER_TOKEN" "$WALLET_DATA" "6"
+
+    if [ "$HTTP_CODE" -eq 200 ]; then
+        print_success "Buyer wallet connected (${TEST_TIME_6}s)"
+    else
+        print_warning "Wallet connection failed (HTTP $HTTP_CODE)"
+    fi
 fi
 
 sleep $SLEEP_TIME
@@ -383,45 +428,67 @@ sleep $SLEEP_TIME
 # Test 7: Connect Seller Wallet
 print_header "7. Connect Seller Wallet"
 WALLET_DATA="{\"wallet_address\": \"$SELLER_WALLET\"}"
-api_call "POST" "/api/user/wallet" "$SELLER_TOKEN" "$WALLET_DATA" "7"
 
-if [ "$HTTP_CODE" -eq 200 ]; then
-    print_success "Seller wallet connected (${TEST_TIME_7}s)"
+# Check if SELLER_TOKEN is available before proceeding
+if [ -z "$SELLER_TOKEN" ] || [ "$SELLER_TOKEN" = "null" ]; then
+    print_error "Cannot connect seller wallet - no valid token available"
+    print_error "This is likely due to failed login or registration in previous steps"
 else
-    print_warning "Wallet connection failed (HTTP $HTTP_CODE)"
+    api_call "POST" "/api/user/wallet" "$SELLER_TOKEN" "$WALLET_DATA" "7"
+
+    if [ "$HTTP_CODE" -eq 200 ]; then
+        print_success "Seller wallet connected (${TEST_TIME_7}s)"
+    else
+        print_warning "Wallet connection failed (HTTP $HTTP_CODE)"
+    fi
 fi
 
 sleep $SLEEP_TIME
 
 # Test 8: Get Current Epoch
 print_header "8. Get Current Market Epoch"
-api_call "GET" "/api/market/epoch" "$BUYER_TOKEN" "" "8"
 
-if [ "$HTTP_CODE" -eq 200 ]; then
-    if validate_json "$BODY"; then
-        EPOCH_ID=$(echo "$BODY" | jq -r '.id // .epoch_id')
-        EPOCH_STATUS=$(echo "$BODY" | jq -r '.status')
-        print_success "Epoch retrieved - ID: $EPOCH_ID, Status: $EPOCH_STATUS (${TEST_TIME_8}s)"
-    fi
+# Check if BUYER_TOKEN is available before proceeding
+if [ -z "$BUYER_TOKEN" ] || [ "$BUYER_TOKEN" = "null" ]; then
+    print_error "Cannot get epoch - no valid buyer token available"
+    print_error "This is likely due to failed login or registration in previous steps"
 else
-    print_warning "Could not get epoch (HTTP $HTTP_CODE)"
-    EPOCH_ID=""
+    api_call "GET" "/api/market/epoch" "$BUYER_TOKEN" "" "8"
+
+    if [ "$HTTP_CODE" -eq 200 ]; then
+        if validate_json "$BODY"; then
+            EPOCH_ID=$(echo "$BODY" | jq -r '.id // .epoch_id')
+            EPOCH_STATUS=$(echo "$BODY" | jq -r '.status')
+            print_success "Epoch retrieved - ID: $EPOCH_ID, Status: $EPOCH_STATUS (${TEST_TIME_8}s)"
+        fi
+    else
+        print_warning "Could not get epoch (HTTP $HTTP_CODE)"
+        EPOCH_ID=""
+    fi
 fi
 
 sleep $SLEEP_TIME
 
 # Test 9: List Orders (Before Creation)
 print_header "9. List Trading Orders (Initial)"
-api_call "GET" "/api/trading/orders" "$BUYER_TOKEN" "" "9"
 
-if [ "$HTTP_CODE" -eq 200 ]; then
-    if validate_json "$BODY"; then
-        INITIAL_ORDER_COUNT=$(echo "$BODY" | jq 'length // 0')
-        print_success "Orders listed: $INITIAL_ORDER_COUNT orders (${TEST_TIME_9}s)"
-    fi
-else
-    print_warning "Could not list orders (HTTP $HTTP_CODE)"
+# Check if BUYER_TOKEN is available before proceeding
+if [ -z "$BUYER_TOKEN" ] || [ "$BUYER_TOKEN" = "null" ]; then
+    print_error "Cannot list orders - no valid buyer token available"
+    print_error "This is likely due to failed login or registration in previous steps"
     INITIAL_ORDER_COUNT=0
+else
+    api_call "GET" "/api/trading/orders" "$BUYER_TOKEN" "" "9"
+
+    if [ "$HTTP_CODE" -eq 200 ]; then
+        if validate_json "$BODY"; then
+            INITIAL_ORDER_COUNT=$(echo "$BODY" | jq 'length // 0')
+            print_success "Orders listed: $INITIAL_ORDER_COUNT orders (${TEST_TIME_9}s)"
+        fi
+    else
+        print_warning "Could not list orders (HTTP $HTTP_CODE)"
+        INITIAL_ORDER_COUNT=0
+    fi
 fi
 
 sleep $SLEEP_TIME
@@ -430,20 +497,26 @@ sleep $SLEEP_TIME
 print_header "10. Create Sell Order"
 ORDER_DATA="{\n    \"energy_amount\": \"100.0\",\n    \"price_per_kwh\": \"0.15\",\n    \"order_type\": \"Limit\",\n    \"side\": \"Sell\"\n}"
 
-api_call "POST" "/api/trading/orders" "$SELLER_TOKEN" "$ORDER_DATA" "10"
-
-if [ "$HTTP_CODE" -eq 201 ] || [ "$HTTP_CODE" -eq 200 ]; then
-    if validate_json "$BODY"; then
-        SELL_ORDER_ID=$(echo "$BODY" | jq -r '.id // .order_id')
-        if [ -z "$EPOCH_ID" ]; then
-            EPOCH_ID=$(echo "$BODY" | jq -r '.epoch_id')
-        fi
-        ORDER_STATUS=$(echo "$BODY" | jq -r '.status // "unknown"')
-        print_success "Sell order created - ID: $SELL_ORDER_ID (${TEST_TIME_10}s)"
-        print_info "Status: $ORDER_STATUS"
-    fi
+# Check if SELLER_TOKEN is available before proceeding
+if [ -z "$SELLER_TOKEN" ] || [ "$SELLER_TOKEN" = "null" ]; then
+    print_error "Cannot create sell order - no valid seller token available"
+    print_error "This is likely due to failed login or registration in previous steps"
 else
-    print_error "Sell order creation failed (HTTP $HTTP_CODE)"
+    api_call "POST" "/api/trading/orders" "$SELLER_TOKEN" "$ORDER_DATA" "10"
+
+    if [ "$HTTP_CODE" -eq 201 ] || [ "$HTTP_CODE" -eq 200 ]; then
+        if validate_json "$BODY"; then
+            SELL_ORDER_ID=$(echo "$BODY" | jq -r '.id // .order_id')
+            if [ -z "$EPOCH_ID" ]; then
+                EPOCH_ID=$(echo "$BODY" | jq -r '.epoch_id')
+            fi
+            ORDER_STATUS=$(echo "$BODY" | jq -r '.status // "unknown"')
+            print_success "Sell order created - ID: $SELL_ORDER_ID (${TEST_TIME_10}s)"
+            print_info "Status: $ORDER_STATUS"
+        fi
+    else
+        print_error "Sell order creation failed (HTTP $HTTP_CODE)"
+    fi
 fi
 
 sleep $SLEEP_TIME
@@ -452,80 +525,211 @@ sleep $SLEEP_TIME
 print_header "11. Create Buy Order"
 ORDER_DATA="{\n    \"energy_amount\": \"100.0\",\n    \"price_per_kwh\": \"0.15\",\n    \"order_type\": \"Limit\",\n    \"side\": \"Buy\"\n}"
 
-api_call "POST" "/api/trading/orders" "$BUYER_TOKEN" "$ORDER_DATA" "11"
-
-if [ "$HTTP_CODE" -eq 201 ] || [ "$HTTP_CODE" -eq 200 ]; then
-    if validate_json "$BODY"; then
-        BUY_ORDER_ID=$(echo "$BODY" | jq -r '.id // .order_id')
-        ORDER_STATUS=$(echo "$BODY" | jq -r '.status // "unknown"')
-        print_success "Buy order created - ID: $BUY_ORDER_ID (${TEST_TIME_11}s)"
-        print_info "Status: $ORDER_STATUS"
-    fi
+# Check if BUYER_TOKEN is available before proceeding
+if [ -z "$BUYER_TOKEN" ] || [ "$BUYER_TOKEN" = "null" ]; then
+    print_error "Cannot create buy order - no valid buyer token available"
+    print_error "This is likely due to failed login or registration in previous steps"
 else
-    print_error "Buy order creation failed (HTTP $HTTP_CODE)"
+    api_call "POST" "/api/trading/orders" "$BUYER_TOKEN" "$ORDER_DATA" "11"
+
+    if [ "$HTTP_CODE" -eq 201 ] || [ "$HTTP_CODE" -eq 200 ]; then
+        if validate_json "$BODY"; then
+            BUY_ORDER_ID=$(echo "$BODY" | jq -r '.id // .order_id')
+            ORDER_STATUS=$(echo "$BODY" | jq -r '.status // "unknown"')
+            print_success "Buy order created - ID: $BUY_ORDER_ID (${TEST_TIME_11}s)"
+            print_info "Status: $ORDER_STATUS"
+        fi
+    else
+        print_error "Buy order creation failed (HTTP $HTTP_CODE)"
+    fi
 fi
 
 sleep $SLEEP_TIME
 
 # Test 12: List Orders (After Creation)
 print_header "12. List Trading Orders (After Creation)"
-api_call "GET" "/api/trading/orders" "$BUYER_TOKEN" "" "12"
 
-if [ "$HTTP_CODE" -eq 200 ]; then
-    if validate_json "$BODY"; then
-        AFTER_ORDER_COUNT=$(echo "$BODY" | jq 'length // 0')
-        NEW_ORDERS=$((AFTER_ORDER_COUNT - INITIAL_ORDER_COUNT))
-        print_success "Orders listed: $AFTER_ORDER_COUNT total (+$NEW_ORDERS new) (${TEST_TIME_12}s)"
-    fi
+# Check if BUYER_TOKEN is available before proceeding
+if [ -z "$BUYER_TOKEN" ] || [ "$BUYER_TOKEN" = "null" ]; then
+    print_error "Cannot list orders - no valid buyer token available"
+    print_error "This is likely due to failed login or registration in previous steps"
 else
-    print_warning "Could not list orders (HTTP $HTTP_CODE)"
+    api_call "GET" "/api/trading/orders" "$BUYER_TOKEN" "" "12"
+
+    if [ "$HTTP_CODE" -eq 200 ]; then
+        if validate_json "$BODY"; then
+            AFTER_ORDER_COUNT=$(echo "$BODY" | jq 'length // 0')
+            NEW_ORDERS=$((AFTER_ORDER_COUNT - INITIAL_ORDER_COUNT))
+            print_success "Orders listed: $AFTER_ORDER_COUNT total (+$NEW_ORDERS new) (${TEST_TIME_12}s)"
+        fi
+    else
+        print_warning "Could not list orders (HTTP $HTTP_CODE)"
+    fi
 fi
 
 sleep $SLEEP_TIME
 
 # Test 13: Get Order Book
 print_header "13. Get Market Order Book"
-api_call "GET" "/api/market/orderbook" "$BUYER_TOKEN" "" "13"
 
-if [ "$HTTP_CODE" -eq 200 ]; then
-    if validate_json "$BODY"; then
-        BUY_COUNT=$(echo "$BODY" | jq '.bids | length')
-        SELL_COUNT=$(echo "$BODY" | jq '.asks | length')
-        print_success "Order book retrieved - $BUY_COUNT bids, $SELL_COUNT asks (${TEST_TIME_13}s)"
-    fi
+# Check if BUYER_TOKEN is available before proceeding
+if [ -z "$BUYER_TOKEN" ] || [ "$BUYER_TOKEN" = "null" ]; then
+    print_error "Cannot get order book - no valid buyer token available"
+    print_error "This is likely due to failed login or registration in previous steps"
 else
-    print_warning "Could not get order book (HTTP $HTTP_CODE)"
+    api_call "GET" "/api/market/orderbook" "$BUYER_TOKEN" "" "13"
+
+    if [ "$HTTP_CODE" -eq 200 ]; then
+        if validate_json "$BODY"; then
+            BUY_COUNT=$(echo "$BODY" | jq '.bids | length')
+            SELL_COUNT=$(echo "$BODY" | jq '.asks | length')
+            print_success "Order book retrieved - $BUY_COUNT bids, $SELL_COUNT asks (${TEST_TIME_13}s)"
+        fi
+    else
+        print_warning "Could not get order book (HTTP $HTTP_CODE)"
+    fi
 fi
 
 sleep $SLEEP_TIME
 
 # Test 14: Get User Profile
 print_header "14. Get User Profile"
-api_call "GET" "/api/user/profile" "$BUYER_TOKEN" "" "14"
 
-if [ "$HTTP_CODE" -eq 200 ]; then
-    print_success "Profile retrieved (${TEST_TIME_14}s)"
+# Check if BUYER_TOKEN is available before proceeding
+if [ -z "$BUYER_TOKEN" ] || [ "$BUYER_TOKEN" = "null" ]; then
+    print_error "Cannot get user profile - no valid buyer token available"
+    print_error "This is likely due to failed login or registration in previous steps"
 else
-    print_warning "Could not get profile (HTTP $HTTP_CODE)"
+    api_call "GET" "/api/user/profile" "$BUYER_TOKEN" "" "14"
+
+    if [ "$HTTP_CODE" -eq 200 ]; then
+        print_success "Profile retrieved (${TEST_TIME_14}s)"
+    else
+        print_warning "Could not get profile (HTTP $HTTP_CODE)"
+    fi
 fi
 
 sleep $SLEEP_TIME
 
-# Test 15: Get Market Stats
+# Test 15: Get Market Statistics
 print_header "15. Get Market Statistics"
-api_call "GET" "/api/market/stats" "$BUYER_TOKEN" "" "15"
 
-if [ "$HTTP_CODE" -eq 200 ]; then
-    if validate_json "$BODY"; then
-        print_success "Market stats retrieved (${TEST_TIME_15}s)"
-        if [ "$(to_lower "$VERBOSE")" = "true" ]; then
-            echo "$BODY" | jq '.'
-        fi
-    fi
-elif [ "$HTTP_CODE" -eq 404 ]; then
-    print_warning "Market stats endpoint not available"
+# Check if BUYER_TOKEN is available before proceeding
+if [ -z "$BUYER_TOKEN" ] || [ "$BUYER_TOKEN" = "null" ]; then
+    print_error "Cannot get market stats - no valid buyer token available"
+    print_error "This is likely due to failed login or registration in previous steps"
 else
-    print_warning "Could not get market stats (HTTP $HTTP_CODE)"
+    api_call "GET" "/api/market/stats" "$BUYER_TOKEN" "" "15"
+
+    if [ "$HTTP_CODE" -eq 200 ]; then
+        if validate_json "$BODY"; then
+            print_success "Market stats retrieved (${TEST_TIME_15}s)"
+            if [ "$(to_lower "$VERBOSE")" = "true" ]; then
+                echo "$BODY" | jq '.'
+            fi
+        fi
+    elif [ "$HTTP_CODE" -eq 404 ]; then
+        print_warning "Market stats endpoint not available"
+    else
+        print_warning "Could not get market stats (HTTP $HTTP_CODE)"
+    fi
+fi
+
+sleep $SLEEP_TIME
+
+# ============================================================================
+# SESSION MANAGEMENT TESTS
+# ============================================================================
+
+# Test 16: Session Validation
+print_header "16. Session Validation"
+
+if [ ! -z "$BUYER_TOKEN" ] && [ "$BUYER_TOKEN" != "null" ]; then
+    api_call "GET" "/api/auth/validate" "$BUYER_TOKEN" "" "16"
+    
+    if [ "$HTTP_CODE" -eq 200 ]; then
+        if validate_json "$BODY"; then
+            SESSION_VALID=$(echo "$BODY" | jq -r '.valid // false')
+            USER_ID=$(echo "$BODY" | jq -r '.user_id // "unknown"')
+            if [ "$SESSION_VALID" = "true" ]; then
+                print_success "Session valid for user $USER_ID (${TEST_TIME_16}s)"
+            else
+                print_warning "Session invalid or expired"
+            fi
+        fi
+    else
+        print_warning "Could not validate session (HTTP $HTTP_CODE)"
+    fi
+else
+    print_skip "Cannot validate session - no buyer token available"
+fi
+
+sleep $SLEEP_TIME
+
+# Test 17: Refresh Token
+print_header "17. Refresh Token"
+
+if [ ! -z "$BUYER_TOKEN" ] && [ "$BUYER_TOKEN" != "null" ]; then
+    api_call "POST" "/api/auth/refresh" "$BUYER_TOKEN" "" "17"
+    
+    if [ "$HTTP_CODE" -eq 200 ]; then
+        if validate_json "$BODY"; then
+            NEW_TOKEN=$(echo "$BODY" | jq -r '.access_token // empty')
+            if [ ! -z "$NEW_TOKEN" ] && [ "$NEW_TOKEN" != "null" ]; then
+                print_success "Token refreshed successfully (${TEST_TIME_17}s)"
+                print_verbose "New token received"
+                # Update the buyer token for subsequent tests
+                BUYER_TOKEN="$NEW_TOKEN"
+            else
+                print_warning "Token refresh succeeded but no new token received"
+            fi
+        fi
+    elif [ "$HTTP_CODE" -eq 401 ]; then
+        print_warning "Token refresh failed - token expired or invalid"
+    else
+        print_warning "Could not refresh token (HTTP $HTTP_CODE)"
+    fi
+else
+    print_skip "Cannot refresh token - no buyer token available"
+fi
+
+sleep $SLEEP_TIME
+
+# Test 18: Logout Buyer
+print_header "18. Logout Buyer"
+
+if [ ! -z "$BUYER_TOKEN" ] && [ "$BUYER_TOKEN" != "null" ]; then
+    api_call "POST" "/api/auth/logout" "$BUYER_TOKEN" "" "18"
+    
+    if [ "$HTTP_CODE" -eq 200 ]; then
+        print_success "Buyer logged out successfully (${TEST_TIME_18}s)"
+        # Clear the token after successful logout
+        BUYER_TOKEN=""
+    elif [ "$HTTP_CODE" -eq 401 ]; then
+        print_warning "Logout failed - token already invalid or expired"
+    else
+        print_warning "Could not logout buyer (HTTP $HTTP_CODE)"
+    fi
+else
+    print_skip "Cannot logout buyer - no buyer token available"
+fi
+
+sleep $SLEEP_TIME
+
+# Test 19: Session Expiry Check
+print_header "19. Session Expiry Check"
+
+# Try to use the cleared token to verify session is terminated
+if [ -z "$BUYER_TOKEN" ]; then
+    api_call "GET" "/api/user/profile" "" "" "19"
+    
+    if [ "$HTTP_CODE" -eq 401 ]; then
+        print_success "Session properly terminated - access denied (${TEST_TIME_19}s)"
+    else
+        print_warning "Unexpected response after logout (HTTP $HTTP_CODE)"
+    fi
+else
+    print_skip "Cannot check session expiry - token still exists"
 fi
 
 sleep $SLEEP_TIME

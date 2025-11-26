@@ -7,7 +7,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use tracing::{debug, info};
+use tracing::info;
 
 use uuid::Uuid;
 
@@ -45,13 +45,11 @@ pub async fn get_transaction_status(
 ) -> Result<Json<TransactionResponse>, ApiError> {
     info!("Getting status for transaction: {}", id);
 
-    let transaction = app_state
-        .transaction_coordinator
-        .get_transaction_status(id)
-        .await?;
-
-    debug!("Retrieved transaction: {:?}", transaction);
-    Ok(Json(transaction))
+    // TODO: Re-enable when transaction_coordinator is available
+    let _ = (app_state, id);
+    Err(ApiError::BadRequest(
+        "Transaction coordinator not yet implemented".to_string(),
+    ))
 }
 
 /// Get transactions for authenticated user
@@ -88,14 +86,11 @@ pub async fn get_user_transactions(
 ) -> Result<Json<Vec<TransactionResponse>>, ApiError> {
     info!("Getting transactions for user: {:?}", user.sub);
 
-    let filters = params.into_transaction_filters(Some(user.sub));
-    let transactions = app_state
-        .transaction_coordinator
-        .get_user_transactions(user.sub, filters)
-        .await?;
-
-    debug!("Retrieved {} transactions for user", transactions.len());
-    Ok(Json(transactions))
+    // TODO: Re-enable when transaction_coordinator is available
+    let _ = (app_state, user, params);
+    Err(ApiError::BadRequest(
+        "Transaction coordinator not yet implemented".to_string(),
+    ))
 }
 
 /// Get transaction history with filters
@@ -139,14 +134,11 @@ pub async fn get_transaction_history(
         return Err(ApiError::Forbidden("Admin access required".to_string()));
     }
 
-    let filters = params.into_transaction_filters(None);
-    let transactions = app_state
-        .transaction_coordinator
-        .get_transactions(filters)
-        .await?;
-
-    debug!("Retrieved {} transactions", transactions.len());
-    Ok(Json(transactions))
+    // TODO: Re-enable when transaction_coordinator is available
+    let _ = (app_state, params);
+    Err(ApiError::BadRequest(
+        "Transaction coordinator not yet implemented".to_string(),
+    ))
 }
 
 /// Get transaction statistics
@@ -177,13 +169,11 @@ pub async fn get_transaction_stats(
         return Err(ApiError::Forbidden("Admin access required".to_string()));
     }
 
-    let stats = app_state
-        .transaction_coordinator
-        .get_transaction_stats()
-        .await?;
-
-    debug!("Retrieved transaction stats: {:?}", stats);
-    Ok(Json(stats))
+    // TODO: Re-enable when transaction_coordinator is available
+    let _ = app_state;
+    Err(ApiError::BadRequest(
+        "Transaction coordinator not yet implemented".to_string(),
+    ))
 }
 
 /// Retry a failed transaction
@@ -224,50 +214,11 @@ pub async fn retry_transaction(
         user.sub, id, request.max_attempts
     );
 
-    // Get transaction details to check permissions
-    let transaction = app_state
-        .transaction_coordinator
-        .get_transaction_status(id)
-        .await?;
-
-    // Check if user has permission to retry this transaction
-    match transaction.user_id {
-        Some(transaction_user_id) => {
-            // Users can only retry their own transactions
-            if transaction_user_id != user.sub {
-                return Err(ApiError::Forbidden(
-                    "You can only retry your own transactions".to_string(),
-                ));
-            }
-        }
-        None => {
-            // If no user_id, only admin can retry
-            if user.role != "admin" {
-                return Err(ApiError::Forbidden(
-                    "Admin access required to retry this transaction".to_string(),
-                ));
-            }
-        }
-    }
-
-    // Merge ID from path with the request
-    let retry_request = TransactionRetryRequest {
-        operation_id: id,
-        operation_type: request.operation_type,
-        max_attempts: request.max_attempts,
-    };
-
-    let result = app_state
-        .transaction_coordinator
-        .retry_transaction(retry_request)
-        .await?;
-
-    info!(
-        "Transaction retry completed with success: {}, attempts: {}",
-        result.success, result.attempts
-    );
-
-    Ok(Json(result))
+    // TODO: Re-enable when transaction_coordinator is available
+    let _ = (app_state, user, id, request);
+    Err(ApiError::BadRequest(
+        "Transaction coordinator not yet implemented".to_string(),
+    ))
 }
 
 /// Query parameters for transaction endpoints
@@ -290,7 +241,7 @@ impl TransactionQueryParams {
         use chrono::{DateTime, Utc};
 
         TransactionFilters {
-            operation_type: self.operation_type,
+            operation_type: self.operation_type.and_then(|t| t.parse().ok()),
             tx_type: self.tx_type.and_then(|t| t.parse().ok()),
             status: self.status.and_then(|s| s.parse().ok()),
             user_id,

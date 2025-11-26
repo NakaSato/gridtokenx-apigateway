@@ -29,8 +29,13 @@ pub struct AppState {
     pub order_matching_engine: services::OrderMatchingEngine,
     pub market_clearing_engine: services::MarketClearingEngine,
     pub market_clearing_service: services::MarketClearingService,
+    pub settlement_service: services::SettlementService,
     pub websocket_service: services::WebSocketService,
-    pub transaction_coordinator: services::TransactionCoordinator,
+    // TODO: Re-enable when ValidationServices implementation is available
+    // pub transaction_coordinator: services::TransactionCoordinator,
+    pub meter_polling_service: services::MeterPollingService,
+    pub event_processor_service: services::EventProcessorService,
     pub health_checker: services::HealthChecker,
     pub audit_logger: services::AuditLogger,
+    pub cache_service: services::CacheService,
 }
