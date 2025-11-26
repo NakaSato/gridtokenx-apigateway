@@ -11,7 +11,9 @@ use crate::services::blockchain_service::BlockchainService;
 use crate::services::meter_service::MeterService;
 use crate::services::websocket_service::WebSocketService;
 use bigdecimal::ToPrimitive;
+use solana_sdk::pubkey::Pubkey;
 use sqlx::PgPool;
+use std::str::FromStr;
 
 /// Result of a minting operation
 #[derive(Debug, Clone)]
@@ -214,36 +216,42 @@ impl MeterPollingService {
         // Calculate token amount
         let token_amount = self.config.kwh_to_tokens(kwh_amount);
 
-        // Mint tokens - use real blockchain or mock based on configuration
         let result: Result<String, ApiError> = if self.config.enable_real_blockchain {
             // Real blockchain minting
+            let amount = match token_amount.clone() {
+                Ok(a) => a,
+                Err(e) => {
+                    return MintResult {
+                        reading_id: reading.id,
+                        success: false,
+                        error: Some(format!("Token conversion failed: {}", e)),
+                        tx_signature: None,
+                    };
+                }
+            };
+
             info!(
                 "Minting {} tokens on blockchain for reading {}",
-                match token_amount {
-                    Ok(amount) => amount.to_string(),
-                    Err(_) => "conversion_error".to_string(),
-                },
-                reading.id
+                amount, reading.id
             );
 
-            // TODO: Implement real blockchain call
-            // This requires:
-            // 1. Authority keypair
-            // 2. User's token account
-            // 3. Mint account
-            // 4. Proper account initialization
-            //
-            // Example implementation:
-            // self.blockchain_service
-            //     .mint_energy_tokens(&authority, &user_token_account, &mint, kwh_amount)
-            //     .await
-            //     .map(|sig| sig.to_string())
-            //     .map_err(|e| ApiError::Internal(format!("Blockchain minting failed: {}", e)))
+            let user_wallet = match Pubkey::from_str(&reading.wallet_address) {
+                Ok(w) => w,
+                Err(e) => {
+                    return MintResult {
+                        reading_id: reading.id,
+                        success: false,
+                        error: Some(format!("Invalid wallet address: {}", e)),
+                        tx_signature: None,
+                    };
+                }
+            };
 
-            // For now, return an error to indicate it's not implemented
-            Err(ApiError::Internal(
-                "Real blockchain minting not yet configured. Set TOKENIZATION_ENABLE_REAL_BLOCKCHAIN=false to use mock.".to_string()
-            ))
+            self.blockchain_service
+                .mint_tokens_direct(&user_wallet, amount)
+                .await
+                .map(|sig| sig.to_string())
+                .map_err(|e| ApiError::Internal(format!("Blockchain minting failed: {}", e)))
         } else {
             // Mock implementation for testing
             debug!("Using mock blockchain signature for reading {}", reading.id);

@@ -45,6 +45,8 @@ pub struct SubmitReadingRequest {
     /// NEW: Required UUID from meter_registry (for verified meters)
     /// For legacy support, this can be omitted during grace period
     pub meter_id: Option<Uuid>,
+    /// Legacy meter serial number (for unverified meters)
+    pub meter_serial: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -268,6 +270,7 @@ pub async fn submit_reading(
         kwh_amount: request.kwh_amount,
         reading_timestamp: request.reading_timestamp,
         meter_signature: request.meter_signature,
+        meter_serial: request.meter_serial,
     };
 
     crate::services::meter_service::MeterService::validate_reading(&meter_request)

@@ -33,6 +33,8 @@ pub struct SubmitMeterReadingRequest {
     pub reading_timestamp: DateTime<Utc>,
     /// Optional: smart meter signature for verification
     pub meter_signature: Option<String>,
+    /// Optional: meter serial number (legacy)
+    pub meter_serial: Option<String>,
 }
 
 /// Service for managing smart meter data
@@ -79,8 +81,13 @@ impl MeterService {
         }
 
         // Check for duplicate readings (same user, similar timestamp)
-        self.check_duplicate_reading(user_id, &request.reading_timestamp)
-            .await?;
+        self.check_duplicate_reading(
+            user_id,
+            &request.reading_timestamp,
+            meter_id,
+            request.meter_serial.as_deref(),
+        )
+        .await?;
 
         // Insert reading into database
         let reading_id = Uuid::new_v4();
@@ -88,9 +95,10 @@ impl MeterService {
             r#"
             INSERT INTO meter_readings (
                 id, user_id, wallet_address, kwh_amount,
-                reading_timestamp, timestamp, submitted_at, minted, meter_id, verification_status
+                reading_timestamp, timestamp, submitted_at, minted, meter_id, verification_status,
+                meter_serial
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING
                 id, user_id, wallet_address,
                 kwh_amount, reading_timestamp, submitted_at,
@@ -107,6 +115,7 @@ impl MeterService {
         .bind(&false)
         .bind(&meter_id)
         .bind(&verification_status)
+        .bind(&request.meter_serial)
         .fetch_one(&self.db_pool)
         .await
         .map_err(|e| anyhow!("Failed to insert meter reading: {}", e))?;
@@ -139,25 +148,72 @@ impl MeterService {
         &self,
         user_id: Uuid,
         reading_timestamp: &DateTime<Utc>,
+        meter_id: Option<Uuid>,
+        meter_serial: Option<&str>,
     ) -> Result<()> {
         // Check for readings within ±15 minutes
         let window_start = *reading_timestamp - chrono::Duration::minutes(15);
         let window_end = *reading_timestamp + chrono::Duration::minutes(15);
 
-        let existing = sqlx::query!(
-            r#"
-            SELECT id FROM meter_readings
-            WHERE user_id = $1
-            AND reading_timestamp BETWEEN $2 AND $3
-            LIMIT 1
-            "#,
-            user_id,
-            window_start,
-            window_end,
-        )
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| anyhow!("Failed to check duplicate readings: {}", e))?;
+        let existing: Option<Uuid> = if let Some(mid) = meter_id {
+            // Check for duplicate reading for this specific meter (verified)
+            let record = sqlx::query!(
+                r#"
+                SELECT id FROM meter_readings
+                WHERE user_id = $1
+                AND meter_id = $2
+                AND reading_timestamp BETWEEN $3 AND $4
+                LIMIT 1
+                "#,
+                user_id,
+                mid,
+                window_start,
+                window_end,
+            )
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(|e| anyhow!("Failed to check duplicate readings: {}", e))?;
+
+            record.map(|r| r.id)
+        } else if let Some(serial) = meter_serial {
+            // Check for duplicate reading for this specific meter serial (unverified/legacy)
+            let record = sqlx::query!(
+                r#"
+                SELECT id FROM meter_readings
+                WHERE user_id = $1
+                AND meter_serial = $2
+                AND reading_timestamp BETWEEN $3 AND $4
+                LIMIT 1
+                "#,
+                user_id,
+                serial,
+                window_start,
+                window_end,
+            )
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(|e| anyhow!("Failed to check duplicate readings: {}", e))?;
+
+            record.map(|r| r.id)
+        } else {
+            // Legacy check: Check for duplicate reading for the user (any meter)
+            let record = sqlx::query!(
+                r#"
+                SELECT id FROM meter_readings
+                WHERE user_id = $1
+                AND reading_timestamp BETWEEN $2 AND $3
+                LIMIT 1
+                "#,
+                user_id,
+                window_start,
+                window_end,
+            )
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(|e| anyhow!("Failed to check duplicate readings: {}", e))?;
+
+            record.map(|r| r.id)
+        };
 
         if existing.is_some() {
             return Err(anyhow!(
@@ -602,6 +658,7 @@ mod tests {
             kwh_amount: BigDecimal::from(10),
             reading_timestamp: Utc::now(),
             meter_signature: None,
+            meter_serial: None,
         };
 
         assert!(MeterService::validate_reading(&request).is_ok());
@@ -614,6 +671,7 @@ mod tests {
             kwh_amount: BigDecimal::from(0),
             reading_timestamp: Utc::now(),
             meter_signature: None,
+            meter_serial: None,
         };
 
         assert!(MeterService::validate_reading(&request).is_err());
@@ -626,6 +684,7 @@ mod tests {
             kwh_amount: BigDecimal::from(10),
             reading_timestamp: Utc::now() + chrono::Duration::hours(1),
             meter_signature: None,
+            meter_serial: None,
         };
 
         assert!(MeterService::validate_reading(&request).is_err());
@@ -638,6 +697,7 @@ mod tests {
             kwh_amount: BigDecimal::from(150), // Over 100 kWh limit
             reading_timestamp: Utc::now(),
             meter_signature: None,
+            meter_serial: None,
         };
 
         assert!(MeterService::validate_reading(&request).is_err());
@@ -650,6 +710,7 @@ mod tests {
             kwh_amount: BigDecimal::from(10),
             reading_timestamp: Utc::now() - chrono::Duration::days(10),
             meter_signature: None,
+            meter_serial: None,
         };
 
         assert!(MeterService::validate_reading(&request).is_err());
