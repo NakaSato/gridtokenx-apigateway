@@ -1,0 +1,17 @@
+target
+.git
+.gitignore
+*.md
+.env
+.env.local
+.DS_Store
+*.log
+.vscode
+.idea
+tests
+docs
+*.swp
+*.swo
+*~
+Dockerfile
+.dockerignore
