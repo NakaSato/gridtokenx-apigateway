@@ -31,6 +31,7 @@ pub enum OrderSide {
 pub struct BookOrder {
     pub id: Uuid,
     pub user_id: Uuid,
+    pub epoch_id: Option<Uuid>,
     pub side: OrderSide,
     pub energy_amount: Decimal, // kWh
     pub price: Decimal,         // USD per kWh
@@ -276,6 +277,13 @@ impl OrderBook {
 
         expired_ids
     }
+
+    /// Clear all orders from the book
+    pub fn clear(&mut self) {
+        self.buy_levels.clear();
+        self.sell_levels.clear();
+        self.order_index.clear();
+    }
 }
 
 /// Trade match result
@@ -434,6 +442,7 @@ impl MarketClearingEngine {
             .map_err(|e| ApiError::Internal(format!("Redis connection failed: {}", e)))?;
 
         let mut book = self.order_book.write().await;
+        book.clear();
         let mut restored_count = 0;
 
         // Restore buy orders
@@ -481,6 +490,7 @@ impl MarketClearingEngine {
     }
 
     /// Clear Redis order book cache
+    #[allow(dead_code)]
     async fn clear_redis_cache(&self) -> Result<(), ApiError> {
         let mut conn = self
             .redis
@@ -529,40 +539,55 @@ impl MarketClearingEngine {
         let orders = sqlx::query_as::<
             _,
             (
-                Uuid,
-                Uuid,
-                String,
-                String,
-                String,
-                String,
-                DateTime<Utc>,
-                DateTime<Utc>,
+                Uuid,                  // id
+                Uuid,                  // user_id
+                Uuid,                  // epoch_id
+                String,                // side
+                String,                // energy_amount
+                String,                // price_per_kwh
+                String,                // filled_amount
+                DateTime<Utc>,         // created_at
+                DateTime<Utc>,         // expires_at
+                String,                // status
+                Option<DateTime<Utc>>, // filled_at
             ),
         >(
             r#"
-            SELECT 
-                id, user_id, side::text, energy_amount::text, 
+            SELECT
+                id, user_id, epoch_id, side::text, energy_amount::text,
                 price_per_kwh::text, filled_amount::text,
-                created_at, expires_at
+                created_at, expires_at, status::text, filled_at
             FROM trading_orders
             WHERE status = 'pending'
                 AND expires_at > NOW()
             ORDER BY created_at ASC
-            "#,
+        "#,
         )
         .fetch_all(&self.db)
         .await
         .map_err(ApiError::Database)?;
 
         let mut book = self.order_book.write().await;
+        book.clear();
         let mut loaded_count = 0;
 
-        for (id, user_id, side_str, energy_str, price_str, filled_str, created_at, expires_at) in
-            orders
+        for (
+            id,
+            user_id,
+            epoch_id,
+            side_str,
+            energy_str,
+            price_str,
+            filled_str,
+            created_at,
+            expires_at,
+            _status,
+            _filled_at,
+        ) in orders
         {
             let side = match side_str.as_str() {
-                "Buy" => OrderSide::Buy,
-                "Sell" => OrderSide::Sell,
+                "buy" | "Buy" => OrderSide::Buy,
+                "sell" | "Sell" => OrderSide::Sell,
                 _ => continue,
             };
 
@@ -576,6 +601,7 @@ impl MarketClearingEngine {
             let order = BookOrder {
                 id,
                 user_id,
+                epoch_id: Some(epoch_id),
                 side,
                 energy_amount,
                 price,
@@ -757,7 +783,10 @@ impl MarketClearingEngine {
                         quantity: match_quantity,
                         total_value,
                         matched_at: Utc::now(),
-                        epoch_id: Uuid::new_v4(), // Placeholder, should be passed from matching cycle
+                        epoch_id: buy_order
+                            .epoch_id
+                            .or(sell_order.epoch_id)
+                            .unwrap_or_else(Uuid::new_v4),
                     };
 
                     info!(
@@ -867,6 +896,12 @@ impl MarketClearingEngine {
             .map_err(ApiError::Database)?
             .flatten();
 
+            // Convert Decimal to BigDecimal for database
+            let matched_amount_bd = sqlx::types::BigDecimal::from_str(&trade.quantity.to_string())
+                .map_err(|e| ApiError::Internal(format!("Invalid quantity: {}", e)))?;
+            let match_price_bd = sqlx::types::BigDecimal::from_str(&trade.price.to_string())
+                .map_err(|e| ApiError::Internal(format!("Invalid price: {}", e)))?;
+
             if let Some(epoch_id) = epoch_id {
                 sqlx::query(
                     r#"
@@ -880,8 +915,8 @@ impl MarketClearingEngine {
                 .bind(epoch_id)
                 .bind(trade.buy_order_id)
                 .bind(trade.sell_order_id)
-                .bind(trade.quantity.to_string())
-                .bind(trade.price.to_string())
+                .bind(matched_amount_bd.clone())
+                .bind(match_price_bd.clone())
                 .bind(trade.matched_at)
                 .bind("pending")
                 .execute(&mut *tx)
@@ -899,11 +934,11 @@ impl MarketClearingEngine {
             // Update buy order with proper partial fill handling
             let buy_result = sqlx::query(
                 r#"
-                UPDATE trading_orders 
+                UPDATE trading_orders
                 SET filled_amount = filled_amount + $1,
-                    status = CASE 
-                        WHEN filled_amount + $1 >= energy_amount THEN 'Filled'::order_status
-                        ELSE 'PartiallyFilled'::order_status
+                    status = CASE
+                        WHEN filled_amount + $1 >= energy_amount THEN 'filled'::order_status
+                        ELSE 'partially_filled'::order_status
                     END,
                     filled_at = CASE
                         WHEN filled_amount + $1 >= energy_amount THEN NOW()
@@ -911,11 +946,11 @@ impl MarketClearingEngine {
                     END,
                     updated_at = NOW()
                 WHERE id = $2
-                  AND status IN ('Pending'::order_status, 'PartiallyFilled'::order_status)
+                  AND status IN ('pending'::order_status, 'partially_filled'::order_status)
                 RETURNING id, energy_amount, filled_amount + $1 as new_filled_amount
                 "#,
             )
-            .bind(trade.quantity.to_string())
+            .bind(matched_amount_bd.clone())
             .bind(trade.buy_order_id)
             .fetch_optional(&mut *tx)
             .await
@@ -933,11 +968,11 @@ impl MarketClearingEngine {
             // Update sell order with proper partial fill handling
             let sell_result = sqlx::query(
                 r#"
-                UPDATE trading_orders 
+                UPDATE trading_orders
                 SET filled_amount = filled_amount + $1,
-                    status = CASE 
-                        WHEN filled_amount + $1 >= energy_amount THEN 'Filled'::order_status
-                        ELSE 'PartiallyFilled'::order_status
+                    status = CASE
+                        WHEN filled_amount + $1 >= energy_amount THEN 'filled'::order_status
+                        ELSE 'partially_filled'::order_status
                     END,
                     filled_at = CASE
                         WHEN filled_amount + $1 >= energy_amount THEN NOW()
@@ -945,11 +980,11 @@ impl MarketClearingEngine {
                     END,
                     updated_at = NOW()
                 WHERE id = $2
-                  AND status IN ('Pending'::order_status, 'PartiallyFilled'::order_status)
+                  AND status IN ('pending'::order_status, 'partially_filled'::order_status)
                 RETURNING id, energy_amount, filled_amount + $1 as new_filled_amount
                 "#,
             )
-            .bind(trade.quantity.to_string())
+            .bind(matched_amount_bd.clone())
             .bind(trade.sell_order_id)
             .fetch_optional(&mut *tx)
             .await
@@ -991,6 +1026,9 @@ impl MarketClearingEngine {
     pub async fn execute_matching_cycle(&self) -> Result<usize, ApiError> {
         info!("🔄 Starting matching cycle");
 
+        // Load active orders from database
+        self.load_order_book().await?;
+
         // Broadcast order book snapshot before matching
         if let Some(ws) = &self.websocket {
             self.broadcast_order_book_snapshot(ws).await;
@@ -1018,6 +1056,7 @@ impl MarketClearingEngine {
                     trade.quantity.to_string(),
                     trade.price.to_string(),
                     trade.total_value.to_string(),
+                    chrono::Utc::now().to_string(),
                 )
                 .await;
             }
@@ -1154,6 +1193,7 @@ mod tests {
             price: Decimal::from_str_exact("0.15").unwrap(),
             filled_amount: Decimal::ZERO,
             created_at: Utc::now(),
+            epoch_id: None,
             expires_at: Utc::now() + chrono::Duration::hours(24),
         };
 
@@ -1177,6 +1217,7 @@ mod tests {
             price: Decimal::from_str_exact("0.15").unwrap(),
             filled_amount: Decimal::ZERO,
             created_at: Utc::now(),
+            epoch_id: None,
             expires_at: Utc::now() + chrono::Duration::hours(24),
         };
 
@@ -1188,6 +1229,7 @@ mod tests {
             price: Decimal::from_str_exact("0.20").unwrap(), // Higher price
             filled_amount: Decimal::ZERO,
             created_at: Utc::now(),
+            epoch_id: None,
             expires_at: Utc::now() + chrono::Duration::hours(24),
         };
 
@@ -1212,6 +1254,7 @@ mod tests {
             price: Decimal::from_str_exact("0.15").unwrap(),
             filled_amount: Decimal::ZERO,
             created_at: Utc::now(),
+            epoch_id: None,
             expires_at: Utc::now() + chrono::Duration::hours(24),
         };
 
@@ -1235,6 +1278,7 @@ mod tests {
             price: Decimal::from_str_exact("0.20").unwrap(),
             filled_amount: Decimal::ZERO,
             created_at: Utc::now(),
+            epoch_id: None,
             expires_at: Utc::now() + chrono::Duration::hours(24),
         };
 
@@ -1246,6 +1290,7 @@ mod tests {
             price: Decimal::from_str_exact("0.15").unwrap(), // Lower price
             filled_amount: Decimal::ZERO,
             created_at: Utc::now(),
+            epoch_id: None,
             expires_at: Utc::now() + chrono::Duration::hours(24),
         };
 
@@ -1271,6 +1316,7 @@ mod tests {
             price: Decimal::from_str_exact("0.15").unwrap(),
             filled_amount: Decimal::ZERO,
             created_at: Utc::now(),
+            epoch_id: None,
             expires_at: Utc::now() + chrono::Duration::hours(24),
         };
 
@@ -1293,6 +1339,7 @@ mod tests {
             price: Decimal::from_str_exact("0.10").unwrap(),
             filled_amount: Decimal::ZERO,
             created_at: Utc::now(),
+            epoch_id: None,
             expires_at: Utc::now() + chrono::Duration::hours(24),
         };
 
@@ -1304,6 +1351,7 @@ mod tests {
             price: Decimal::from_str_exact("0.20").unwrap(),
             filled_amount: Decimal::ZERO,
             created_at: Utc::now(),
+            epoch_id: None,
             expires_at: Utc::now() + chrono::Duration::hours(24),
         };
 
@@ -1329,6 +1377,7 @@ mod tests {
             price: Decimal::from_str_exact("0.10").unwrap(),
             filled_amount: Decimal::ZERO,
             created_at: Utc::now(),
+            epoch_id: None,
             expires_at: Utc::now() + chrono::Duration::hours(24),
         };
 
@@ -1340,6 +1389,7 @@ mod tests {
             price: Decimal::from_str_exact("0.15").unwrap(),
             filled_amount: Decimal::ZERO,
             created_at: Utc::now(),
+            epoch_id: None,
             expires_at: Utc::now() + chrono::Duration::hours(24),
         };
 
@@ -1367,6 +1417,7 @@ mod tests {
                 price: Decimal::from_str_exact(&format!("0.{}", i * 10)).unwrap(),
                 filled_amount: Decimal::ZERO,
                 created_at: Utc::now(),
+                epoch_id: None,
                 expires_at: Utc::now() + chrono::Duration::hours(24),
             };
             book.add_order(order);
@@ -1390,6 +1441,7 @@ mod tests {
             price: Decimal::from_str_exact("0.15").unwrap(),
             filled_amount: Decimal::from(30),
             created_at: Utc::now(),
+            epoch_id: None,
             expires_at: Utc::now() + chrono::Duration::hours(24),
         };
 
@@ -1406,6 +1458,7 @@ mod tests {
             price: Decimal::from_str_exact("0.15").unwrap(),
             filled_amount: Decimal::from(100),
             created_at: Utc::now(),
+            epoch_id: None,
             expires_at: Utc::now() + chrono::Duration::hours(24),
         };
 
@@ -1420,6 +1473,7 @@ mod tests {
         let expired_order = BookOrder {
             id: Uuid::new_v4(),
             user_id: Uuid::new_v4(),
+            epoch_id: None,
             side: OrderSide::Buy,
             energy_amount: Decimal::from(100),
             price: Decimal::from_str_exact("0.15").unwrap(),
@@ -1438,6 +1492,7 @@ mod tests {
             price: Decimal::from_str_exact("0.15").unwrap(),
             filled_amount: Decimal::ZERO,
             created_at: Utc::now(),
+            epoch_id: None,
             expires_at: Utc::now() + chrono::Duration::hours(24),
         };
 
@@ -1459,6 +1514,7 @@ mod tests {
                 price,
                 filled_amount: Decimal::ZERO,
                 created_at: Utc::now(),
+                epoch_id: None,
                 expires_at: Utc::now() + chrono::Duration::hours(24),
             };
             book.add_order(order);

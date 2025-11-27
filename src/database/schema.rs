@@ -3,8 +3,8 @@
 
 pub mod types {
     use serde::{Deserialize, Serialize};
-    use utoipa::ToSchema;
     use std::fmt;
+    use utoipa::ToSchema;
 
     #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, ToSchema)]
     #[sqlx(type_name = "user_role", rename_all = "lowercase")]
@@ -14,14 +14,14 @@ pub mod types {
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, ToSchema)]
-    #[sqlx(type_name = "order_type")]
+    #[sqlx(type_name = "order_type", rename_all = "lowercase")]
     pub enum OrderType {
         Market,
         Limit,
     }
 
-    #[derive(Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type, ToSchema)]
-    #[sqlx(type_name = "order_side")]
+    #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, sqlx::Type, ToSchema)]
+    #[sqlx(type_name = "order_side", rename_all = "lowercase")]
     pub enum OrderSide {
         Buy,
         Sell,

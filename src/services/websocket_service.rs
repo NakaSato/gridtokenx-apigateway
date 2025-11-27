@@ -147,6 +147,7 @@ pub struct PriceLevel {
 }
 
 /// WebSocket client connection
+#[allow(dead_code)]
 struct Client {
     id: Uuid,
     sender: SplitSink<WebSocket, Message>,

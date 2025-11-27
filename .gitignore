@@ -1,5 +1,5 @@
 # Rust
-/target/
+**/target/**
 **/*.rs.bk
 *.pdb
 
@@ -16,7 +16,6 @@ Cargo.lock
 .DS_Store
 
 # Environment files
-.env
 .env.local
 .env.*.local
 scripts/testing.env

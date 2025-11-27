@@ -1,0 +1,192 @@
+    Checking api-gateway v0.1.1 (/Users/chanthawat/Developments/weekend/gridtokenx-apigateway)
+error[E0412]: cannot find type `DashboardMetrics` in this scope
+  --> src/handlers/dashboard.rs:12:66
+   |
+12 |         (status = 200, description = "Dashboard metrics", body = DashboardMetrics),
+   |                                                                  ^^^^^^^^^^^^^^^^
+   |
+  ::: src/services/dashboard_service.rs:16:1
+   |
+16 | pub struct DashboardService {
+   | --------------------------- similarly named struct `DashboardService` defined here
+   |
+help: a struct with a similar name exists
+   |
+12 -         (status = 200, description = "Dashboard metrics", body = DashboardMetrics),
+12 +         (status = 200, description = "Dashboard metrics", body = DashboardService),
+   |
+help: consider importing this struct
+   |
+ 1 + use crate::services::dashboard_service::DashboardMetrics;
+   |
+
+warning: unused import: `std::str::FromStr`
+ --> src/error.rs:8:5
+  |
+8 | use std::str::FromStr;
+  |     ^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::sync::Arc`
+ --> src/handlers/dashboard.rs:4:5
+  |
+4 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `EncodedConfirmedTransactionWithStatusMeta`
+ --> src/services/event_processor_service.rs:5:33
+  |
+5 | use solana_transaction_status::{EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding};
+  |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Duration`
+ --> src/services/meter_verification_service.rs:3:24
+  |
+3 | use chrono::{DateTime, Duration, Utc};
+  |                        ^^^^^^^^
+
+error[E0277]: `?` couldn't convert the error to `ApiError`
+   --> src/handlers/dashboard.rs:19:56
+    |
+ 19 |     let metrics = dashboard_service.get_metrics().await?;
+    |                   -------------------------------------^ the trait `std::convert::From<anyhow::Error>` is not implemented for `ApiError`
+    |                   |
+    |                   this can't be annotated with `?` because it has type `Result<_, anyhow::Error>`
+    |
+note: `ApiError` needs to implement `From<anyhow::Error>`
+   --> src/error.rs:307:1
+    |
+307 | pub enum ApiError {
+    | ^^^^^^^^^^^^^^^^^
+    = note: the question mark operation (`?`) implicitly performs a conversion on the error value using the `From` trait
+    = help: the following other types implement trait `std::convert::From<T>`:
+              `ApiError` implements `std::convert::From<RedisError>`
+              `ApiError` implements `std::convert::From<sqlx::Error>`
+
+error[E0277]: the trait bound `EventProcessorStats: ToSchema` is not satisfied
+   --> src/handlers/health.rs:88:75
+    |
+ 88 |         (status = 200, description = "Event processor statistics", body = EventProcessorStats),
+    |                                                                           ^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `ToSchema` is not implemented for `EventProcessorStats`
+   --> src/services/event_processor_service.rs:586:1
+    |
+586 | pub struct EventProcessorStats {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `ToSchema`:
+              &'t [T]
+              &'t mut [T]
+              &str
+              ()
+              ActivityListResponse
+              ActivityQuery
+              AdminUpdateUserRequest
+              AuditEventRecord
+            and 213 others
+
+error[E0277]: the trait bound `EventProcessorStats: PartialSchema` is not satisfied
+   --> src/handlers/health.rs:88:75
+    |
+ 88 |         (status = 200, description = "Event processor statistics", body = EventProcessorStats),
+    |                                                                           ^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `ComposeSchema` is not implemented for `EventProcessorStats`
+   --> src/services/event_processor_service.rs:586:1
+    |
+586 | pub struct EventProcessorStats {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `ComposeSchema`:
+              &[T]
+              &mut [T]
+              &str
+              ActivityListResponse
+              ActivityQuery
+              AdminUpdateUserRequest
+              AuditEventRecord
+              AuditLogQuery
+            and 211 others
+    = note: required for `EventProcessorStats` to implement `PartialSchema`
+note: required by a bound in `utoipa::ToSchema::name`
+   --> /Users/chanthawat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/utoipa-5.4.0/src/lib.rs:374:21
+    |
+374 | pub trait ToSchema: PartialSchema {
+    |                     ^^^^^^^^^^^^^ required by this bound in `ToSchema::name`
+...
+405 |     fn name() -> Cow<'static, str> {
+    |        ---- required by a bound in this associated function
+
+error[E0277]: the trait bound `EventProcessorStats: Clone` is not satisfied
+  --> src/services/dashboard_service.rs:11:5
+   |
+ 8 | #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+   |                 ----- in this derive macro expansion
+...
+11 |     pub event_processor: EventProcessorStats,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `Clone` is not implemented for `EventProcessorStats`
+   |
+help: consider annotating `EventProcessorStats` with `#[derive(Clone)]`
+  --> src/services/event_processor_service.rs:586:1
+   |
+586+ #[derive(Clone)]
+587| pub struct EventProcessorStats {
+   |
+
+error[E0277]: the trait bound `EventProcessorStats: ToSchema` is not satisfied
+   --> src/services/dashboard_service.rs:11:26
+    |
+ 11 |     pub event_processor: EventProcessorStats,
+    |                          ^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `ToSchema` is not implemented for `EventProcessorStats`
+   --> src/services/event_processor_service.rs:586:1
+    |
+586 | pub struct EventProcessorStats {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `ToSchema`:
+              &'t [T]
+              &'t mut [T]
+              &str
+              ()
+              ActivityListResponse
+              ActivityQuery
+              AdminUpdateUserRequest
+              AuditEventRecord
+            and 213 others
+
+error[E0277]: the trait bound `EventProcessorStats: PartialSchema` is not satisfied
+   --> src/services/dashboard_service.rs:11:26
+    |
+ 11 |     pub event_processor: EventProcessorStats,
+    |                          ^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `ComposeSchema` is not implemented for `EventProcessorStats`
+   --> src/services/event_processor_service.rs:586:1
+    |
+586 | pub struct EventProcessorStats {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the following other types implement trait `ComposeSchema`:
+              &[T]
+              &mut [T]
+              &str
+              ActivityListResponse
+              ActivityQuery
+              AdminUpdateUserRequest
+              AuditEventRecord
+              AuditLogQuery
+            and 211 others
+    = note: required for `EventProcessorStats` to implement `PartialSchema`
+note: required by a bound in `utoipa::ToSchema::name`
+   --> /Users/chanthawat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/utoipa-5.4.0/src/lib.rs:374:21
+    |
+374 | pub trait ToSchema: PartialSchema {
+    |                     ^^^^^^^^^^^^^ required by this bound in `ToSchema::name`
+...
+405 |     fn name() -> Cow<'static, str> {
+    |        ---- required by a bound in this associated function
+
+Some errors have detailed explanations: E0277, E0412.
+For more information about an error, try `rustc --explain E0277`.
+warning: `api-gateway` (lib) generated 4 warnings
+error: could not compile `api-gateway` (lib) due to 11 previous errors; 4 warnings emitted

@@ -32,9 +32,9 @@ impl PriorityLevel {
     /// Get estimated confirmation time (in slots)
     pub fn estimated_slots(&self) -> u64 {
         match self {
-            PriorityLevel::Low => 10,      // ~40 seconds
-            PriorityLevel::Medium => 5,     // ~20 seconds
-            PriorityLevel::High => 2,       // ~8 seconds
+            PriorityLevel::Low => 10,   // ~40 seconds
+            PriorityLevel::Medium => 5, // ~20 seconds
+            PriorityLevel::High => 2,   // ~8 seconds
         }
     }
 }
@@ -46,7 +46,7 @@ impl PriorityFeeService {
     /// Add compute budget and priority fee instructions to transaction
     /// Returns modified instruction list with priority fee
     pub fn add_priority_fee(
-        instructions: &mut Vec<Instruction>,
+        _instructions: &mut Vec<Instruction>,
         priority_level: PriorityLevel,
         compute_limit: Option<u64>,
     ) -> Result<()> {
@@ -60,7 +60,10 @@ impl PriorityFeeService {
 
         // TODO: Add compute budget instructions when solana-sdk compute_budget is available
         // For now, we'll just log the priority fee settings
-        debug!("Priority fee settings: {} micro-lamports per CU, compute limit: {}", micro_lamports, compute_limit);
+        debug!(
+            "Priority fee settings: {} micro-lamports per CU, compute limit: {}",
+            micro_lamports, compute_limit
+        );
 
         info!(
             "Priority fee added: {} ({}) - Estimated confirmation: {} slots",
@@ -73,16 +76,13 @@ impl PriorityFeeService {
     }
 
     /// Calculate estimated priority fee cost in SOL
-    pub fn estimate_fee_cost(
-        priority_level: PriorityLevel,
-        compute_limit: Option<u64>,
-    ) -> f64 {
+    pub fn estimate_fee_cost(priority_level: PriorityLevel, compute_limit: Option<u64>) -> f64 {
         let compute_limit = compute_limit.unwrap_or(200_000);
         let micro_lamports = priority_level.micro_lamports_per_cu();
-        
+
         // Total micro-lamports = compute_limit * micro_lamports_per_cu
         let total_micro_lamports = compute_limit * micro_lamports;
-        
+
         // Convert to SOL (1 SOL = 1_000_000_000 micro-lamports)
         total_micro_lamports as f64 / 1_000_000_000.0
     }
@@ -95,6 +95,10 @@ impl PriorityFeeService {
             TransactionType::OrderCreation => PriorityLevel::Low,
             TransactionType::ERCIssuance => PriorityLevel::Medium,
             TransactionType::WalletConnection => PriorityLevel::Low,
+            TransactionType::UserRegistration => PriorityLevel::Medium,
+            TransactionType::MeterRegistration => PriorityLevel::Medium,
+            TransactionType::MeterReading => PriorityLevel::Low,
+            TransactionType::TokenTransfer => PriorityLevel::Medium,
         }
     }
 
@@ -106,6 +110,10 @@ impl PriorityFeeService {
             TransactionType::OrderCreation => 100_000,
             TransactionType::ERCIssuance => 250_000,
             TransactionType::WalletConnection => 50_000,
+            TransactionType::UserRegistration => 100_000,
+            TransactionType::MeterRegistration => 120_000,
+            TransactionType::MeterReading => 80_000,
+            TransactionType::TokenTransfer => 100_000,
         }
     }
 }
@@ -118,6 +126,10 @@ pub enum TransactionType {
     OrderCreation,
     ERCIssuance,
     WalletConnection,
+    UserRegistration,
+    MeterRegistration,
+    MeterReading,
+    TokenTransfer,
 }
 
 impl TransactionType {
@@ -129,6 +141,10 @@ impl TransactionType {
             TransactionType::OrderCreation => "Trading order creation",
             TransactionType::ERCIssuance => "ERC certificate issuance",
             TransactionType::WalletConnection => "Wallet connection",
+            TransactionType::UserRegistration => "User registration on blockchain",
+            TransactionType::MeterRegistration => "Smart meter registration",
+            TransactionType::MeterReading => "Meter reading submission",
+            TransactionType::TokenTransfer => "Token transfer between accounts",
         }
     }
 
@@ -136,6 +152,7 @@ impl TransactionType {
     pub fn should_use_priority_fees(&self) -> bool {
         match self {
             TransactionType::WalletConnection => false, // Low importance
+            TransactionType::MeterReading => false,     // High volume, lower priority
             _ => true, // Most transactions benefit from priority fees
         }
     }
@@ -188,7 +205,7 @@ impl PriorityTransactionBuilder {
     /// Build final instruction list with priority fees
     pub fn build(self) -> Result<Vec<Instruction>> {
         let mut instructions = self.instructions;
-        
+
         PriorityFeeService::add_priority_fee(
             &mut instructions,
             self.priority_level,
@@ -200,10 +217,7 @@ impl PriorityTransactionBuilder {
 
     /// Get estimated fee cost
     pub fn estimate_fee_cost(&self) -> f64 {
-        PriorityFeeService::estimate_fee_cost(
-            self.priority_level,
-            self.compute_limit,
-        )
+        PriorityFeeService::estimate_fee_cost(self.priority_level, self.compute_limit)
     }
 
     /// Get priority level description
@@ -230,11 +244,8 @@ mod tests {
 
     #[test]
     fn test_fee_estimation() {
-        let cost = PriorityFeeService::estimate_fee_cost(
-            PriorityLevel::Medium,
-            Some(200_000),
-        );
-        
+        let cost = PriorityFeeService::estimate_fee_cost(PriorityLevel::Medium, Some(200_000));
+
         // 200_000 CU * 10_000 micro-lamports/CU = 2_000_000_000 micro-lamports = 2 SOL
         assert_eq!(cost, 2.0);
     }
@@ -243,8 +254,9 @@ mod tests {
     fn test_transaction_recommendations() {
         let priority = PriorityFeeService::recommend_priority_level(TransactionType::Settlement);
         assert!(matches!(priority, PriorityLevel::High));
-        
-        let compute_limit = PriorityFeeService::recommend_compute_limit(TransactionType::Settlement);
+
+        let compute_limit =
+            PriorityFeeService::recommend_compute_limit(TransactionType::Settlement);
         assert_eq!(compute_limit, 300_000);
     }
 
@@ -254,9 +266,12 @@ mod tests {
             .with_priority_level(PriorityLevel::High)
             .with_compute_limit(250_000);
 
-        assert_eq!(builder.priority_description(), PriorityLevel::High.description());
+        assert_eq!(
+            builder.priority_description(),
+            PriorityLevel::High.description()
+        );
         assert_eq!(builder.estimated_confirmation_slots(), 2);
-        
+
         let cost = builder.estimate_fee_cost();
         assert!(cost > 0.0);
     }

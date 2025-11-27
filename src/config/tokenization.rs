@@ -44,6 +44,9 @@ pub struct TokenizationConfig {
 
     /// Maximum number of transactions per batch (default: 20)
     pub max_transactions_per_batch: usize,
+
+    /// Whether to use real blockchain transactions or mocks (default: false)
+    pub enable_real_blockchain: bool,
 }
 
 impl Default for TokenizationConfig {
@@ -62,6 +65,7 @@ impl Default for TokenizationConfig {
             max_retry_delay_secs: 3600, // 1 hour
             transaction_timeout_secs: 60,
             max_transactions_per_batch: 20,
+            enable_real_blockchain: false, // Default to mock for safety
         }
     }
 }
@@ -174,6 +178,7 @@ impl TokenizationConfig {
 
         if let Ok(val) = env::var("TOKENIZATION_MAX_RETRY_ATTEMPTS") {
             match val.parse::<u32>() {
+                #[allow(unused_comparisons)]
                 Ok(attempts) if attempts >= 0 => {
                     config.max_retry_attempts = attempts;
                     info!("Using custom max retry attempts: {}", attempts);
@@ -271,6 +276,19 @@ impl TokenizationConfig {
             }
         }
 
+        if let Ok(val) = env::var("TOKENIZATION_ENABLE_REAL_BLOCKCHAIN") {
+            match val.parse::<bool>() {
+                Ok(enabled) => {
+                    config.enable_real_blockchain = enabled;
+                    info!("Using real blockchain transactions: {}", enabled);
+                }
+                Err(_) => warn!(
+                    "Failed to parse enable real blockchain: {}, using default",
+                    val
+                ),
+            }
+        }
+
         // Validate configuration
         if config.auto_mint_enabled && config.polling_interval_secs < 10 {
             return Err(anyhow!(
@@ -340,7 +358,7 @@ pub enum ValidationError {
     #[error("Amount cannot be negative")]
     NegativeAmount,
 
-    #[error("Amount {0} kWh exceeds maximum allowed {1} kWh")]
+    #[error("Amount {0} kWh exceeds maximum allowed value")]
     AmountTooHigh(f64),
 
     #[error("Amount exceeds maximum representable value")]
@@ -447,10 +465,12 @@ mod tests {
     #[test]
     fn test_config_from_env() {
         // Set some environment variables
-        env::set_var("TOKENIZATION_KWH_TO_TOKEN_RATIO", "2.5");
-        env::set_var("TOKENIZATION_DECIMALS", "18");
-        env::set_var("TOKENIZATION_MAX_READING_KWH", "200.0");
-        env::set_var("TOKENIZATION_AUTO_MINT_ENABLED", "false");
+        unsafe {
+            env::set_var("TOKENIZATION_KWH_TO_TOKEN_RATIO", "2.5");
+            env::set_var("TOKENIZATION_DECIMALS", "18");
+            env::set_var("TOKENIZATION_MAX_READING_KWH", "200.0");
+            env::set_var("TOKENIZATION_AUTO_MINT_ENABLED", "false");
+        }
 
         // Load config
         let config = TokenizationConfig::from_env().unwrap();
@@ -462,23 +482,29 @@ mod tests {
         assert!(!config.auto_mint_enabled);
 
         // Clean up
-        env::remove_var("TOKENIZATION_KWH_TO_TOKEN_RATIO");
-        env::remove_var("TOKENIZATION_DECIMALS");
-        env::remove_var("TOKENIZATION_MAX_READING_KWH");
-        env::remove_var("TOKENIZATION_AUTO_MINT_ENABLED");
+        unsafe {
+            env::remove_var("TOKENIZATION_KWH_TO_TOKEN_RATIO");
+            env::remove_var("TOKENIZATION_DECIMALS");
+            env::remove_var("TOKENIZATION_MAX_READING_KWH");
+            env::remove_var("TOKENIZATION_AUTO_MINT_ENABLED");
+        }
     }
 
     #[test]
     fn test_config_validation() {
         // Test invalid configuration
-        env::set_var("TOKENIZATION_POLLING_INTERVAL_SECS", "5"); // Too low
-        env::set_var("TOKENIZATION_AUTO_MINT_ENABLED", "true");
+        unsafe {
+            env::set_var("TOKENIZATION_POLLING_INTERVAL_SECS", "5"); // Too low
+            env::set_var("TOKENIZATION_AUTO_MINT_ENABLED", "true");
+        }
 
         // Should return an error
         assert!(TokenizationConfig::from_env().is_err());
 
         // Clean up
-        env::remove_var("TOKENIZATION_POLLING_INTERVAL_SECS");
-        env::remove_var("TOKENIZATION_AUTO_MINT_ENABLED");
+        unsafe {
+            env::remove_var("TOKENIZATION_POLLING_INTERVAL_SECS");
+            env::remove_var("TOKENIZATION_AUTO_MINT_ENABLED");
+        }
     }
 }

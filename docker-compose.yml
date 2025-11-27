@@ -1,0 +1,517 @@
+services:
+  # Smart Contract Deployment Service
+  contact:
+    build:
+      context: ./docker/contact
+      dockerfile: Dockerfile
+    container_name: p2p-contact
+    env_file: .env
+    # Temporarily disabled validator dependency due to platform issues
+    # depends_on:
+    #   solana-validator:
+    #     condition: service_healthy
+    volumes:
+      - .:/workspaces/p2p
+      - ./programs:/workspaces/programs
+      - ./contracts:/workspaces/contracts
+      - contact_artifacts:/opt/deployer/artifacts
+      - deployment_logs:/opt/deployer/logs
+    networks:
+      - p2p-network
+    restart: "no"  # Run once deployment strategy
+    environment:
+      ANCHOR_PROVIDER_URL: "${SOLANA_RPC_URL}"
+      # Can be overridden to use devnet: "https://api.devnet.solana.com"
+      ANCHOR_WALLET: "${ENGINEERING_KEYPAIR_PATH}"
+      RUST_LOG: "${RUST_LOG}"
+      DEPLOYMENT_TIMEOUT: "300"  # 5 minutes
+      MAX_RETRIES: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/verify-deployment.sh || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Anchor Development Chain (includes Solana validator)
+  solana-validator:
+    build:
+      context: ./docker/solana-validator
+      dockerfile: Dockerfile
+    container_name: p2p-anchor-dev
+    env_file: .env
+    ports:
+      - "8898:8899"  # JSON RPC (avoiding conflict with Anchor tests)
+      - "8901:8900"  # WebSocket
+      - "8001:8001"  # Gossip
+    volumes:
+      - solana_ledger:/opt/solana/ledger
+      - .:/workspaces/p2p
+      - ./programs:/workspaces/programs
+      - ./contracts:/workspaces/contracts
+    networks:
+      - p2p-network
+    restart: unless-stopped
+    environment:
+      RUST_LOG: "${RUST_LOG}"
+      START_VALIDATOR: "true"  # Set to false for dev mode only
+      SKIP_DEPLOYMENT: "false"  # Set to true to skip automatic deployment
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/check-deployment.sh || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16
+    container_name: p2p-postgres
+    env_file: .env
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB}"
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - p2p-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U p2p_user -d p2p_energy_trading"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: p2p-redis
+    env_file: .env
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - p2p-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Mailpit SMTP Server (Development Email Testing)
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: p2p-mailpit
+    ports:
+      - "1025:1025"  # SMTP server
+      - "8025:8025"  # Web UI
+    environment:
+      MP_MAX_MESSAGES: "5000"
+      MP_DATABASE: "/data/mailpit.db"
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+      TZ: "UTC"
+    volumes:
+      - mailpit_data:/data
+    networks:
+      - p2p-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8025/api/v1/info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # InfluxDB Time-Series Database
+  influxdb:
+    image: influxdb:2.7
+    container_name: p2p-influxdb
+    env_file: .env
+    ports:
+      - "8086:8086"
+    environment:
+      # Docker automated setup - only runs on first start with empty volume
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: adminpassword
+      DOCKER_INFLUXDB_INIT_ORG: "${INFLUXDB_ORG}"
+      DOCKER_INFLUXDB_INIT_BUCKET: "${INFLUXDB_BUCKET}"
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: "${INFLUXDB_TOKEN}"
+      DOCKER_INFLUXDB_INIT_RETENTION: 7d
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
+    networks:
+      - p2p-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # InfluxDB Initialization
+  influxdb-init:
+    image: influxdb:2.7
+    container_name: p2p-influxdb-init
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    environment:
+      INFLUXDB_HOST: "http://influxdb:8086"
+      INFLUXDB_ORG: "${INFLUXDB_ORG}"
+      INFLUXDB_USERNAME: "admin"
+      INFLUXDB_PASSWORD: "adminpassword"
+      INFLUXDB_ADMIN_TOKEN: "${INFLUXDB_TOKEN}"
+    volumes:
+      - ./docker/influxdb/init-influxdb.sh:/scripts/init-influxdb.sh:ro
+    networks:
+      - p2p-network
+    command: ["/bin/bash", "/scripts/init-influxdb.sh"]
+    restart: "no"
+
+  # Kafka Message Queue
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: p2p-kafka
+    env_file: .env
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: "${KAFKA_BROKER_ID}"
+      KAFKA_ZOOKEEPER_CONNECT: "${KAFKA_ZOOKEEPER_CONNECT}"
+      KAFKA_ADVERTISED_LISTENERS: "${KAFKA_ADVERTISED_LISTENERS}"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "${KAFKA_LISTENER_SECURITY_PROTOCOL_MAP}"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "${KAFKA_INTER_BROKER_LISTENER_NAME}"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR}"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "${KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS}"
+    depends_on:
+      - zookeeper
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - p2p-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Kafka Topic Initialization
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: p2p-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./docker/kafka/kafka-setup.sh:/scripts/kafka-setup.sh:ro
+    networks:
+      - p2p-network
+    command: ["/bin/bash", "/scripts/kafka-setup.sh"]
+    restart: "no"
+
+  # Zookeeper for Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: p2p-zookeeper
+    env_file: .env
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: "${ZOOKEEPER_CLIENT_PORT}"
+      ZOOKEEPER_TICK_TIME: "${ZOOKEEPER_TICK_TIME}"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    networks:
+      - p2p-network
+    restart: unless-stopped
+
+  # Oracle Simulator
+  oracle-simulator:
+    build:
+      context: ./docker/oracle-simulator
+    container_name: p2p-oracle-simulator
+    env_file: .env
+    depends_on:
+      - solana-validator
+      - postgres
+    environment:
+      SOLANA_RPC_URL: "${SOLANA_RPC_URL}"
+      DATABASE_URL: "${DATABASE_URL}"
+      ORACLE_INTERVAL: "30"  # seconds
+    networks:
+      - p2p-network
+    restart: unless-stopped
+
+  # Smart Meter Simulator
+  smart-meter-simulator:
+    build:
+      context: ./docker/smart-meter-simulator
+      dockerfile: Dockerfile
+    container_name: p2p-smart-meter-simulator
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      influxdb:
+        condition: service_healthy
+    environment:
+      # Database Configuration
+      DATABASE_URL: "${DATABASE_URL}"
+      
+      # InfluxDB Configuration
+      INFLUXDB_URL: "${INFLUXDB_URL}"
+      INFLUXDB_TOKEN: "${INFLUXDB_TOKEN}"
+      INFLUXDB_ORG: "${INFLUXDB_ORG}"
+      INFLUXDB_BUCKET: "${INFLUXDB_BUCKET}"
+      
+      # Kafka Configuration
+      KAFKA_BOOTSTRAP_SERVERS: "${KAFKA_BOOTSTRAP_SERVERS}"
+      
+      # Simulation Configuration
+      SIMULATION_INTERVAL: "${SIMULATION_INTERVAL}"
+      NUM_METERS: "${NUM_METERS}"
+      OUTPUT_FILE: "./data/meter_readings.jsonl"
+      
+      # WebSocket Configuration
+      WS_ENABLED: "${WS_ENABLED}"
+      WS_HOST: "0.0.0.0"
+      WS_PORT: "${WS_PORT}"
+      
+      # Solar Configuration
+      SOLAR_PANEL_EFFICIENCY_MIN: "${SOLAR_PANEL_EFFICIENCY_MIN}"
+      SOLAR_PANEL_EFFICIENCY_MAX: "${SOLAR_PANEL_EFFICIENCY_MAX}"
+      BASE_GENERATION_MIN: "${BASE_GENERATION_MIN}"
+      BASE_GENERATION_MAX: "${BASE_GENERATION_MAX}"
+      
+      # Trading Configuration
+      MIN_SELL_PRICE: "${MIN_SELL_PRICE}"
+      MAX_SELL_PRICE: "${MAX_SELL_PRICE}"
+      MIN_BUY_PRICE: "${MIN_BUY_PRICE}"
+      MAX_BUY_PRICE: "${MAX_BUY_PRICE}"
+      GRID_FEED_IN_RATE: "${GRID_FEED_IN_RATE}"
+      GRID_PURCHASE_RATE: "${GRID_PURCHASE_RATE}"
+      
+      # REC Configuration
+      REC_CERTIFICATION_ENABLED: "${REC_CERTIFICATION_ENABLED}"
+      CARBON_OFFSET_RATE: "${CARBON_OFFSET_RATE}"
+      
+      # Logging Configuration
+      LOG_LEVEL: "INFO"
+    
+    ports:
+      - "${WS_PORT}:${WS_PORT}"
+      - "9091:9091"
+    
+    volumes:
+      - ./docker/smart-meter-simulator/data:/app/data
+    
+    networks:
+      - p2p-network
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "python", "-c", "from config import SimulatorConfig; print('OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: .
+      dockerfile: docker/api-gateway/Dockerfile
+    container_name: p2p-api-gateway
+    env_file: .env
+    ports:
+      - "${API_PORT:-8080}:${PORT:-8080}"
+    depends_on:
+      - postgres
+      - redis
+      - influxdb
+      - datadog-agent
+      # - solana-validator  # Temporarily disabled due to build issues
+    environment:
+      DATABASE_URL: "${DATABASE_URL}"
+      INFLUXDB_URL: "${INFLUXDB_URL}"
+      INFLUXDB_TOKEN: "${INFLUXDB_TOKEN}"
+      INFLUXDB_ORG: "${INFLUXDB_ORG}"
+      INFLUXDB_BUCKET: "${INFLUXDB_BUCKET}"
+      REDIS_URL: "${REDIS_URL}"
+      SOLANA_RPC_URL: "${SOLANA_RPC_URL}"
+      SOLANA_WS_URL: "${SOLANA_WS_URL}"
+      JWT_SECRET: "${JWT_SECRET}"
+      API_KEY_SECRET: "${HMAC_SECRET}"
+      ENGINEERING_API_KEY: "${ENGINEERING_API_KEY}"
+      ENVIRONMENT: "${ENVIRONMENT}"
+      PORT: "${PORT}"
+      TEST_MODE: "${TEST_MODE}"
+      MAX_CONNECTIONS: "${MAX_CONNECTIONS}"
+      REDIS_POOL_SIZE: "${REDIS_POOL_SIZE}"
+      REQUEST_TIMEOUT: "${REQUEST_TIMEOUT}"
+      RATE_LIMIT_WINDOW: "${RATE_LIMIT_WINDOW}"
+      LOG_LEVEL: "${LOG_LEVEL}"
+      AUDIT_LOG_ENABLED: "${AUDIT_LOG_ENABLED}"
+      RUST_LOG: "${RUST_LOG}"
+      # Datadog APM Configuration
+      DD_AGENT_HOST: "datadog-agent"
+      DD_TRACE_AGENT_PORT: "8126"
+      DD_DOGSTATSD_PORT: "8125"
+      DD_SERVICE: "api-gateway"
+      DD_ENV: "${ENVIRONMENT}"
+      DD_VERSION: "0.1.0"
+      DD_LOGS_INJECTION: "true"
+      DD_TRACE_SAMPLE_RATE: "1.0"
+      DD_APM_ENABLED: "true"
+      DD_APM_NON_LOCAL_TRAFFIC: "true"
+      DD_APM_RECEIVER_SOCKET: "/var/run/datadog/apm.socket"
+      DD_DOGSTATSD_SOCKET: "/var/run/datadog/dsd.socket"
+    volumes:
+      - datadog_run:/var/run/datadog
+    networks:
+      - p2p-network
+    restart: unless-stopped
+
+  # Frontend
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+    container_name: p2p-frontend
+    env_file: .env
+    ports:
+      - "3000:80"
+    depends_on:
+      - api-gateway
+    environment:
+      VITE_API_BASE_URL: "${VITE_API_BASE_URL}"
+      VITE_SOLANA_RPC_URL: "${VITE_SOLANA_RPC_URL}"
+    networks:
+      - p2p-network
+    restart: unless-stopped
+
+  # Nginx Reverse Proxy
+  nginx:
+    build:
+      context: ./docker/nginx
+    container_name: p2p-nginx
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - api-gateway
+      - frontend
+    volumes:
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d
+      - ./docker/nginx/ssl:/etc/nginx/ssl
+    networks:
+      - p2p-network
+    restart: unless-stopped
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: p2p-prometheus
+    env_file: .env
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - p2p-network
+    restart: unless-stopped
+
+  # Grafana Dashboard
+  grafana:
+    image: grafana/grafana:latest
+    container_name: p2p-grafana
+    env_file: .env
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD}"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    networks:
+      - p2p-network
+    restart: unless-stopped
+
+  # Datadog Agent
+  datadog-agent:
+    image: gcr.io/datadoghq/agent:7
+    container_name: dd-agent
+    env_file: .env
+    ports:
+      - "8126:8126"  # APM
+      - "8125:8125/udp"  # DogStatsD
+    environment:
+      DD_API_KEY: "${DD_API_KEY:-0b2a4ba085738cb4198fcc25a61c4129}"
+      DD_SITE: "${DD_SITE:-us5.datadoghq.com}"
+      DD_DOGSTATSD_NON_LOCAL_TRAFFIC: "true"
+      DD_ENV: "dev"
+      DD_APM_ENABLED: "true"
+      DD_APM_NON_LOCAL_TRAFFIC: "true"
+      DD_LOGS_ENABLED: "true"
+      DD_LOGS_CONFIG_AUTO_MULTI_LINE_DETECTION: "true"
+      DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL: "true"
+      DD_CONTAINER_EXCLUDE_LOGS: "name:dd-agent"
+      DD_CONTAINER_EXCLUDE: "name:dd-agent"
+      DD_PROCESS_CONFIG_PROCESS_COLLECTION_ENABLED: "true"
+      DD_TAGS: "env:${ENVIRONMENT:-development} project:gridtokenx-platform"
+    volumes:
+      - datadog_run:/var/run/datadog
+      - datadog_agent_run:/opt/datadog-agent/run
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc/:/host/proc/:ro
+      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /etc/passwd:/etc/passwd:ro
+    networks:
+      - p2p-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "agent health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  solana_ledger:
+  contact_artifacts:
+  deployment_logs:
+  postgres_data:
+  redis_data:
+  mailpit_data:
+  influxdb_data:
+  influxdb_config:
+  kafka_data:
+  zookeeper_data:
+  zookeeper_logs:
+  prometheus_data:
+  grafana_data:
+  datadog_run:
+  datadog_agent_run:
+
+networks:
+  p2p-network:
+    driver: bridge

@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::env;
 
 pub mod tokenization;
-pub use tokenization::{ConfigError, TokenizationConfig, ValidationError};
+pub use tokenization::{TokenizationConfig, ValidationError};
+// Removed unused imports: ConfigError
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -27,6 +28,17 @@ pub struct Config {
     pub test_mode: bool,
     pub email: EmailConfig,
     pub tokenization: TokenizationConfig,
+    pub event_processor: EventProcessorConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventProcessorConfig {
+    pub enabled: bool,
+    pub polling_interval_secs: u64,
+    pub batch_size: usize,
+    pub max_retries: u32,
+    pub webhook_url: Option<String>,
+    pub webhook_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,6 +143,26 @@ impl Config {
             },
             tokenization: TokenizationConfig::from_env()
                 .map_err(|e| anyhow::anyhow!("Failed to load tokenization config: {}", e))?,
+            event_processor: EventProcessorConfig {
+                enabled: env::var("EVENT_PROCESSOR_ENABLED")
+                    .unwrap_or_else(|_| "true".to_string())
+                    .parse()
+                    .unwrap_or(true),
+                polling_interval_secs: env::var("EVENT_PROCESSOR_POLLING_INTERVAL_SECS")
+                    .unwrap_or_else(|_| "10".to_string())
+                    .parse()
+                    .unwrap_or(10),
+                batch_size: env::var("EVENT_PROCESSOR_BATCH_SIZE")
+                    .unwrap_or_else(|_| "100".to_string())
+                    .parse()
+                    .unwrap_or(100),
+                max_retries: env::var("EVENT_PROCESSOR_MAX_RETRIES")
+                    .unwrap_or_else(|_| "3".to_string())
+                    .parse()
+                    .unwrap_or(3),
+                webhook_url: env::var("EVENT_PROCESSOR_WEBHOOK_URL").ok(),
+                webhook_secret: env::var("EVENT_PROCESSOR_WEBHOOK_SECRET").ok(),
+            },
         })
     }
 }

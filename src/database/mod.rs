@@ -93,7 +93,8 @@ mod tests {
     // Note: Testcontainers integration will be implemented in Phase 2
     // when we set up full integration testing
 
-    pub struct TestDatabase {
+    #[allow(dead_code)]
+pub struct TestDatabase {
         pub pool: DatabasePool,
     }
 

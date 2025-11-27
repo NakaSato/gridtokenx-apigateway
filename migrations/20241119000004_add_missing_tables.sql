@@ -1,5 +1,5 @@
--- Add missing tables and columns
--- Created: November 18, 2024
+-- Add trades table
+-- Created: November 19, 2024
 
 -- =========================================================================
 -- Add missing columns to trading_orders

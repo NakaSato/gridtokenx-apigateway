@@ -1,0 +1,237 @@
+# Prometheus Redis Exporter Configuration for GridTokenX
+# Provides comprehensive Redis metrics collection for monitoring
+
+# Redis Exporter Docker Compose Service
+version: '3.8'
+
+services:
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: redis-exporter
+    env_file: .env
+    ports:
+      - "9121:9121"
+    networks:
+      - p2p-network
+    restart: unless-stopped
+    environment:
+      # Redis connection settings
+      REDIS_ADDR: "redis://redis:6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_ALIAS: "gridtokenx-redis"
+      
+      # Exporter configuration
+      REDIS_EXPORTER_LOG_FORMAT: "txt"
+      REDIS_EXPORTER_DEBUG: "false"
+      REDIS_EXPORTER_WEB_LISTEN_ADDRESS: ":9121"
+      REDIS_EXPORTER_WEB_TELEMETRY_PATH: "/metrics"
+      REDIS_EXPORTER_NAMESPACE: "redis"
+      REDIS_EXPORTER_CONFIG_COMMAND: "config"
+      
+      # Connection settings
+      REDIS_EXPORTER_CONNECTION_TIMEOUT: "15s"
+      REDIS_EXPORTER_INCL_SYSTEM_METRICS: "true"
+      REDIS_EXPORTER_CONFIG_COMMAND: "config"
+      
+      # Metrics collection
+      REDIS_EXPORTER_CHECK_KEYS: ""
+      REDIS_EXPORTER_CHECK_SINGLE_KEYS: ""
+      REDIS_EXPORTER_SCRIPT: ""
+      
+      # Custom labels
+      REDIS_EXPORTER_CLIENT_NAME: "gridtokenx-api-gateway"
+      REDIS_EXPORTER_CLIENT_VER: "1.0.0"
+      
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9121/metrics || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    labels:
+      - "com.gridtokenx.service=redis-exporter"
+      - "com.gridtokenx.environment=${ENVIRONMENT:-development}"
+      - "com.gridtokenx.monitoring=prometheus"
+
+  # Custom Redis metrics collector (for additional GridTokenX-specific metrics)
+  redis-metrics-collector:
+    build:
+      context: ./docker/redis/metrics
+      dockerfile: Dockerfile
+    container_name: redis-metrics-collector
+    env_file: .env
+    networks:
+      - p2p-network
+    restart: unless-stopped
+    environment:
+      REDIS_URL: ${REDIS_URL}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      METRICS_PORT: "9095"
+      COLLECTION_INTERVAL: "15s"
+      
+      # GridTokenX-specific metrics
+      TRACK_CACHE_PERFORMANCE: "true"
+      TRACK_MARKET_DATA: "true"
+      TRACK_USER_SESSIONS: "true"
+      TRACK_RATE_LIMITING: "true"
+      TRACK_TRANSACTION_CACHE: "true"
+      
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9095/metrics || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    labels:
+      - "com.gridtokenx.service=redis-metrics-collector"
+      - "com.gridtokenx.environment=${ENVIRONMENT:-development}"
+      - "com.gridtokenx.monitoring=prometheus"
+
+# Prometheus configuration snippet
+# Add this to your prometheus.yml:
+#
+# scrape_configs:
+#   - job_name: 'redis'
+#     static_configs:
+#       - targets: ['redis-exporter:9121']
+#     scrape_interval: 15s
+#     metrics_path: /metrics
+#     params:
+#       format: ['prometheus']
+#       
+#   - job_name: 'redis-gridtokenx-custom'
+#     static_configs:
+#       - targets: ['redis-metrics-collector:9095']
+#     scrape_interval: 15s
+#     metrics_path: /metrics
+#
+# # Redis alerting rules
+# rule_files:
+#   - "redis_alerts.yml"
+#
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
+
+# Redis alerting rules (redis_alerts.yml)
+groups:
+  - name: redis_alerts
+    rules:
+      # Redis down alert
+      - alert: RedisInstanceDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis instance {{ $labels.instance }} is down"
+          description: "Redis instance {{ $labels.instance }} has been down for more than 1 minute."
+          
+      # High memory usage alert
+      - alert: RedisHighMemoryUsage
+        expr: (redis_memory_used_bytes / redis_memory_max_bytes) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis high memory usage on {{ $labels.instance }}"
+          description: "Redis memory usage is {{ $value }}% on instance {{ $labels.instance }}."
+          
+      # Low cache hit rate alert
+      - alert: RedisLowCacheHitRate
+        expr: (rate(redis_keyspace_hits_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m]))) * 100 < 70
+        for: 10m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis low cache hit rate on {{ $labels.instance }}"
+          description: "Redis cache hit rate is {{ $value }}% on instance {{ $labels.instance }}."
+          
+      # Too many connections alert
+      - alert: RedisTooManyConnections
+        expr: redis_connected_clients > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis too many connections on {{ $labels.instance }}"
+          description: "Redis has {{ $value }} connected clients on instance {{ $labels.instance }}."
+          
+      # Slow queries alert
+      - alert: RedisSlowQueries
+        expr: redis_slowlog_length > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis slow queries detected on {{ $labels.instance }}"
+          description: "Redis has {{ $value }} slow queries in the log on instance {{ $labels.instance }}."
+          
+      # Expired keys alert
+      - alert: RedisHighExpiredKeys
+        expr: rate(redis_expired_keys_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: info
+          service: redis
+        annotations:
+          summary: "Redis high expired keys rate on {{ $labels.instance }}"
+          description: "Redis is expiring {{ $value }} keys per second on instance {{ $labels.instance }}."
+          
+      # Rejected connections alert
+      - alert: RedisRejectedConnections
+        expr: increase(redis_rejected_connections_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis rejected connections on {{ $labels.instance }}"
+          description: "Redis has rejected {{ $value }} connections in the last 5 minutes on instance {{ $labels.instance }}."
+          
+      # Master link down (for replication)
+      - alert: RedisMasterLinkDown
+        expr: redis_master_link_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis master link down on {{ $labels.instance }}"
+          description: "Redis master link is down on replica instance {{ $labels.instance }}."
+          
+      # GridTokenX-specific alerts
+      - alert: GridTokenXMarketDataStale
+        expr: time() - redis_gridtokenx_market_data_timestamp > 300
+        for: 2m
+        labels:
+          severity: warning
+          service: redis
+          team: gridtokenx
+        annotations:
+          summary: "GridTokenX market data is stale"
+          description: "Market data in Redis is older than 5 minutes on instance {{ $labels.instance }}."
+          
+      - alert: GridTokenXHighCacheEviction
+        expr: rate(redis_evicted_keys_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+          team: gridtokenx
+        annotations:
+          summary: "GridTokenX high cache eviction rate"
+          description: "Redis is evicting {{ $value }} keys per second on instance {{ $labels.instance }}."

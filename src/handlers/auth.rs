@@ -638,12 +638,18 @@ struct UserRow {
     email: String,
     password_hash: String,
     role: String,
+    #[allow(dead_code)]
     first_name: String,
+    #[allow(dead_code)]
     last_name: String,
     wallet_address: Option<String>,
+    #[allow(dead_code)]
     blockchain_registered: bool,
+    #[allow(dead_code)]
     is_active: bool,
     email_verified: bool,
+    #[allow(dead_code)]
     created_at: chrono::DateTime<chrono::Utc>,
+    #[allow(dead_code)]
     updated_at: chrono::DateTime<chrono::Utc>,
 }

@@ -1,15 +1,12 @@
 // Middleware module - authentication, CORS, logging, security, etc.
 
-pub mod request_logger;
-pub mod metrics;
-pub mod security_headers;
 pub mod json_validation;
+pub mod metrics;
+pub mod metrics_middleware;
+pub mod request_logger;
+pub mod security_headers;
 
-pub use request_logger::{
-    request_logger_middleware, auth_logger_middleware
-};
-pub use metrics::{
-    metrics_middleware, active_requests_middleware
-};
-pub use security_headers::add_security_headers;
 pub use json_validation::json_validation_middleware;
+pub use metrics::{active_requests_middleware, metrics_middleware};
+pub use request_logger::{auth_logger_middleware, request_logger_middleware};
+pub use security_headers::add_security_headers;

@@ -275,9 +275,9 @@ impl EpochScheduler {
         let epochs_to_activate = sqlx::query!(
             r#"
             SELECT id, epoch_number, start_time, end_time, status as "status: EpochStatus"
-            FROM market_epochs 
+            FROM market_epochs
             WHERE status = $1
-            AND start_time <= $2 
+            AND start_time <= $2
             AND end_time > $2
             ORDER BY start_time ASC
             "#,
@@ -341,8 +341,8 @@ impl EpochScheduler {
         let epochs_to_clear = sqlx::query!(
             r#"
             SELECT id, epoch_number, start_time, end_time, status as "status: EpochStatus"
-            FROM market_epochs 
-            WHERE status = $1 
+            FROM market_epochs
+            WHERE status = $1
             AND end_time <= $2
             ORDER BY end_time ASC
             "#,
@@ -482,10 +482,10 @@ impl EpochScheduler {
         let epoch = sqlx::query_as!(
             MarketEpoch,
             r#"
-            SELECT 
+            SELECT
                 id, epoch_number, start_time, end_time, status as "status: EpochStatus",
                 clearing_price, total_volume, total_orders, matched_orders
-            FROM market_epochs 
+            FROM market_epochs
             ORDER BY epoch_number DESC
             LIMIT 1
             "#
@@ -500,10 +500,10 @@ impl EpochScheduler {
         let epoch = sqlx::query_as!(
             MarketEpoch,
             r#"
-            SELECT 
+            SELECT
                 id, epoch_number, start_time, end_time, status as "status: EpochStatus",
                 clearing_price, total_volume, total_orders, matched_orders
-            FROM market_epochs 
+            FROM market_epochs
             WHERE id = $1
             "#,
             epoch_id
@@ -554,7 +554,7 @@ impl EpochScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{Datelike, TimeZone};
+    use chrono::TimeZone;
     use sqlx::PgPool;
     use std::env;
 
@@ -801,7 +801,7 @@ mod tests {
         let config = EpochConfig::default();
         let scheduler = EpochScheduler::new(create_test_db().await, config);
 
-        let mut epoch = MarketEpoch {
+        let epoch = MarketEpoch {
             id: Uuid::new_v4(),
             epoch_number: 202511091430,
             start_time: Utc.with_ymd_and_hms(2025, 11, 9, 14, 30, 0).unwrap(),

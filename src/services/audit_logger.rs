@@ -6,7 +6,7 @@ use serde::{Serialize, Deserialize};
 use chrono::Utc;
 use uuid::Uuid;
 use utoipa::ToSchema;
-use ipnetwork::IpNetwork;
+use sqlx::types::ipnetwork::IpNetwork;
 
 /// Security and business events to be audited
 #[derive(Debug, Clone, Serialize, Deserialize)]

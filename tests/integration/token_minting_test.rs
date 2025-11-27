@@ -337,7 +337,7 @@ async fn test_complete_token_lifecycle() -> Result<()> {
 
     // Phase 1: Mint tokens (system transfer for testing)
     println!("\n📋 Phase 1: Mint Tokens");
-    let mint_amount: u64 = 1000 * 1_000_000;
+    let _mint_amount: u64 = 1000 * 1_000_000;
     let mint_ix = create_transfer_instruction(
         &authority.pubkey(),
         &user_account,
@@ -347,7 +347,7 @@ async fn test_complete_token_lifecycle() -> Result<()> {
 
     // Phase 2: Transfer tokens (system transfer for testing)
     println!("\n📋 Phase 2: Transfer Tokens");
-    let transfer_amount: u64 = 600 * 1_000_000;
+    let _transfer_amount: u64 = 600 * 1_000_000;
     let transfer_ix = create_transfer_instruction(
         &authority.pubkey(),
         &recipient_account,
@@ -357,7 +357,7 @@ async fn test_complete_token_lifecycle() -> Result<()> {
 
     // Phase 3: Burn remaining tokens (system transfer for testing)
     println!("\n📋 Phase 3: Burn Tokens");
-    let burn_amount: u64 = 400 * 1_000_000;
+    let _burn_amount: u64 = 400 * 1_000_000;
     let burn_ix = create_transfer_instruction(
         &authority.pubkey(),
         &mint_address,

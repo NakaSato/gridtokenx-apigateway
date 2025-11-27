@@ -1,6 +1,8 @@
-use axum::{response::Json};
+use axum::{extract::State, response::Json};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+
+use crate::services::EventProcessorStats;
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct HealthResponse {
@@ -37,10 +39,20 @@ impl HealthStatus {
         }
     }
 
-    pub fn add_dependency_check(&mut self, name: &str, is_healthy: bool, response_time: Option<u64>, error: Option<String>) {
+    pub fn add_dependency_check(
+        &mut self,
+        name: &str,
+        is_healthy: bool,
+        response_time: Option<u64>,
+        error: Option<String>,
+    ) {
         self.dependencies.push(ServiceHealth {
             name: name.to_string(),
-            status: if is_healthy { "healthy".to_string() } else { "unhealthy".to_string() },
+            status: if is_healthy {
+                "healthy".to_string()
+            } else {
+                "unhealthy".to_string()
+            },
             response_time_ms: response_time,
             last_check: chrono::Utc::now(),
             error_message: error,
@@ -64,4 +76,30 @@ impl HealthStatus {
 )]
 pub async fn health_check() -> Json<HealthStatus> {
     Json(HealthStatus::new())
+}
+
+/// Get event processor statistics
+/// GET /api/health/event-processor
+#[utoipa::path(
+    get,
+    path = "/api/health/event-processor",
+    tag = "health",
+    responses(
+        (status = 200, description = "Event processor statistics", body = EventProcessorStats),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn get_event_processor_stats(
+    State(state): State<crate::AppState>,
+) -> Result<Json<crate::services::EventProcessorStats>, crate::error::ApiError> {
+    let stats = state
+        .event_processor_service
+        .get_stats()
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get event processor stats: {}", e);
+            crate::error::ApiError::Internal("Failed to get event processor stats".to_string())
+        })?;
+
+    Ok(Json(stats))
 }

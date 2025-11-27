@@ -147,7 +147,7 @@ pub async fn register(
     let user_id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO users (id, username, email, password_hash, role,
-                           first_name, last_name, is_active, 
+                           first_name, last_name, is_active,
                            email_verified, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, true, false, NOW(), NOW())",
     )
@@ -172,7 +172,7 @@ pub async fn register(
 
     // Store hashed token in database
     sqlx::query(
-        "UPDATE users SET 
+        "UPDATE users SET
          email_verification_token = $1,
          email_verification_sent_at = NOW(),
          email_verification_expires_at = $2
@@ -370,7 +370,7 @@ pub async fn remove_wallet_address(
 ) -> Result<StatusCode> {
     // Update wallet address to null
     let result = sqlx::query(
-        "UPDATE users SET wallet_address = NULL, blockchain_registered = false, updated_at = NOW() 
+        "UPDATE users SET wallet_address = NULL, blockchain_registered = false, updated_at = NOW()
          WHERE id = $1 AND is_active = true",
     )
     .bind(user.0.sub)
@@ -686,9 +686,9 @@ pub async fn get_my_activity(
     // Get activities - using correct column names from migration
     let activities = sqlx::query_as::<_, ActivityRow>(
         "SELECT id, user_id, activity_type, description, ip_address, user_agent, created_at
-         FROM user_activities 
-         WHERE user_id = $1 
-         ORDER BY created_at DESC 
+         FROM user_activities
+         WHERE user_id = $1
+         ORDER BY created_at DESC
          LIMIT $2 OFFSET $3",
     )
     .bind(user_id)
@@ -772,9 +772,9 @@ pub async fn get_user_activity(
     // Get activities - using correct column names from migration
     let activities = sqlx::query_as::<_, ActivityRow>(
         "SELECT id, user_id, activity_type, description, ip_address, user_agent, created_at
-         FROM user_activities 
-         WHERE user_id = $1 
-         ORDER BY created_at DESC 
+         FROM user_activities
+         WHERE user_id = $1
+         ORDER BY created_at DESC
          LIMIT $2 OFFSET $3",
     )
     .bind(user_id)

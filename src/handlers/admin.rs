@@ -1,19 +1,17 @@
 // Admin endpoints for market monitoring and control
 // Requires admin authentication
 
-use axum::{
-    extract::State,
-    response::Json,
-};
+use axum::{extract::State, response::Json};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, types::BigDecimal};
-use utoipa::ToSchema;
 use std::str::FromStr;
+use utoipa::ToSchema;
 
-use crate::auth::middleware::AuthenticatedUser;
-use crate::error::ApiError;
 use crate::AppState;
+use crate::auth::middleware::AuthenticatedUser;
+use crate::error::{ApiError, ErrorResponse};
+use crate::services::event_processor_service::ReplayStatus;
 
 /// Market health status
 #[derive(Debug, Serialize, ToSchema)]
@@ -156,12 +154,12 @@ pub async fn get_market_health(
     };
 
     let spread_percentage = match (&order_book.best_bid, &order_book.best_ask) {
-        (Some(bid), Some(ask)) if *bid > rust_decimal::Decimal::ZERO => {
-            Some(((*ask - *bid) / *bid * rust_decimal::Decimal::from(100))
+        (Some(bid), Some(ask)) if *bid > rust_decimal::Decimal::ZERO => Some(
+            ((*ask - *bid) / *bid * rust_decimal::Decimal::from(100))
                 .to_string()
                 .parse::<f64>()
-                .unwrap_or(0.0))
-        }
+                .unwrap_or(0.0),
+        ),
         _ => None,
     };
 
@@ -175,7 +173,7 @@ pub async fn get_market_health(
             MAX(executed_at) as last_match_time
         FROM trades
         WHERE executed_at > NOW() - INTERVAL '24 hours'
-        "#
+        "#,
     )
     .fetch_one(&state.db)
     .await
@@ -186,7 +184,7 @@ pub async fn get_market_health(
         SELECT COUNT(*) 
         FROM trading_orders 
         WHERE status IN ('Pending', 'PartiallyFilled')
-        "#
+        "#,
     )
     .fetch_one(&state.db)
     .await
@@ -227,10 +225,22 @@ pub async fn get_market_health(
             liquidity_score,
         },
         matching_stats: MatchingStatistics {
-            total_matches_24h: matching_stats_row.try_get::<i64, _>("total_matches").unwrap_or(0),
-            total_volume_24h: matching_stats_row.try_get::<BigDecimal, _>("total_volume").unwrap_or_default().to_string(),
-            average_price_24h: matching_stats_row.try_get::<BigDecimal, _>("average_price").unwrap_or_default().to_string(),
-            last_match_time: matching_stats_row.try_get::<Option<chrono::DateTime<Utc>>, _>("last_match_time").ok().flatten().map(|t| t.to_rfc3339()),
+            total_matches_24h: matching_stats_row
+                .try_get::<i64, _>("total_matches")
+                .unwrap_or(0),
+            total_volume_24h: matching_stats_row
+                .try_get::<BigDecimal, _>("total_volume")
+                .unwrap_or_default()
+                .to_string(),
+            average_price_24h: matching_stats_row
+                .try_get::<BigDecimal, _>("average_price")
+                .unwrap_or_default()
+                .to_string(),
+            last_match_time: matching_stats_row
+                .try_get::<Option<chrono::DateTime<Utc>>, _>("last_match_time")
+                .ok()
+                .flatten()
+                .map(|t| t.to_rfc3339()),
             pending_orders,
         },
         settlement_stats,
@@ -265,7 +275,7 @@ pub async fn get_trading_analytics(
             COALESCE(AVG(quantity::numeric), 0) as avg_trade_size
         FROM trades
         WHERE executed_at > NOW() - INTERVAL '24 hours'
-        "#
+        "#,
     )
     .fetch_one(&state.db)
     .await
@@ -288,8 +298,16 @@ pub async fn get_trading_analytics(
     .await
     .map_err(ApiError::Database)?;
 
-    let open_24h = price_stats.try_get::<Option<BigDecimal>, _>("open_24h").ok().flatten().and_then(|d| rust_decimal::Decimal::from_str(&d.to_string()).ok());
-    let close_24h = price_stats.try_get::<Option<BigDecimal>, _>("close_24h").ok().flatten().and_then(|d| rust_decimal::Decimal::from_str(&d.to_string()).ok());
+    let open_24h = price_stats
+        .try_get::<Option<BigDecimal>, _>("open_24h")
+        .ok()
+        .flatten()
+        .and_then(|d| rust_decimal::Decimal::from_str(&d.to_string()).ok());
+    let close_24h = price_stats
+        .try_get::<Option<BigDecimal>, _>("close_24h")
+        .ok()
+        .flatten()
+        .and_then(|d| rust_decimal::Decimal::from_str(&d.to_string()).ok());
 
     let change_24h = match (open_24h, close_24h) {
         (Some(open), Some(close)) => Some((close - open).to_string()),
@@ -297,12 +315,12 @@ pub async fn get_trading_analytics(
     };
 
     let change_percentage_24h = match (open_24h, close_24h) {
-        (Some(open), Some(close)) if open > rust_decimal::Decimal::ZERO => {
-            Some(((close - open) / open * rust_decimal::Decimal::from(100))
+        (Some(open), Some(close)) if open > rust_decimal::Decimal::ZERO => Some(
+            ((close - open) / open * rust_decimal::Decimal::from(100))
                 .to_string()
                 .parse::<f64>()
-                .unwrap_or(0.0))
-        }
+                .unwrap_or(0.0),
+        ),
         _ => None,
     };
 
@@ -318,7 +336,7 @@ pub async fn get_trading_analytics(
         GROUP BY buyer_id
         ORDER BY total_volume DESC
         LIMIT 10
-        "#
+        "#,
     )
     .fetch_all(&state.db)
     .await
@@ -329,8 +347,14 @@ pub async fn get_trading_analytics(
         .map(|row| TraderStats {
             user_id: row.try_get::<uuid::Uuid, _>("user_id").unwrap().to_string(),
             total_trades: row.try_get::<i64, _>("total_trades").unwrap_or(0),
-            total_volume: row.try_get::<BigDecimal, _>("total_volume").unwrap_or_default().to_string(),
-            buy_volume: row.try_get::<BigDecimal, _>("total_volume").unwrap_or_default().to_string(),
+            total_volume: row
+                .try_get::<BigDecimal, _>("total_volume")
+                .unwrap_or_default()
+                .to_string(),
+            buy_volume: row
+                .try_get::<BigDecimal, _>("total_volume")
+                .unwrap_or_default()
+                .to_string(),
             sell_volume: "0".to_string(),
         })
         .collect();
@@ -346,7 +370,7 @@ pub async fn get_trading_analytics(
         WHERE executed_at > NOW() - INTERVAL '24 hours'
         GROUP BY DATE_TRUNC('hour', executed_at)
         ORDER BY hour DESC
-        "#
+        "#,
     )
     .fetch_all(&state.db)
     .await
@@ -355,21 +379,49 @@ pub async fn get_trading_analytics(
     let hourly_volume: Vec<HourlyVolume> = hourly_data
         .into_iter()
         .map(|row| HourlyVolume {
-            hour: row.try_get::<Option<chrono::DateTime<Utc>>, _>("hour").ok().flatten().map(|h| h.to_rfc3339()).unwrap_or_default(),
-            volume: row.try_get::<BigDecimal, _>("volume").unwrap_or_default().to_string(),
+            hour: row
+                .try_get::<Option<chrono::DateTime<Utc>>, _>("hour")
+                .ok()
+                .flatten()
+                .map(|h| h.to_rfc3339())
+                .unwrap_or_default(),
+            volume: row
+                .try_get::<BigDecimal, _>("volume")
+                .unwrap_or_default()
+                .to_string(),
             trade_count: row.try_get::<i64, _>("trade_count").unwrap_or(0),
         })
         .collect();
 
     Ok(Json(TradingAnalytics {
         total_trades: overall_stats.try_get::<i64, _>("total_trades").unwrap_or(0),
-        total_volume: overall_stats.try_get::<BigDecimal, _>("total_volume").unwrap_or_default().to_string(),
-        total_value: overall_stats.try_get::<BigDecimal, _>("total_value").unwrap_or_default().to_string(),
-        average_trade_size: overall_stats.try_get::<BigDecimal, _>("avg_trade_size").unwrap_or_default().to_string(),
+        total_volume: overall_stats
+            .try_get::<BigDecimal, _>("total_volume")
+            .unwrap_or_default()
+            .to_string(),
+        total_value: overall_stats
+            .try_get::<BigDecimal, _>("total_value")
+            .unwrap_or_default()
+            .to_string(),
+        average_trade_size: overall_stats
+            .try_get::<BigDecimal, _>("avg_trade_size")
+            .unwrap_or_default()
+            .to_string(),
         price_statistics: PriceStatistics {
-            current_price: price_stats.try_get::<Option<String>, _>("current_price").ok().flatten(),
-            high_24h: price_stats.try_get::<Option<BigDecimal>, _>("high_24h").ok().flatten().map(|p| p.to_string()),
-            low_24h: price_stats.try_get::<Option<BigDecimal>, _>("low_24h").ok().flatten().map(|p| p.to_string()),
+            current_price: price_stats
+                .try_get::<Option<String>, _>("current_price")
+                .ok()
+                .flatten(),
+            high_24h: price_stats
+                .try_get::<Option<BigDecimal>, _>("high_24h")
+                .ok()
+                .flatten()
+                .map(|p| p.to_string()),
+            low_24h: price_stats
+                .try_get::<Option<BigDecimal>, _>("low_24h")
+                .ok()
+                .flatten()
+                .map(|p| p.to_string()),
             open_24h: open_24h.map(|p| p.to_string()),
             close_24h: close_24h.map(|p| p.to_string()),
             change_24h,
@@ -422,21 +474,95 @@ pub async fn market_control(
                 timestamp: Utc::now().to_rfc3339(),
             }
         }
-        MarketAction::ResumeTrading => {
-            MarketControlResponse {
-                success: true,
-                message: "Trading resumed (feature not yet implemented)".to_string(),
-                timestamp: Utc::now().to_rfc3339(),
-            }
-        }
-        MarketAction::ClearOrderBook => {
-            MarketControlResponse {
-                success: false,
-                message: "Clear order book is a dangerous operation and requires additional confirmation".to_string(),
-                timestamp: Utc::now().to_rfc3339(),
-            }
-        }
+        MarketAction::ResumeTrading => MarketControlResponse {
+            success: true,
+            message: "Trading resumed (feature not yet implemented)".to_string(),
+            timestamp: Utc::now().to_rfc3339(),
+        },
+        MarketAction::ClearOrderBook => MarketControlResponse {
+            success: false,
+            message:
+                "Clear order book is a dangerous operation and requires additional confirmation"
+                    .to_string(),
+            timestamp: Utc::now().to_rfc3339(),
+        },
     };
 
     Ok(Json(result))
+}
+
+/// Request payload for event replay
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct ReplayEventsRequest {
+    pub start_slot: u64,
+    pub end_slot: Option<u64>,
+}
+
+/// Response for event replay trigger
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ReplayEventsResponse {
+    pub message: String,
+    pub job_id: String,
+}
+
+/// Trigger event replay
+#[utoipa::path(
+    post,
+    path = "/api/admin/event-processor/replay",
+    request_body = ReplayEventsRequest,
+    responses(
+        (status = 200, description = "Event replay triggered", body = ReplayEventsResponse),
+        (status = 403, description = "Admin access required"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "Admin - Event Processor",
+    security(("bearer_auth" = []))
+)]
+pub async fn trigger_event_replay(
+    State(state): State<AppState>,
+    _user: AuthenticatedUser,
+    Json(payload): Json<ReplayEventsRequest>,
+) -> Result<Json<ReplayEventsResponse>, ApiError> {
+    tracing::info!("Triggering event replay: {:?}", payload);
+
+    match state
+        .event_processor_service
+        .replay_events(payload.start_slot, payload.end_slot)
+        .await
+    {
+        Ok(message) => {
+            let response = ReplayEventsResponse {
+                message,
+                job_id: uuid::Uuid::new_v4().to_string(),
+            };
+            Ok(Json(response))
+        }
+        Err(e) => {
+            tracing::error!("Failed to trigger event replay: {}", e);
+            Err(ApiError::Internal(e.to_string()))
+        }
+    }
+}
+
+/// Get event replay status
+#[utoipa::path(
+    get,
+    path = "/api/admin/event-processor/replay",
+    tag = "Admin",
+    responses(
+        (status = 200, description = "Replay status retrieved successfully", body = Option<ReplayStatus>),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(
+        ("api_key" = [])
+    )
+)]
+pub async fn get_replay_status(
+    State(state): State<AppState>,
+) -> std::result::Result<
+    Json<Option<crate::services::event_processor_service::ReplayStatus>>,
+    ApiError,
+> {
+    let status = state.event_processor_service.get_replay_status();
+    Ok(Json(status))
 }

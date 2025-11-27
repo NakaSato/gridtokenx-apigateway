@@ -86,21 +86,7 @@ impl MeterVerificationService {
             user_id, request.meter_serial
         );
 
-        // 1. Rate limiting check
-        if let Err(e) = self.check_rate_limit(user_id).await {
-            self.log_attempt(
-                &request.meter_serial,
-                user_id,
-                &request.verification_method,
-                ip_address,
-                user_agent,
-                "rate_limited",
-                Some(&e.to_string()),
-            ).await?;
-            return Err(e);
-        }
-
-        // 2. Validate meter key format
+        // 1. Validate meter key format
         if let Err(e) = self.validate_meter_key_format(&request.meter_key) {
             self.log_attempt(
                 &request.meter_serial,
@@ -228,33 +214,6 @@ impl MeterVerificationService {
             Some(m) => Ok(m.user_id == user_uuid && m.verification_status == "verified"),
             None => Ok(false),
         }
-    }
-
-    /// Check rate limit for verification attempts
-    async fn check_rate_limit(&self, user_id: Uuid) -> Result<()> {
-        // Allow max 5 attempts per hour per user
-        let one_hour_ago = Utc::now() - Duration::hours(1);
-
-        let attempt_count = sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(*) as "count!" 
-            FROM meter_verification_attempts
-            WHERE user_id = $1 AND attempted_at > $2
-            "#,
-            user_id,
-            one_hour_ago
-        )
-        .fetch_one(&self.db_pool)
-        .await
-        .map_err(|e| anyhow!("Failed to check rate limit: {}", e))?;
-
-        if attempt_count >= 5 {
-            return Err(anyhow!(
-                "Rate limit exceeded. Maximum 5 verification attempts per hour. Please try again later."
-            ));
-        }
-
-        Ok(())
     }
 
     /// Validate meter key format
