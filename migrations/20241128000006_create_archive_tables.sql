@@ -196,10 +196,10 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Grant permissions
-GRANT SELECT ON meter_readings_archive TO gridtokenx;
-GRANT SELECT ON market_epochs_archive TO gridtokenx;
-GRANT SELECT ON settlements_archive TO gridtokenx;
-GRANT SELECT ON trading_orders_archive TO gridtokenx;
+GRANT SELECT ON meter_readings_archive TO gridtokenx_user;
+GRANT SELECT ON market_epochs_archive TO gridtokenx_user;
+GRANT SELECT ON settlements_archive TO gridtokenx_user;
+GRANT SELECT ON trading_orders_archive TO gridtokenx_user;
 
 -- Create view to query both current and archived meter readings
 CREATE OR REPLACE VIEW meter_readings_all AS

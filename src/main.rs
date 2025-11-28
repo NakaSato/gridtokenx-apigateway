@@ -113,9 +113,8 @@ async fn main() -> Result<()> {
 
     // Run database migrations (PostgreSQL only - TimescaleDB has its own schema)
     // Temporarily disable migrations to run application
-    // database::run_migrations(&db_pool).await?;
-    // info!("✅ Database migrations completed successfully");
-    info!("⚠️ Database migrations disabled");
+    database::run_migrations(&db_pool).await?;
+    info!("✅ Database migrations completed successfully");
 
     // Setup Redis connection with authentication support
     let redis_client = redis::Client::open(config.redis_url.as_str())?;
@@ -489,7 +488,7 @@ async fn main() -> Result<()> {
                 .route("/meters", post(user_management::register_meter_handler))
                 .route("/meters", get(user_management::get_user_meters_handler))
                 .route(
-                    "/meters/:meter_id",
+                    "/meters/{meter_id}",
                     axum::routing::delete(user_management::delete_meter_handler),
                 ),
         )

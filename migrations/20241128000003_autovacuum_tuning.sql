@@ -65,10 +65,10 @@ ALTER TABLE market_epochs SET (
 CREATE OR REPLACE VIEW v_table_bloat AS
 SELECT
     schemaname,
-    tablename,
-    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS total_size,
-    pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) AS table_size,
-    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename) - pg_relation_size(schemaname||'.'||tablename)) AS indexes_size,
+    relname as tablename,
+    pg_size_pretty(pg_total_relation_size(schemaname||'.'||relname)) AS total_size,
+    pg_size_pretty(pg_relation_size(schemaname||'.'||relname)) AS table_size,
+    pg_size_pretty(pg_total_relation_size(schemaname||'.'||relname) - pg_relation_size(schemaname||'.'||relname)) AS indexes_size,
     n_live_tup AS live_tuples,
     n_dead_tup AS dead_tuples,
     ROUND(100.0 * n_dead_tup / NULLIF(n_live_tup + n_dead_tup, 0), 2) AS dead_tuple_percent,
@@ -126,7 +126,7 @@ RETURNS TABLE(
 BEGIN
     RETURN QUERY
     SELECT
-        schemaname || '.' || tablename AS table_name,
+        schemaname || '.' || relname AS table_name,
         n_live_tup,
         n_dead_tup,
         ROUND(100.0 * n_dead_tup / NULLIF(n_live_tup + n_dead_tup, 0), 2),

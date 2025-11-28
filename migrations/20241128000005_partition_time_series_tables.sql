@@ -5,54 +5,9 @@
 -- =========================================================================
 -- PARTITION METER READINGS TABLE
 -- =========================================================================
+-- Note: Meter readings partitioning is handled in 20241128000001_partition_meter_readings.sql
+-- This section is removed to avoid duplicates.
 
--- Step 1: Rename existing table
-ALTER TABLE meter_readings RENAME TO meter_readings_old;
-
--- Step 2: Create partitioned table
-CREATE TABLE meter_readings (
-    id UUID DEFAULT gen_random_uuid(),
-    meter_id VARCHAR(50) NOT NULL,
-    wallet_address VARCHAR(88) NOT NULL,
-    timestamp TIMESTAMPTZ NOT NULL,
-    energy_generated NUMERIC(12, 4),
-    energy_consumed NUMERIC(12, 4),
-    surplus_energy NUMERIC(12, 4),
-    deficit_energy NUMERIC(12, 4),
-    battery_level NUMERIC(5, 2),
-    temperature NUMERIC(5, 2),
-    voltage NUMERIC(8, 2),
-    current NUMERIC(8, 2),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY (id, timestamp)
-) PARTITION BY RANGE (timestamp);
-
--- Step 3: Create partitions for current and next 3 months
-CREATE TABLE meter_readings_2024_11 PARTITION OF meter_readings
-    FOR VALUES FROM ('2024-11-01') TO ('2024-12-01');
-
-CREATE TABLE meter_readings_2024_12 PARTITION OF meter_readings
-    FOR VALUES FROM ('2024-12-01') TO ('2025-01-01');
-
-CREATE TABLE meter_readings_2025_01 PARTITION OF meter_readings
-    FOR VALUES FROM ('2025-01-01') TO ('2025-02-01');
-
-CREATE TABLE meter_readings_2025_02 PARTITION OF meter_readings
-    FOR VALUES FROM ('2025-02-01') TO ('2025-03-01');
-
--- Step 4: Create indexes on partitioned table
-CREATE INDEX idx_meter_readings_timestamp ON meter_readings USING BRIN(timestamp);
-CREATE INDEX idx_meter_readings_meter_timestamp ON meter_readings(meter_id, timestamp DESC);
-CREATE INDEX idx_meter_readings_wallet_timestamp ON meter_readings(wallet_address, timestamp DESC);
-
--- Step 5: Migrate existing data (if any)
-INSERT INTO meter_readings 
-SELECT * FROM meter_readings_old
-WHERE timestamp >= '2024-11-01';
-
--- Step 6: Drop old table (after verifying data migration)
--- DROP TABLE meter_readings_old;
--- Note: Commented out for safety. Run manually after verification.
 
 -- =========================================================================
 -- PARTITION USER ACTIVITIES TABLE
@@ -60,6 +15,12 @@ WHERE timestamp >= '2024-11-01';
 
 -- Step 1: Rename existing table
 ALTER TABLE user_activities RENAME TO user_activities_old;
+
+-- Rename indexes on old table to avoid conflicts
+ALTER INDEX IF EXISTS idx_user_activities_created RENAME TO idx_user_activities_old_created;
+ALTER INDEX IF EXISTS idx_user_activities_user_created RENAME TO idx_user_activities_old_user_created;
+ALTER INDEX IF EXISTS idx_user_activities_type_created RENAME TO idx_user_activities_old_type_created;
+ALTER INDEX IF EXISTS idx_user_activities_metadata RENAME TO idx_user_activities_old_metadata;
 
 -- Step 2: Create partitioned table
 CREATE TABLE user_activities (

@@ -103,7 +103,7 @@ BEGIN
 END $$;
 
 -- Step 8: Grant permissions
-GRANT SELECT, INSERT, UPDATE, DELETE ON blockchain_events TO gridtokenx;
+GRANT SELECT, INSERT, UPDATE, DELETE ON blockchain_events TO gridtokenx_user;
 
 -- Verification queries
 -- View partition information

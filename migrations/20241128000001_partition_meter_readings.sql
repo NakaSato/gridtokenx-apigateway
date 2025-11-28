@@ -208,7 +208,7 @@ BEGIN
 END $$;
 
 -- Step 12: Grant permissions
-GRANT SELECT, INSERT, UPDATE, DELETE ON meter_readings TO gridtokenx;
+GRANT SELECT, INSERT, UPDATE, DELETE ON meter_readings TO gridtokenx_user;
 
 -- Verification
 SELECT 

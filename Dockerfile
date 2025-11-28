@@ -27,10 +27,12 @@ ENV SQLX_OFFLINE=true
 COPY --from=planner /app/recipe.json recipe.json
 
 # Build dependencies - this is the caching Docker layer
+ENV CARGO_BUILD_JOBS=2
 RUN cargo chef cook --release --recipe-path recipe.json
 
 # Copy source code and build application
 COPY . .
+ENV CARGO_BUILD_JOBS=2
 RUN cargo build --release --bin api-gateway
 
 # Runtime stage
@@ -41,6 +43,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
     libpq5 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
