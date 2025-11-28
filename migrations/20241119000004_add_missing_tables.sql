@@ -57,5 +57,6 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
 -- =========================================================================
 -- Add trigger for blockchain_transactions updated_at
 -- =========================================================================
+DROP TRIGGER IF EXISTS update_blockchain_transactions_updated_at ON blockchain_transactions;
 CREATE TRIGGER update_blockchain_transactions_updated_at BEFORE UPDATE ON blockchain_transactions
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

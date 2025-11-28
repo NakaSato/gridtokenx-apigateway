@@ -471,7 +471,7 @@ pub async fn mint_from_reading(
 
     // Validate the reading is recent (within 30 days)
     let thirty_days_ago = chrono::Utc::now() - chrono::Duration::days(30);
-    if reading.reading_timestamp < Some(thirty_days_ago) {
+    if reading.reading_timestamp < thirty_days_ago {
         return Err(ApiError::BadRequest(
             "Reading is too old to mint (must be within 30 days)".to_string(),
         ));

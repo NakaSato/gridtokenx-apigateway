@@ -366,6 +366,213 @@ impl MeterVerificationService {
         Ok(attempts)
     }
 
+    /// Register meter with minimal info (simplified registration)
+    /// This is for users who just want to register their meter serial without full verification
+    pub async fn register_meter_simple(
+        &self,
+        user_id: Uuid,
+        meter_serial: String,
+        meter_type: Option<String>,
+        location_address: Option<String>,
+    ) -> Result<MeterRegistry> {
+        info!(
+            "User {} registering meter (simple): {}",
+            user_id, meter_serial
+        );
+
+        // 1. Validate meter serial format
+        self.validate_meter_serial_format(&meter_serial)?;
+
+        // 2. Check if meter is already registered
+        if let Some(existing) = self.get_meter_by_serial(&meter_serial).await? {
+            if existing.user_id != user_id {
+                return Err(anyhow!(
+                    "Meter serial '{}' is already registered by another user",
+                    meter_serial
+                ));
+            } else {
+                return Err(anyhow!(
+                    "Meter serial '{}' is already registered to your account",
+                    meter_serial
+                ));
+            }
+        }
+
+        // 3. Insert into meter_registry with pending status
+        let meter_id = sqlx::query!(
+            r#"
+            INSERT INTO meter_registry (
+                meter_serial, meter_key_hash, verification_method,
+                verification_status, user_id, meter_type, location_address
+            )
+            VALUES ($1, '', 'serial', 'pending', $2, $3, $4)
+            RETURNING id
+            "#,
+            meter_serial,
+            user_id,
+            meter_type,
+            location_address,
+        )
+        .fetch_one(&self.db_pool)
+        .await
+        .map_err(|e| anyhow!("Failed to register meter: {}", e))?;
+
+        // 4. Fetch and return the created meter
+        let meter = self.get_meter_by_id(&meter_id.id).await?
+            .ok_or_else(|| anyhow!("Failed to retrieve registered meter"))?;
+
+        info!(
+            "Meter {} successfully registered for user {} with ID: {}",
+            meter_serial, user_id, meter_id.id
+        );
+
+        Ok(meter)
+    }
+
+    /// Delete a pending meter (only allowed for pending status)
+    pub async fn delete_pending_meter(
+        &self,
+        user_id: Uuid,
+        meter_id: Uuid,
+    ) -> Result<()> {
+        info!("User {} attempting to delete meter: {}", user_id, meter_id);
+
+        // 1. Check if meter exists and belongs to user
+        let meter = sqlx::query!(
+            r#"
+            SELECT user_id, verification_status FROM meter_registry
+            WHERE id = $1
+            "#,
+            meter_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| anyhow!("Failed to fetch meter: {}", e))?
+        .ok_or_else(|| anyhow!("Meter not found"))?;
+
+        // 2. Verify ownership
+        if meter.user_id != user_id {
+            return Err(anyhow!("You do not own this meter"));
+        }
+
+        // 3. Only allow deletion of pending meters
+        if meter.verification_status != "pending" {
+            return Err(anyhow!(
+                "Cannot delete {} meters. Only pending meters can be deleted.",
+                meter.verification_status
+            ));
+        }
+
+        // 4. Delete the meter
+        sqlx::query!(
+            r#"
+            DELETE FROM meter_registry
+            WHERE id = $1
+            "#,
+            meter_id
+        )
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| anyhow!("Failed to delete meter: {}", e))?;
+
+        info!("Meter {} successfully deleted by user {}", meter_id, user_id);
+
+        Ok(())
+    }
+
+    /// Validate meter serial format
+    fn validate_meter_serial_format(&self, meter_serial: &str) -> Result<()> {
+        // Meter serial should be 5-50 characters
+        if meter_serial.len() < 5 || meter_serial.len() > 50 {
+            return Err(anyhow!(
+                "Meter serial must be between 5 and 50 characters long"
+            ));
+        }
+
+        // Check if contains only alphanumeric characters and hyphens
+        if !meter_serial.chars().all(|c| c.is_alphanumeric() || c == '-') {
+            return Err(anyhow!(
+                "Meter serial can only contain letters, numbers, and hyphens"
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Get meter by serial number
+    async fn get_meter_by_serial(&self, meter_serial: &str) -> Result<Option<MeterRegistry>> {
+        let row = sqlx::query!(
+            r#"
+            SELECT 
+                id, meter_serial, meter_key_hash, verification_method,
+                verification_status, user_id, manufacturer, meter_type,
+                location_address, installation_date, verification_proof,
+                verified_at, verified_by, created_at, updated_at
+            FROM meter_registry
+            WHERE meter_serial = $1
+            "#,
+            meter_serial
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| anyhow!("Failed to fetch meter by serial: {}", e))?;
+
+        Ok(row.map(|r| MeterRegistry {
+            id: r.id,
+            meter_serial: r.meter_serial,
+            meter_key_hash: r.meter_key_hash,
+            verification_method: r.verification_method,
+            verification_status: r.verification_status,
+            user_id: r.user_id,
+            manufacturer: r.manufacturer,
+            meter_type: r.meter_type,
+            location_address: r.location_address,
+            installation_date: r.installation_date,
+            verification_proof: r.verification_proof,
+            verified_at: r.verified_at,
+            verified_by: r.verified_by,
+            created_at: r.created_at.expect("created_at should not be null"),
+            updated_at: r.updated_at.expect("updated_at should not be null"),
+        }))
+    }
+
+    /// Get meter by ID
+    async fn get_meter_by_id(&self, meter_id: &Uuid) -> Result<Option<MeterRegistry>> {
+        let row = sqlx::query!(
+            r#"
+            SELECT 
+                id, meter_serial, meter_key_hash, verification_method,
+                verification_status, user_id, manufacturer, meter_type,
+                location_address, installation_date, verification_proof,
+                verified_at, verified_by, created_at, updated_at
+            FROM meter_registry
+            WHERE id = $1
+            "#,
+            meter_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| anyhow!("Failed to fetch meter by ID: {}", e))?;
+
+        Ok(row.map(|r| MeterRegistry {
+            id: r.id,
+            meter_serial: r.meter_serial,
+            meter_key_hash: r.meter_key_hash,
+            verification_method: r.verification_method,
+            verification_status: r.verification_status,
+            user_id: r.user_id,
+            manufacturer: r.manufacturer,
+            meter_type: r.meter_type,
+            location_address: r.location_address,
+            installation_date: r.installation_date,
+            verification_proof: r.verification_proof,
+            verified_at: r.verified_at,
+            verified_by: r.verified_by,
+            created_at: r.created_at.expect("created_at should not be null"),
+            updated_at: r.updated_at.expect("updated_at should not be null"),
+        }))
+    }
+
     /// Get verification statistics for monitoring
     pub async fn get_verification_stats(&self) -> Result<VerificationStats> {
         let stats = sqlx::query!(

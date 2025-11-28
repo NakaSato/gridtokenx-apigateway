@@ -884,3 +884,259 @@ struct ActivityRow {
     user_agent: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
 }
+// Meter Registration Handlers - Added for simplified meter registration
+
+use crate::services::meter_verification_service::MeterRegistry;
+
+/// Request to register a meter
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct RegisterMeterRequest {
+    #[validate(length(min = 5, max = 50))]
+    #[schema(example = "METER-12345")]
+    pub meter_serial: String,
+
+    #[validate(length(min = 1, max = 50))]
+    #[schema(example = "solar")]
+    pub meter_type: Option<String>,
+
+    #[validate(length(min = 1, max = 255))]
+    #[schema(example = "123 Main Street")]
+    pub location_address: Option<String>,
+}
+
+/// Response for meter registration
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RegisterMeterResponse {
+    pub meter_id: Uuid,
+    pub meter_serial: String,
+    pub wallet_address: Option<String>,
+    pub verification_status: String,
+    pub message: String,
+}
+
+/// Response for listing user's meters
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UserMetersResponse {
+    pub meters: Vec<UserMeterInfo>,
+    pub total: usize,
+}
+
+/// User meter information
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UserMeterInfo {
+    pub meter_id: Uuid,
+    pub meter_serial: String,
+    pub wallet_address: Option<String>,
+    pub verification_status: String,
+    pub meter_type: Option<String>,
+    pub location_address: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Register a meter for the current user
+/// POST /api/user/meters
+#[utoipa::path(
+    post,
+    path = "/api/user/meters",
+    tag = "users",
+    request_body = RegisterMeterRequest,
+    responses(
+        (status = 201, description = "Meter registered successfully", body = RegisterMeterResponse),
+        (status = 400, description = "Invalid request or meter already registered"),
+        (status = 403, description = "Email verification or wallet address required"),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn register_meter_handler(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+    Json(request): Json<RegisterMeterRequest>,
+) -> Result<(StatusCode, Json<RegisterMeterResponse>)> {
+    // Validate request
+    request
+        .validate()
+        .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
+
+    // Check if email is verified
+    let user_info = sqlx::query!(
+        "SELECT email_verified, wallet_address FROM users WHERE id = $1",
+        user.0.sub
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
+    .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+
+    if !user_info.email_verified {
+        return Err(ApiError::Forbidden(
+            "Email verification required before registering meters".to_string(),
+        ));
+    }
+
+    // Check if wallet address is set
+    if user_info.wallet_address.is_none() {
+        return Err(ApiError::BadRequest(
+            "Wallet address must be set before registering meters".to_string(),
+        ));
+    }
+
+    // Register meter via service
+    let meter = state
+        .meter_verification_service
+        .register_meter_simple(
+            user.0.sub,
+            request.meter_serial.clone(),
+            request.meter_type,
+            request.location_address,
+        )
+        .await
+        .map_err(|e| {
+            if e.to_string().contains("already registered") {
+                ApiError::BadRequest(e.to_string())
+            } else {
+                ApiError::Internal(format!("Failed to register meter: {}", e))
+            }
+        })?;
+
+    // Log activity
+    let _ = log_user_activity(
+        &state.db,
+        user.0.sub,
+        "meter_registered".to_string(),
+        Some(serde_json::json!({
+            "meter_id": meter.id,
+            "meter_serial": meter.meter_serial
+        })),
+        None,
+        None,
+    )
+    .await;
+
+    let response = RegisterMeterResponse {
+        meter_id: meter.id,
+        meter_serial: meter.meter_serial,
+        wallet_address: user_info.wallet_address,
+        verification_status: meter.verification_status,
+        message: "Meter registered successfully. Status is pending until verified by admin."
+            .to_string(),
+    };
+
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+/// Get current user's registered meters
+/// GET /api/user/meters
+#[utoipa::path(
+    get,
+    path = "/api/user/meters",
+    tag = "users",
+    responses(
+        (status = 200, description = "User's meters retrieved successfully", body = UserMetersResponse),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn get_user_meters_handler(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+) -> Result<Json<UserMetersResponse>> {
+    // Get user's wallet address
+    let wallet_address =
+        sqlx::query_scalar::<_, Option<String>>("SELECT wallet_address FROM users WHERE id = $1")
+            .bind(user.0.sub)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?
+            .flatten();
+
+    // Get meters from service
+    let meters = state
+        .meter_verification_service
+        .get_user_meters(&user.0.sub)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to fetch meters: {}", e)))?;
+
+    let meter_list: Vec<UserMeterInfo> = meters
+        .into_iter()
+        .map(|m| UserMeterInfo {
+            meter_id: m.id,
+            meter_serial: m.meter_serial,
+            wallet_address: wallet_address.clone(),
+            verification_status: m.verification_status,
+            meter_type: m.meter_type,
+            location_address: m.location_address,
+            created_at: m.created_at,
+        })
+        .collect();
+
+    let total = meter_list.len();
+
+    Ok(Json(UserMetersResponse {
+        meters: meter_list,
+        total,
+    }))
+}
+
+/// Delete a pending meter
+/// DELETE /api/user/meters/{meter_id}
+#[utoipa::path(
+    delete,
+    path = "/api/user/meters/{meter_id}",
+    tag = "users",
+    params(
+        ("meter_id" = Uuid, Path, description = "Meter ID to delete")
+    ),
+    responses(
+        (status = 204, description = "Meter deleted successfully"),
+        (status = 400, description = "Cannot delete verified meters"),
+        (status = 403, description = "Not meter owner"),
+        (status = 404, description = "Meter not found"),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn delete_meter_handler(
+    State(state): State<AppState>,
+    Path(meter_id): Path<Uuid>,
+    user: AuthenticatedUser,
+) -> Result<StatusCode> {
+    // Delete meter via service
+    state
+        .meter_verification_service
+        .delete_pending_meter(user.0.sub, meter_id)
+        .await
+        .map_err(|e| {
+            let error_msg = e.to_string();
+            if error_msg.contains("not found") {
+                ApiError::NotFound(error_msg)
+            } else if error_msg.contains("do not own") {
+                ApiError::Forbidden(error_msg)
+            } else if error_msg.contains("Cannot delete") {
+                ApiError::BadRequest(error_msg)
+            } else {
+                ApiError::Internal(format!("Failed to delete meter: {}", e))
+            }
+        })?;
+
+    // Log activity
+    let _ = log_user_activity(
+        &state.db,
+        user.0.sub,
+        "meter_deleted".to_string(),
+        Some(serde_json::json!({
+            "meter_id": meter_id
+        })),
+        None,
+        None,
+    )
+    .await;
+
+    Ok(StatusCode::NO_CONTENT)
+}

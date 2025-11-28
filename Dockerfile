@@ -1,5 +1,5 @@
 # Multi-stage build for Rust API Gateway
-FROM rust:1.75-slim-bookworm AS chef
+FROM rust:1-slim-bookworm AS chef
 
 # Install cargo-chef for dependency caching
 RUN cargo install cargo-chef
@@ -18,7 +18,11 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     libpq-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Enable offline mode for sqlx
+ENV SQLX_OFFLINE=true
 
 COPY --from=planner /app/recipe.json recipe.json
 

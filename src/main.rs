@@ -484,7 +484,14 @@ async fn main() -> Result<()> {
                     "/wallet",
                     axum::routing::delete(user_management::remove_wallet_address),
                 )
-                .route("/activity", get(user_management::get_my_activity)),
+                .route("/activity", get(user_management::get_my_activity))
+                // Meter registration routes
+                .route("/meters", post(user_management::register_meter_handler))
+                .route("/meters", get(user_management::get_user_meters_handler))
+                .route(
+                    "/meters/:meter_id",
+                    axum::routing::delete(user_management::delete_meter_handler),
+                ),
         )
         // Admin-only user management routes
         .nest(

@@ -12,7 +12,7 @@ ALTER TABLE users ADD CONSTRAINT chk_user_role
 
 -- Step 3: Update index to include new roles
 DROP INDEX IF EXISTS idx_users_role_simplified;
-CREATE INDEX idx_users_role ON users(role) 
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role) 
     WHERE role IN ('user', 'admin', 'prosumer', 'consumer');
 
 -- Step 4: Add comment explaining role types

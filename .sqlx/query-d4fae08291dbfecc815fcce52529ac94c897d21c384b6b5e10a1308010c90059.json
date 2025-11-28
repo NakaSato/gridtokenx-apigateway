@@ -8,11 +8,36 @@
         "Uuid",
         "Uuid",
         "Varchar",
-        "Varchar",
+        {
+          "Custom": {
+            "name": "order_side",
+            "kind": {
+              "Enum": [
+                "buy",
+                "sell"
+              ]
+            }
+          }
+        },
         "Numeric",
         "Numeric",
         "Numeric",
-        "Varchar",
+        {
+          "Custom": {
+            "name": "order_status",
+            "kind": {
+              "Enum": [
+                "pending",
+                "active",
+                "partially_filled",
+                "filled",
+                "settled",
+                "cancelled",
+                "expired"
+              ]
+            }
+          }
+        },
         "Timestamptz",
         "Timestamptz",
         "Uuid"

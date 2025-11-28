@@ -11,7 +11,22 @@
       {
         "ordinal": 1,
         "name": "status: OrderStatus",
-        "type_info": "Varchar"
+        "type_info": {
+          "Custom": {
+            "name": "order_status",
+            "kind": {
+              "Enum": [
+                "pending",
+                "active",
+                "partially_filled",
+                "filled",
+                "settled",
+                "cancelled",
+                "expired"
+              ]
+            }
+          }
+        }
       }
     ],
     "parameters": {

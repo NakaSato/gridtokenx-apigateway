@@ -18,6 +18,4 @@ CREATE INDEX IF NOT EXISTS idx_minting_retry_queue_attempts ON minting_retry_que
 
 -- Add a comment to explain the purpose of the table
 COMMENT ON TABLE minting_retry_queue IS 'Stores failed meter readings that need to be retried for token minting';
-```
 
-### Step 4: Enhance WebSocket Service with Meter Events
