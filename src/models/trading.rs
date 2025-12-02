@@ -1,7 +1,7 @@
 use crate::database::schema::types::{OrderSide, OrderStatus, OrderType};
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use sqlx::types::BigDecimal;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -13,18 +13,18 @@ pub struct TradingOrder {
     pub order_type: OrderType,
     pub side: OrderSide,
     #[schema(value_type = f64)]
-    pub energy_amount: rust_decimal::Decimal,
+    pub energy_amount: Decimal,
     #[schema(value_type = f64)]
-    pub price_per_kwh: rust_decimal::Decimal,
+    pub price_per_kwh: Decimal,
     #[schema(value_type = f64)]
-    pub filled_amount: rust_decimal::Decimal,
+    pub filled_amount: Decimal,
     pub status: OrderStatus,
     pub expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub filled_at: Option<DateTime<Utc>>,
 }
 
-// Internal database model with BigDecimal for database operations
+// Internal database model with Decimal for database operations
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct TradingOrderDb {
     pub id: Uuid,
@@ -32,9 +32,9 @@ pub struct TradingOrderDb {
     pub epoch_id: Option<Uuid>,
     pub order_type: OrderType,
     pub side: OrderSide,
-    pub energy_amount: BigDecimal,
-    pub price_per_kwh: BigDecimal,
-    pub filled_amount: BigDecimal,
+    pub energy_amount: Decimal,
+    pub price_per_kwh: Decimal,
+    pub filled_amount: Decimal,
     pub status: OrderStatus,
     pub expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -43,20 +43,15 @@ pub struct TradingOrderDb {
 
 impl From<TradingOrderDb> for TradingOrder {
     fn from(db_order: TradingOrderDb) -> Self {
-        use std::str::FromStr;
-
         TradingOrder {
             id: db_order.id,
             user_id: db_order.user_id,
             epoch_id: db_order.epoch_id,
             order_type: db_order.order_type,
             side: db_order.side,
-            energy_amount: rust_decimal::Decimal::from_str(&db_order.energy_amount.to_string())
-                .unwrap_or_default(),
-            price_per_kwh: rust_decimal::Decimal::from_str(&db_order.price_per_kwh.to_string())
-                .unwrap_or_default(),
-            filled_amount: rust_decimal::Decimal::from_str(&db_order.filled_amount.to_string())
-                .unwrap_or_default(),
+            energy_amount: db_order.energy_amount,
+            price_per_kwh: db_order.price_per_kwh,
+            filled_amount: db_order.filled_amount,
             status: db_order.status,
             expires_at: db_order.expires_at,
             created_at: db_order.created_at,
@@ -69,9 +64,10 @@ impl From<TradingOrderDb> for TradingOrder {
 pub struct CreateOrderRequest {
     #[schema(value_type = f64)]
     pub energy_amount: rust_decimal::Decimal,
-    #[schema(value_type = f64)]
-    pub price_per_kwh: rust_decimal::Decimal,
+    #[schema(value_type = Option<f64>)]
+    pub price_per_kwh: Option<rust_decimal::Decimal>,
     pub order_type: OrderType,
+    pub side: OrderSide,
     pub expiry_time: Option<DateTime<Utc>>,
 }
 

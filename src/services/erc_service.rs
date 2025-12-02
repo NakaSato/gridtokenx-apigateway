@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
-use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 // Removed unused import: Digest
 use solana_sdk::{
@@ -19,7 +19,7 @@ pub struct ErcCertificate {
     pub certificate_id: String,
     pub user_id: Option<Uuid>,
     pub wallet_address: String,
-    pub kwh_amount: Option<BigDecimal>,
+    pub kwh_amount: Option<Decimal>,
     pub issue_date: Option<DateTime<Utc>>,
     pub expiry_date: Option<DateTime<Utc>>,
     pub issuer_wallet: Option<String>,
@@ -35,7 +35,7 @@ pub struct ErcCertificate {
 pub struct IssueErcRequest {
     pub wallet_address: String,
     pub meter_id: Option<String>,
-    pub kwh_amount: BigDecimal,
+    pub kwh_amount: Decimal,
     pub expiry_date: Option<DateTime<Utc>>,
     pub metadata: Option<serde_json::Value>,
 }
@@ -443,7 +443,7 @@ impl ErcService {
     ) -> Result<ErcCertificate> {
         // Validate amount
         use std::str::FromStr;
-        if request.kwh_amount <= BigDecimal::from_str("0").unwrap() {
+        if request.kwh_amount <= Decimal::ZERO {
             return Err(anyhow!("kWh amount must be positive"));
         }
 
@@ -885,17 +885,17 @@ impl ErcService {
 #[derive(Debug, sqlx::FromRow)]
 struct CertificateStatsRow {
     total_count: i64,
-    active_kwh: BigDecimal,
-    retired_kwh: BigDecimal,
-    total_kwh: BigDecimal,
+    active_kwh: Decimal,
+    retired_kwh: Decimal,
+    total_kwh: Decimal,
 }
 
 #[derive(Debug, Serialize)]
 pub struct CertificateStats {
     pub total_certificates: i64,
-    pub active_kwh: BigDecimal,
-    pub retired_kwh: BigDecimal,
-    pub total_kwh: BigDecimal,
+    pub active_kwh: Decimal,
+    pub retired_kwh: Decimal,
+    pub total_kwh: Decimal,
 }
 
 #[cfg(test)]

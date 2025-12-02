@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::database::schema::types::EpochStatus;
 use crate::error::ApiError;
+use crate::services::BlockchainService;
 use crate::services::market_clearing_service::{MarketClearingService, MarketEpoch};
 
 #[derive(Debug, Clone)]
@@ -47,6 +48,7 @@ pub struct EpochScheduler {
     db: PgPool,
     config: EpochConfig,
     market_clearing_service: MarketClearingService,
+    blockchain_service: BlockchainService,
     current_epoch: Arc<RwLock<Option<MarketEpoch>>>,
     is_running: AtomicBool,
     event_sender: broadcast::Sender<EpochTransitionEvent>,
@@ -54,8 +56,9 @@ pub struct EpochScheduler {
 }
 
 impl EpochScheduler {
-    pub fn new(db: PgPool, config: EpochConfig) -> Self {
-        let market_clearing_service = MarketClearingService::new(db.clone());
+    pub fn new(db: PgPool, config: EpochConfig, blockchain_service: BlockchainService) -> Self {
+        let market_clearing_service =
+            MarketClearingService::new(db.clone(), blockchain_service.clone());
         let (event_sender, _) = broadcast::channel(1000);
         let (_, shutdown_receiver) = broadcast::channel(1);
 
@@ -63,6 +66,7 @@ impl EpochScheduler {
             db,
             config,
             market_clearing_service,
+            blockchain_service,
             current_epoch: Arc::new(RwLock::new(None)),
             is_running: AtomicBool::new(false),
             event_sender,
@@ -310,7 +314,7 @@ impl EpochScheduler {
                 end_time: epoch_row.end_time,
                 status: EpochStatus::Active,
                 clearing_price: None,
-                total_volume: Some(bigdecimal::BigDecimal::from_str("0").unwrap()),
+                total_volume: Some(Decimal::ZERO),
                 total_orders: Some(0),
                 matched_orders: Some(0),
             };
@@ -567,6 +571,12 @@ mod tests {
         PgPool::connect_lazy(&database_url).expect("Failed to connect to test database")
     }
 
+    // Helper function to create a test blockchain service
+    fn create_test_blockchain_service() -> BlockchainService {
+        BlockchainService::new("http://localhost:8899".to_string(), "localnet".to_string())
+            .expect("Failed to create test blockchain service")
+    }
+
     #[tokio::test]
     async fn test_epoch_number_calculation() {
         let timestamp = Utc.with_ymd_and_hms(2025, 11, 9, 14, 30, 0).unwrap();
@@ -589,7 +599,11 @@ mod tests {
     #[tokio::test]
     async fn test_target_state_determination() {
         let config = EpochConfig::default();
-        let scheduler = EpochScheduler::new(create_test_db().await, config);
+        let scheduler = EpochScheduler::new(
+            create_test_db().await,
+            config,
+            create_test_blockchain_service(),
+        );
 
         let now = Utc.with_ymd_and_hms(2025, 11, 9, 14, 30, 0).unwrap();
 
@@ -601,7 +615,7 @@ mod tests {
             end_time: Utc.with_ymd_and_hms(2025, 11, 9, 14, 45, 0).unwrap(),
             status: EpochStatus::Pending,
             clearing_price: None,
-            total_volume: Some(bigdecimal::BigDecimal::from_str("0").unwrap()),
+            total_volume: Some(Decimal::ZERO),
             total_orders: Some(0),
             matched_orders: Some(0),
         };
@@ -654,7 +668,11 @@ mod tests {
     #[tokio::test]
     async fn test_state_transition_sequence() {
         let config = EpochConfig::default();
-        let scheduler = EpochScheduler::new(create_test_db().await, config);
+        let scheduler = EpochScheduler::new(
+            create_test_db().await,
+            config,
+            create_test_blockchain_service(),
+        );
 
         let epoch_start = Utc.with_ymd_and_hms(2025, 11, 9, 14, 30, 0).unwrap();
         let epoch_end = Utc.with_ymd_and_hms(2025, 11, 9, 14, 45, 0).unwrap();
@@ -667,7 +685,7 @@ mod tests {
             end_time: epoch_end,
             status: EpochStatus::Pending,
             clearing_price: None,
-            total_volume: Some(bigdecimal::BigDecimal::from_str("0").unwrap()),
+            total_volume: Some(Decimal::ZERO),
             total_orders: Some(0),
             matched_orders: Some(0),
         };
@@ -776,7 +794,11 @@ mod tests {
     #[tokio::test]
     async fn test_expired_epoch_detection() {
         let config = EpochConfig::default();
-        let scheduler = EpochScheduler::new(create_test_db().await, config);
+        let scheduler = EpochScheduler::new(
+            create_test_db().await,
+            config,
+            create_test_blockchain_service(),
+        );
 
         let epoch = MarketEpoch {
             id: Uuid::new_v4(),
@@ -785,7 +807,7 @@ mod tests {
             end_time: Utc.with_ymd_and_hms(2025, 11, 9, 14, 45, 0).unwrap(),
             status: EpochStatus::Pending,
             clearing_price: None,
-            total_volume: Some(bigdecimal::BigDecimal::from_str("0").unwrap()),
+            total_volume: Some(Decimal::ZERO),
             total_orders: Some(0),
             matched_orders: Some(0),
         };
@@ -799,7 +821,11 @@ mod tests {
     #[tokio::test]
     async fn test_cleared_epoch_should_settle() {
         let config = EpochConfig::default();
-        let scheduler = EpochScheduler::new(create_test_db().await, config);
+        let scheduler = EpochScheduler::new(
+            create_test_db().await,
+            config,
+            create_test_blockchain_service(),
+        );
 
         let epoch = MarketEpoch {
             id: Uuid::new_v4(),
@@ -807,8 +833,8 @@ mod tests {
             start_time: Utc.with_ymd_and_hms(2025, 11, 9, 14, 30, 0).unwrap(),
             end_time: Utc.with_ymd_and_hms(2025, 11, 9, 14, 45, 0).unwrap(),
             status: EpochStatus::Cleared,
-            clearing_price: Some(bigdecimal::BigDecimal::from_str("0.15").unwrap()),
-            total_volume: Some(bigdecimal::BigDecimal::from_str("1000").unwrap()),
+            clearing_price: Some(rust_decimal::Decimal::from_str("0.15").unwrap()),
+            total_volume: Some(rust_decimal::Decimal::from_str("1000").unwrap()),
             total_orders: Some(10),
             matched_orders: Some(8),
         };

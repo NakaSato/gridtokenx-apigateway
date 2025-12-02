@@ -1,10 +1,10 @@
 use anyhow::{Result, anyhow};
+use solana_sdk::sysvar::clock;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::{Keypair, Signer},
 };
-use solana_sdk::sysvar::clock;
 use std::str::FromStr;
 
 // System program ID constant
@@ -18,7 +18,7 @@ pub const ENERGY_TOKEN_PROGRAM_ID: &str = "94G1r674LmRDmLN2UPjDFD8Eh7zT8JaSaxv9v
 pub const TRADING_PROGRAM_ID: &str = "GZnqNTJsre6qB4pWCQRE9FiJU2GUeBtBDPp6s7zosctk";
 
 /// Instruction builder for Solana programs
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct InstructionBuilder {
     payer: Pubkey,
 }
@@ -28,10 +28,15 @@ impl InstructionBuilder {
         Self { payer }
     }
 
+    pub fn payer(&self) -> Pubkey {
+        self.payer
+    }
+
     /// Build instruction for creating energy trade order
     pub fn build_create_order_instruction(
         &self,
         market_pubkey: &str,
+        order_pda: Pubkey,
         energy_amount: u64,
         price_per_kwh: u64,
         order_type: &str,
@@ -40,10 +45,6 @@ impl InstructionBuilder {
         // Parse program and market pubkeys
         let program_id = Pubkey::from_str(TRADING_PROGRAM_ID)?;
         let market = Pubkey::from_str(market_pubkey)?;
-
-        // Generate new order account
-        let order_keypair = Keypair::new();
-        let order_pubkey = order_keypair.pubkey();
 
         // Find ERC certificate account if provided
         let erc_certificate = if let Some(cert_id) = erc_certificate_id {
@@ -55,7 +56,7 @@ impl InstructionBuilder {
         // Build accounts array
         let mut accounts = vec![
             AccountMeta::new(market, false),
-            AccountMeta::new(order_pubkey, false),
+            AccountMeta::new(order_pda, false),
             AccountMeta::new_readonly(self.payer, true),
             AccountMeta::new_readonly(Pubkey::from_str(SYSTEM_PROGRAM_ID)?, false),
         ];
@@ -280,8 +281,8 @@ impl InstructionBuilder {
     /// Get ERC certificate pubkey from certificate ID
     fn get_erc_certificate_pubkey(&self, certificate_id: &str) -> Result<Pubkey> {
         let (certificate_pubkey, _) = Pubkey::find_program_address(
-            &[b"certificate", certificate_id.as_bytes()],
-            &Pubkey::from_str(REGISTRY_PROGRAM_ID)?,
+            &[b"erc_certificate", certificate_id.as_bytes()],
+            &Pubkey::from_str(GOVERNANCE_PROGRAM_ID)?,
         );
 
         Ok(certificate_pubkey)

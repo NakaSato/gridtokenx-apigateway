@@ -896,11 +896,8 @@ impl MarketClearingEngine {
             .map_err(ApiError::Database)?
             .flatten();
 
-            // Convert Decimal to BigDecimal for database
-            let matched_amount_bd = sqlx::types::BigDecimal::from_str(&trade.quantity.to_string())
-                .map_err(|e| ApiError::Internal(format!("Invalid quantity: {}", e)))?;
-            let match_price_bd = sqlx::types::BigDecimal::from_str(&trade.price.to_string())
-                .map_err(|e| ApiError::Internal(format!("Invalid price: {}", e)))?;
+            let matched_amount = trade.quantity;
+            let match_price = trade.price;
 
             if let Some(epoch_id) = epoch_id {
                 sqlx::query(
@@ -915,8 +912,8 @@ impl MarketClearingEngine {
                 .bind(epoch_id)
                 .bind(trade.buy_order_id)
                 .bind(trade.sell_order_id)
-                .bind(matched_amount_bd.clone())
-                .bind(match_price_bd.clone())
+                .bind(matched_amount)
+                .bind(match_price)
                 .bind(trade.matched_at)
                 .bind("pending")
                 .execute(&mut *tx)
@@ -950,7 +947,7 @@ impl MarketClearingEngine {
                 RETURNING id, energy_amount, filled_amount + $1 as new_filled_amount
                 "#,
             )
-            .bind(matched_amount_bd.clone())
+            .bind(matched_amount)
             .bind(trade.buy_order_id)
             .fetch_optional(&mut *tx)
             .await
@@ -984,7 +981,7 @@ impl MarketClearingEngine {
                 RETURNING id, energy_amount, filled_amount + $1 as new_filled_amount
                 "#,
             )
-            .bind(matched_amount_bd.clone())
+            .bind(matched_amount)
             .bind(trade.sell_order_id)
             .fetch_optional(&mut *tx)
             .await

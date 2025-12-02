@@ -1,6 +1,7 @@
 // Data models and DTOs
 // Database models, API request/response models, etc.
 
+pub mod amm;
 pub mod blockchain;
 pub mod energy;
 pub mod meter;

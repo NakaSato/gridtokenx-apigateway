@@ -2,10 +2,10 @@
 // Handles energy token transfers on Solana blockchain
 
 use anyhow::Result;
-use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
-// Removed unused import: TryFutureExt
 use rust_decimal::Decimal;
+// Removed unused import: TryFutureExt
+
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::str::FromStr;
@@ -165,11 +165,11 @@ impl SettlementService {
         .bind(settlement.id)
         .bind(settlement.buyer_id)
         .bind(settlement.seller_id)
-        .bind(BigDecimal::from_str(&settlement.energy_amount.to_string()).unwrap_or_default())
-        .bind(BigDecimal::from_str(&settlement.price.to_string()).unwrap_or_default())
-        .bind(BigDecimal::from_str(&settlement.total_value.to_string()).unwrap_or_default())
-        .bind(BigDecimal::from_str(&settlement.fee_amount.to_string()).unwrap_or_default())
-        .bind(BigDecimal::from_str(&settlement.net_amount.to_string()).unwrap_or_default())
+        .bind(settlement.energy_amount)
+        .bind(settlement.price)
+        .bind(settlement.total_value)
+        .bind(settlement.fee_amount)
+        .bind(settlement.net_amount)
         .bind(settlement.status.to_string())
         .bind(settlement.created_at)
         .bind(trade.epoch_id)
@@ -407,31 +407,11 @@ impl SettlementService {
             trade_id: Uuid::new_v4(), // Not stored in this simplified version
             buyer_id: row.get("buyer_id"),
             seller_id: row.get("seller_id"),
-            energy_amount: row
-                .get::<BigDecimal, _>("energy_amount")
-                .to_string()
-                .parse()
-                .unwrap_or(Decimal::ZERO),
-            price: row
-                .get::<BigDecimal, _>("price_per_kwh")
-                .to_string()
-                .parse()
-                .unwrap_or(Decimal::ZERO),
-            total_value: row
-                .get::<BigDecimal, _>("total_amount")
-                .to_string()
-                .parse()
-                .unwrap_or(Decimal::ZERO),
-            fee_amount: row
-                .get::<BigDecimal, _>("fee_amount")
-                .to_string()
-                .parse()
-                .unwrap_or(Decimal::ZERO),
-            net_amount: row
-                .get::<BigDecimal, _>("net_amount")
-                .to_string()
-                .parse()
-                .unwrap_or(Decimal::ZERO),
+            energy_amount: row.get("energy_amount"),
+            price: row.get("price_per_kwh"),
+            total_value: row.get("total_amount"),
+            fee_amount: row.get("fee_amount"),
+            net_amount: row.get("net_amount"),
             status,
             blockchain_tx: row.get("transaction_hash"),
             created_at: row.get("created_at"),
@@ -583,11 +563,7 @@ impl SettlementService {
             processing_count: row.get::<i64, _>("processing_count"),
             confirmed_count: row.get::<i64, _>("confirmed_count"),
             failed_count: row.get::<i64, _>("failed_count"),
-            total_settled_value: row
-                .get::<BigDecimal, _>("total_settled_value")
-                .to_string()
-                .parse()
-                .unwrap_or(Decimal::ZERO),
+            total_settled_value: row.get("total_settled_value"),
         })
     }
 }

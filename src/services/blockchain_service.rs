@@ -15,11 +15,24 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 /// Blockchain service for interacting with Solana programs
+/// BlockchainService for interacting with Solana programs
 #[derive(Clone)]
 pub struct BlockchainService {
     transaction_handler: TransactionHandler,
     instruction_builder: InstructionBuilder,
+    rpc_client: Arc<RpcClient>,
     cluster: String,
+}
+
+impl std::fmt::Debug for BlockchainService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlockchainService")
+            .field("transaction_handler", &self.transaction_handler)
+            .field("instruction_builder", &self.instruction_builder)
+            .field("rpc_client", &"RpcClient")
+            .field("cluster", &self.cluster)
+            .finish()
+    }
 }
 
 impl BlockchainService {
@@ -44,6 +57,7 @@ impl BlockchainService {
         Ok(Self {
             transaction_handler,
             instruction_builder,
+            rpc_client,
             cluster,
         })
     }
@@ -180,32 +194,32 @@ impl BlockchainService {
 
     /// Get Registry program ID
     pub fn registry_program_id() -> Result<Pubkey> {
-        // TODO: Implement program_ids module or load from config
-        Err(anyhow!("Program IDs not configured"))
+        Pubkey::from_str("2XPQmFYMdXjP7ffoBB3mXeCdboSFg5Yeb6QmTSGbW8a7")
+            .map_err(|e| anyhow!("Invalid Registry Program ID: {}", e))
     }
 
     /// Get Oracle program ID
     pub fn oracle_program_id() -> Result<Pubkey> {
-        // TODO: Implement program_ids module or load from config
-        Err(anyhow!("Program IDs not configured"))
+        Pubkey::from_str("DvdtU4quEbuxUY2FckmvcXwTpC9qp4HLJKb1PMLaqAoE")
+            .map_err(|e| anyhow!("Invalid Oracle Program ID: {}", e))
     }
 
     /// Get Governance program ID
     pub fn governance_program_id() -> Result<Pubkey> {
-        // TODO: Implement program_ids module or load from config
-        Err(anyhow!("Program IDs not configured"))
+        Pubkey::from_str("4DY97YYBt4bxvG7xaSmWy3MhYhmA6HoMajBHVqhySvXe")
+            .map_err(|e| anyhow!("Invalid Governance Program ID: {}", e))
     }
 
     /// Get Energy Token program ID
     pub fn energy_token_program_id() -> Result<Pubkey> {
-        // TODO: Implement program_ids module or load from config
-        Err(anyhow!("Program IDs not configured"))
+        Pubkey::from_str("94G1r674LmRDmLN2UPjDFD8Eh7zT8JaSaxv9v68GyEur")
+            .map_err(|e| anyhow!("Invalid Energy Token Program ID: {}", e))
     }
 
     /// Get Trading program ID
     pub fn trading_program_id() -> Result<Pubkey> {
-        // TODO: Implement program_ids module or load from config
-        Err(anyhow!("Program IDs not configured"))
+        Pubkey::from_str("GZnqNTJsre6qB4pWCQRE9FiJU2GUeBtBDPp6s7zosctk")
+            .map_err(|e| anyhow!("Invalid Trading Program ID: {}", e))
     }
 
     // ====================================================================
@@ -213,7 +227,27 @@ impl BlockchainService {
     // ====================================================================
 
     /// Build instruction for creating energy trade order
-    pub fn build_create_order_instruction(
+    /// Get active orders count from market account
+    async fn get_market_active_orders(&self, market_pubkey: &Pubkey) -> Result<u64> {
+        let client = Arc::clone(&self.rpc_client);
+        let market_pubkey = *market_pubkey;
+
+        let active_orders = tokio::task::spawn_blocking(move || {
+            let account = client.get_account(&market_pubkey)?;
+            // Parse active_orders from account data (offset 40, u64)
+            if account.data.len() < 48 {
+                return Err(anyhow!("Market account data too small"));
+            }
+            let active_orders_bytes: [u8; 8] = account.data[40..48].try_into().unwrap();
+            Ok(u64::from_le_bytes(active_orders_bytes))
+        })
+        .await??;
+
+        Ok(active_orders)
+    }
+
+    /// Build instruction for creating energy trade order
+    pub async fn build_create_order_instruction(
         &self,
         market_pubkey: &str,
         energy_amount: u64,
@@ -221,8 +255,22 @@ impl BlockchainService {
         order_type: &str,
         erc_certificate_id: Option<&str>,
     ) -> Result<Instruction> {
+        let market = Pubkey::from_str(market_pubkey)?;
+
+        // Get active orders count
+        let active_orders = self.get_market_active_orders(&market).await?;
+
+        // Derive order PDA
+        let authority = self.instruction_builder.payer();
+
+        let (order_pda, _) = Pubkey::find_program_address(
+            &[b"order", authority.as_ref(), &active_orders.to_le_bytes()],
+            &Self::trading_program_id()?,
+        );
+
         self.instruction_builder.build_create_order_instruction(
             market_pubkey,
+            order_pda,
             energy_amount,
             price_per_kwh,
             order_type,

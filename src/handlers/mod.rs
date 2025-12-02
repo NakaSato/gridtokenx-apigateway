@@ -17,6 +17,7 @@ pub mod meters;
 pub mod metrics;
 pub mod oracle;
 pub mod registry;
+pub mod swap;
 pub mod token;
 pub mod trading;
 pub mod transactions;

@@ -16,6 +16,7 @@ pub enum TransactionType {
     GovernanceVote,
     OracleUpdate,
     RegistryUpdate,
+    Swap,
 }
 
 impl std::fmt::Display for TransactionType {
@@ -27,6 +28,7 @@ impl std::fmt::Display for TransactionType {
             Self::GovernanceVote => write!(f, "governance_vote"),
             Self::OracleUpdate => write!(f, "oracle_update"),
             Self::RegistryUpdate => write!(f, "registry_update"),
+            Self::Swap => write!(f, "swap"),
         }
     }
 }
@@ -42,6 +44,7 @@ impl std::str::FromStr for TransactionType {
             "governance_vote" => Ok(Self::GovernanceVote),
             "oracle_update" => Ok(Self::OracleUpdate),
             "registry_update" => Ok(Self::RegistryUpdate),
+            "swap" => Ok(Self::Swap),
             _ => Err(format!("Unknown transaction type: {}", s)),
         }
     }
@@ -57,6 +60,7 @@ impl TransactionType {
             Self::GovernanceVote => "governance_vote",
             Self::OracleUpdate => "oracle_update",
             Self::RegistryUpdate => "registry_update",
+            Self::Swap => "swap",
         }
     }
 }

@@ -62,6 +62,7 @@ pub struct AppState {
     pub audit_logger: services::AuditLogger,
     pub cache_service: services::CacheService,
     pub dashboard_service: services::DashboardService,
+    pub amm_service: services::AmmService,
 }
 
 impl axum::extract::FromRef<AppState> for services::DashboardService {
@@ -229,7 +230,8 @@ async fn main() -> Result<()> {
     info!("Prometheus metrics initialized");
 
     // Initialize market clearing service (Phase 5) for epoch-based order management
-    let market_clearing_service = services::MarketClearingService::new(db_pool.clone());
+    let market_clearing_service =
+        services::MarketClearingService::new(db_pool.clone(), blockchain_service.clone());
     info!("✅ Market clearing service initialized for epoch management");
 
     // Initialize WebSocket service for real-time market updates
@@ -318,6 +320,7 @@ async fn main() -> Result<()> {
     let epoch_scheduler = std::sync::Arc::new(services::EpochScheduler::new(
         db_pool.clone(),
         services::EpochConfig::default(),
+        blockchain_service.clone(),
     ));
     info!("✅ Epoch scheduler initialized (15-minute intervals)");
 
@@ -357,6 +360,10 @@ async fn main() -> Result<()> {
         services::DashboardService::new(health_checker.clone(), event_processor_service.clone());
     info!("✅ Dashboard service initialized");
 
+    // Initialize AMM service
+    let amm_service = services::AmmService::new(db_pool.clone());
+    info!("✅ AMM service initialized");
+
     // Create application state
     let app_state = AppState {
         db: db_pool.clone(),
@@ -389,6 +396,7 @@ async fn main() -> Result<()> {
         audit_logger,
         cache_service,
         dashboard_service,
+        amm_service,
     };
 
     // Start meter polling service
@@ -557,7 +565,12 @@ async fn main() -> Result<()> {
                 )
                 .route("/governance/unpause", post(governance::emergency_unpause))
                 // Token admin routes
-                .route("/admin/tokens/mint", post(token::mint_tokens))
+                .route("/tokens/mint", post(token::mint_tokens))
+                // AMM Routes
+                .route("/swap/quote", post(handlers::swap::get_quote))
+                .route("/swap/execute", post(handlers::swap::execute_swap))
+                .route("/swap/pools", get(handlers::swap::list_pools))
+                .route("/swap/history", get(handlers::swap::get_swap_history))
                 // Transaction routes
                 .nest(
                     "/api/tx",

@@ -1,19 +1,20 @@
 use axum::{
-    extract::{Path, Query, State},
     Json,
+    extract::{Path, Query, State},
 };
+use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
-use utoipa::{ToSchema, IntoParams};
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
-use bigdecimal::BigDecimal;
 use validator::Validate;
 
 use crate::{
-    error::{ApiError, Result},
-    auth::middleware::AuthenticatedUser,
-    utils::{PaginationParams, PaginationMeta, SortOrder},
     AppState,
+    auth::middleware::AuthenticatedUser,
+    error::{ApiError, Result},
+    utils::{PaginationMeta, PaginationParams, SortOrder},
 };
 
 // ============================================================================
@@ -25,7 +26,7 @@ pub struct IssueErcRequest {
     pub wallet_address: String,
     pub meter_id: Option<String>,
     #[schema(value_type = String)]
-    pub kwh_amount: BigDecimal,
+    pub kwh_amount: Decimal,
     pub expiry_date: Option<chrono::DateTime<chrono::Utc>>,
     pub metadata: Option<serde_json::Value>,
 }
@@ -37,7 +38,7 @@ pub struct ErcCertificateResponse {
     pub user_id: Option<Uuid>,
     pub wallet_address: String,
     #[schema(value_type = String)]
-    pub kwh_amount: Option<BigDecimal>,
+    pub kwh_amount: Option<Decimal>,
     pub issue_date: Option<chrono::DateTime<chrono::Utc>>,
     pub expiry_date: Option<chrono::DateTime<chrono::Utc>>,
     pub issuer_wallet: Option<String>,
@@ -58,42 +59,62 @@ pub struct GetCertificatesQuery {
     pub status: Option<String>,
 }
 
-fn default_page() -> u32 { 1 }
-fn default_page_size() -> u32 { 20 }
-fn default_sort_order() -> SortOrder { SortOrder::Desc }
+fn default_page() -> u32 {
+    1
+}
+fn default_page_size() -> u32 {
+    20
+}
+fn default_sort_order() -> SortOrder {
+    SortOrder::Desc
+}
 #[allow(dead_code)]
-fn default_limit() -> i64 { 50 }
+fn default_limit() -> i64 {
+    50
+}
 
 impl GetCertificatesQuery {
     pub fn validate_params(&mut self) -> Result<()> {
         if self.page < 1 {
-            return Err(ApiError::validation_error("page must be >= 1", Some("page")));
+            return Err(ApiError::validation_error(
+                "page must be >= 1",
+                Some("page"),
+            ));
         }
         if self.page_size < 1 || self.page_size > 100 {
-            return Err(ApiError::validation_error("page_size must be between 1 and 100", Some("page_size")));
+            return Err(ApiError::validation_error(
+                "page_size must be between 1 and 100",
+                Some("page_size"),
+            ));
         }
-        
+
         if let Some(sort_by) = &self.sort_by {
             match sort_by.as_str() {
-                "issue_date" | "expiry_date" | "kwh_amount" | "status" => {},
-                _ => return Err(ApiError::validation_error(
-                    "sort_by must be one of: issue_date, expiry_date, kwh_amount, status",
-                    Some("sort_by")
-                )),
+                "issue_date" | "expiry_date" | "kwh_amount" | "status" => {}
+                _ => {
+                    return Err(ApiError::validation_error(
+                        "sort_by must be one of: issue_date, expiry_date, kwh_amount, status",
+                        Some("sort_by"),
+                    ));
+                }
             }
         }
-        
+
         // Validate status if provided
         if let Some(status) = &self.status {
             use crate::utils::validation::Validator;
             Validator::validate_certificate_status(status)?;
         }
-        
+
         Ok(())
     }
-    
-    pub fn limit(&self) -> i64 { self.page_size as i64 }
-    pub fn offset(&self) -> i64 { ((self.page - 1) * self.page_size) as i64 }
+
+    pub fn limit(&self) -> i64 {
+        self.page_size as i64
+    }
+    pub fn offset(&self) -> i64 {
+        ((self.page - 1) * self.page_size) as i64
+    }
     pub fn sort_direction(&self) -> &str {
         match self.sort_order {
             SortOrder::Asc => "ASC",
@@ -115,11 +136,11 @@ pub struct CertificatesResponse {
 pub struct CertificateStatsResponse {
     pub total_certificates: i64,
     #[schema(value_type = String)]
-    pub active_kwh: BigDecimal,
+    pub active_kwh: Decimal,
     #[schema(value_type = String)]
-    pub retired_kwh: BigDecimal,
+    pub retired_kwh: Decimal,
     #[schema(value_type = String)]
-    pub total_kwh: BigDecimal,
+    pub total_kwh: Decimal,
 }
 
 // ============================================================================
@@ -170,20 +191,17 @@ pub async fn issue_certificate(
     );
 
     // Get issuer wallet from database
-    let issuer_record = sqlx::query!(
-        "SELECT wallet_address FROM users WHERE id = $1",
-        user.sub
-    )
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| {
-        error!("Failed to fetch issuer: {}", e);
-        ApiError::Internal("Failed to fetch issuer data".to_string())
-    })?;
+    let issuer_record = sqlx::query!("SELECT wallet_address FROM users WHERE id = $1", user.sub)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| {
+            error!("Failed to fetch issuer: {}", e);
+            ApiError::Internal("Failed to fetch issuer data".to_string())
+        })?;
 
-    let issuer_wallet = issuer_record.wallet_address.ok_or_else(|| {
-        ApiError::BadRequest("Issuer wallet address not set".to_string())
-    })?;
+    let issuer_wallet = issuer_record
+        .wallet_address
+        .ok_or_else(|| ApiError::BadRequest("Issuer wallet address not set".to_string()))?;
 
     // Get recipient user ID
     let recipient = sqlx::query!(
@@ -197,9 +215,7 @@ pub async fn issue_certificate(
         ApiError::Internal("Failed to fetch recipient".to_string())
     })?;
 
-    let recipient_user_id = recipient
-        .map(|r| r.id)
-        .unwrap_or_else(|| Uuid::nil()); // Use nil UUID if user not found
+    let recipient_user_id = recipient.map(|r| r.id).unwrap_or_else(|| Uuid::nil()); // Use nil UUID if user not found
 
     // Issue certificate in database first
     let cert_request = crate::services::erc_service::IssueErcRequest {
@@ -210,7 +226,8 @@ pub async fn issue_certificate(
         metadata: request.metadata.clone(),
     };
 
-    let certificate = state.erc_service
+    let certificate = state
+        .erc_service
         .issue_certificate(recipient_user_id, &issuer_wallet, cert_request)
         .await
         .map_err(|e| {
@@ -219,33 +236,38 @@ pub async fn issue_certificate(
         })?;
 
     // Parse user wallet for blockchain operation
-    let user_wallet = crate::services::blockchain_service::BlockchainService::parse_pubkey(&certificate.wallet_address)
-        .map_err(|e| {
-            error!("Failed to parse user wallet: {}", e);
-            ApiError::BadRequest(format!("Invalid wallet address: {}", e))
-        })?;
+    let user_wallet = crate::services::blockchain_service::BlockchainService::parse_pubkey(
+        &certificate.wallet_address,
+    )
+    .map_err(|e| {
+        error!("Failed to parse user wallet: {}", e);
+        ApiError::BadRequest(format!("Invalid wallet address: {}", e))
+    })?;
 
     // Get authority keypair for blockchain operation
-    let authority = state.wallet_service
+    let authority = state
+        .wallet_service
         .get_authority_keypair()
         .await
         .map_err(|e| {
             error!("Failed to get authority keypair: {}", e);
             ApiError::with_code(
                 crate::error::ErrorCode::ServiceUnavailable,
-                format!("Authority wallet unavailable: {}", e)
+                format!("Authority wallet unavailable: {}", e),
             )
         })?;
 
     // Get governance program ID
-    let governance_program_id = crate::services::blockchain_service::BlockchainService::governance_program_id()
-        .map_err(|e| {
-            error!("Failed to get governance program ID: {}", e);
-            ApiError::with_code(
-                crate::error::ErrorCode::InternalServerError,
-                format!("Governance program not configured: {}", e)
-            )
-        })?;
+    let governance_program_id =
+        crate::services::blockchain_service::BlockchainService::governance_program_id().map_err(
+            |e| {
+                error!("Failed to get governance program ID: {}", e);
+                ApiError::with_code(
+                    crate::error::ErrorCode::InternalServerError,
+                    format!("Governance program not configured: {}", e),
+                )
+            },
+        )?;
 
     // Extract renewable source and validation data from metadata
     let (renewable_source, validation_data) = if let Some(metadata) = &certificate.metadata {
@@ -254,33 +276,33 @@ pub async fn issue_certificate(
             .and_then(|v| v.as_str())
             .unwrap_or("Unknown")
             .to_string();
-        
+
         let validation_data = metadata
             .get("validation_data")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        
+
         (renewable_source, validation_data)
     } else {
         ("Unknown".to_string(), "".to_string())
     };
 
     // Convert kwh_amount to f64 for blockchain
-    let kwh_amount_f64 = certificate.kwh_amount
+    let kwh_amount_f64 = certificate
+        .kwh_amount
         .as_ref()
-        .and_then(|bd| {
-            use std::str::FromStr;
-            f64::from_str(&bd.to_string()).ok()
-        })
+        .and_then(|bd| bd.to_f64())
         .unwrap_or(0.0);
 
     // Get meter_id
-    let meter_id = request.meter_id.clone()
-        .ok_or_else(|| ApiError::BadRequest("meter_id is required for on-chain issuance".to_string()))?;
+    let meter_id = request.meter_id.clone().ok_or_else(|| {
+        ApiError::BadRequest("meter_id is required for on-chain issuance".to_string())
+    })?;
 
     // Mint certificate on-chain
-    let blockchain_signature = state.erc_service
+    let blockchain_signature = state
+        .erc_service
         .issue_certificate_on_chain(
             &certificate.certificate_id,
             &user_wallet,
@@ -298,8 +320,12 @@ pub async fn issue_certificate(
         })?;
 
     // Update certificate with blockchain signature
-    let updated_certificate = state.erc_service
-        .update_blockchain_signature(&certificate.certificate_id, &blockchain_signature.to_string())
+    let updated_certificate = state
+        .erc_service
+        .update_blockchain_signature(
+            &certificate.certificate_id,
+            &blockchain_signature.to_string(),
+        )
         .await
         .map_err(|e| {
             error!("Failed to update certificate blockchain signature: {}", e);
@@ -350,7 +376,8 @@ pub async fn get_certificate(
 ) -> Result<Json<ErcCertificateResponse>> {
     info!("Fetching certificate: {}", certificate_id);
 
-    let certificate = state.erc_service
+    let certificate = state
+        .erc_service
         .get_certificate_by_id(&certificate_id)
         .await
         .map_err(|e| {
@@ -399,7 +426,8 @@ pub async fn get_certificates_by_wallet(
 ) -> Result<Json<Vec<ErcCertificateResponse>>> {
     info!("Fetching certificates for wallet: {}", wallet_address);
 
-    let certificates = state.erc_service
+    let certificates = state
+        .erc_service
         .get_certificates_by_wallet(&wallet_address, query.limit(), query.offset())
         .await
         .map_err(|e| {
@@ -450,7 +478,7 @@ pub async fn get_my_certificates(
 
     // Validate parameters
     query.validate_params()?;
-    
+
     let limit = query.limit();
     let offset = query.offset();
     let sort_field = query.get_sort_field();
@@ -458,7 +486,8 @@ pub async fn get_my_certificates(
     let status_filter = query.status.as_deref();
 
     // Count total
-    let total = state.erc_service
+    let total = state
+        .erc_service
         .count_user_certificates(user.sub, status_filter)
         .await
         .map_err(|e| {
@@ -467,8 +496,16 @@ pub async fn get_my_certificates(
         })?;
 
     // Fetch certificates
-    let certificates = state.erc_service
-        .get_user_certificates(user.sub, limit, offset, sort_field, sort_direction, status_filter)
+    let certificates = state
+        .erc_service
+        .get_user_certificates(
+            user.sub,
+            limit,
+            offset,
+            sort_field,
+            sort_direction,
+            status_filter,
+        )
         .await
         .map_err(|e| {
             error!("Failed to fetch user certificates: {}", e);
@@ -503,10 +540,7 @@ pub async fn get_my_certificates(
         total,
     );
 
-    Ok(Json(CertificatesResponse {
-        data,
-        pagination,
-    }))
+    Ok(Json(CertificatesResponse { data, pagination }))
 }
 
 /// Get certificate statistics for current user
@@ -528,7 +562,8 @@ pub async fn get_my_certificate_stats(
 ) -> Result<Json<CertificateStatsResponse>> {
     info!("User {} fetching certificate statistics", user.sub);
 
-    let stats = state.erc_service
+    let stats = state
+        .erc_service
         .get_user_stats(user.sub)
         .await
         .map_err(|e| {
@@ -570,7 +605,8 @@ pub async fn retire_certificate(
     info!("User {} retiring certificate {}", user.sub, certificate_id);
 
     // Get certificate to verify ownership
-    let certificate = state.erc_service
+    let certificate = state
+        .erc_service
         .get_certificate_by_id(&certificate_id)
         .await
         .map_err(|e| {
@@ -586,7 +622,8 @@ pub async fn retire_certificate(
     }
 
     // Retire certificate
-    let retired_cert = state.erc_service
+    let retired_cert = state
+        .erc_service
         .retire_certificate(certificate.id)
         .await
         .map_err(|e| {

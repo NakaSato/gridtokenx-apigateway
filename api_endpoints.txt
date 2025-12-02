@@ -1,0 +1,182 @@
+# GridTokenX API Gateway - All Endpoints
+
+## Public API Routes (No Authentication Required)
+
+### Health & Metrics
+- GET /health
+- GET /metrics
+- GET /health/metrics
+- GET /health/event-processor
+- GET /api/dashboard/metrics
+
+### Authentication
+- POST /api/auth/login
+- POST /api/auth/register
+- GET /api/auth/verify-email
+- POST /api/auth/resend-verification
+- POST /api/auth/wallet/login
+- POST /api/auth/wallet/register
+
+### Market Data (Public)
+- GET /api/market/epoch
+- GET /api/market/epoch/status
+- GET /api/market/orderbook
+- GET /api/market/stats
+
+### WebSocket
+- GET /api/market/ws
+- GET /ws
+
+### Documentation
+- GET /api/docs
+- GET /api/docs/openapi.json
+
+## Protected API Routes (Authentication Required)
+
+### User Profile Management
+- GET /api/auth/profile
+- POST /api/auth/profile/update
+- POST /api/auth/password
+
+### User Management
+- POST /api/user/wallet
+- DELETE /api/user/wallet
+- GET /api/user/activity
+- POST /api/user/meters
+- GET /api/user/meters
+- DELETE /api/user/meters/{meter_id}
+
+### Admin User Management
+- GET /api/users/{id}
+- PUT /api/users/{id}
+- POST /api/users/{id}/deactivate
+- POST /api/users/{id}/reactivate
+- GET /api/users/{id}/activity
+- GET /api/users/
+
+### Blockchain Interactions
+- POST /api/blockchain/transactions
+- GET /api/blockchain/transactions
+- GET /api/blockchain/transactions/{signature}
+- POST /api/blockchain/programs/{name}
+- GET /api/blockchain/accounts/{address}
+- GET /api/blockchain/network
+- GET /api/blockchain/users/{wallet_address}
+
+### Blockchain Testing
+- POST /api/test/transactions
+- GET /api/test/transactions/{signature}
+- GET /api/test/statistics
+
+### Admin Routes
+- POST /api/admin/users/{id}/update-role
+- POST /api/admin/governance/emergency-pause
+- POST /api/admin/governance/unpause
+- POST /api/admin/tokens/mint
+- GET /api/admin/market/health
+- GET /api/admin/market/analytics
+- POST /api/admin/market/control
+- POST /api/admin/event-processor/replay
+- GET /api/admin/event-processor/replay
+- GET /api/admin/audit/user/{user_id}
+- GET /api/admin/audit/type/{event_type}
+- GET /api/admin/audit/security
+- GET /api/admin/epochs
+- GET /api/admin/epochs/{epoch_id}/stats
+- POST /api/admin/epochs/{epoch_id}/trigger
+
+### Transaction Management
+- GET /api/admin/api/tx/{id}/status
+- GET /api/admin/api/tx/user
+- GET /api/admin/api/tx/history
+- GET /api/admin/api/tx/stats
+- POST /api/admin/api/tx/{id}/retry
+
+### Trading Admin
+- POST /api/admin/trading/match-orders
+
+### Oracle Services
+- POST /api/oracle/prices
+- GET /api/oracle/prices/current
+- GET /api/oracle/data
+
+### Governance
+- GET /api/governance/status
+
+### Market Data (Authenticated)
+- GET /api/market-data/depth
+- GET /api/market-data/depth-chart
+- GET /api/market-data/clearing-price
+- GET /api/market-data/trades/my-history
+
+### Energy Trading
+- POST /api/trading/orders
+- GET /api/trading/orders
+
+### Analytics
+- GET /api/analytics/market
+- GET /api/analytics/my-stats
+
+### Token Management
+- GET /api/tokens/balance/{wallet_address}
+- GET /api/tokens/info
+- POST /api/tokens/mint-from-reading
+
+### Energy Meter Management
+- POST /api/meters/verify
+- GET /api/meters/registered
+- POST /api/meters/submit-reading
+- GET /api/meters/my-readings
+- GET /api/meters/readings/{wallet_address}
+- GET /api/meters/stats
+
+### Admin Meter Management
+- GET /api/admin/meters/unminted
+- POST /api/admin/meters/mint-from-reading
+
+### Energy Renewable Certificate (ERC)
+- POST /api/erc/issue
+- GET /api/erc/my-certificates
+- GET /api/erc/my-stats
+- GET /api/erc/{certificate_id}
+- POST /api/erc/{certificate_id}/retire
+- GET /api/erc/wallet/{wallet_address}
+
+## Summary
+
+Total Endpoints: 82
+- Public Routes: 15
+- Protected Routes: 67
+
+## Categories
+
+1. **Health & Monitoring**: 5 endpoints
+2. **Authentication**: 7 endpoints
+3. **User Management**: 11 endpoints
+4. **Blockchain**: 8 endpoints
+5. **Testing**: 3 endpoints
+6. **Admin**: 19 endpoints
+7. **Market & Trading**: 10 endpoints
+8. **Analytics**: 2 endpoints
+9. **Tokens**: 3 endpoints
+10. **Energy Meters**: 8 endpoints
+11. **ERC (Certificates)**: 6 endpoints
+12. **Oracle**: 3 endpoints
+13. **Governance**: 2 endpoints
+14. **WebSocket**: 2 endpoints
+15. **Documentation**: 2 endpoints
+
+## HTTP Methods Distribution
+
+- GET: 48 endpoints
+- POST: 29 endpoints
+- PUT: 1 endpoint
+- DELETE: 4 endpoints
+
+## Notes
+
+- All routes under `/api/` (except public auth and market endpoints) require authentication
+- Admin routes require additional administrative privileges
+- WebSocket endpoints support real-time market data updates
+- The API uses JWT tokens and API keys for authentication
+- All routes are protected with security headers, CORS, and request logging middleware

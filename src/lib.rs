@@ -38,4 +38,5 @@ pub struct AppState {
     pub health_checker: services::HealthChecker,
     pub audit_logger: services::AuditLogger,
     pub cache_service: services::CacheService,
+    pub amm_service: services::AmmService,
 }

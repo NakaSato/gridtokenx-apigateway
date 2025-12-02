@@ -1,4 +1,3 @@
-    Checking api-gateway v0.1.1 (/Users/chanthawat/Developments/weekend/gridtokenx-apigateway)
 warning: unused import: `std::str::FromStr`
  --> src/error.rs:8:5
   |
@@ -13,11 +12,65 @@ warning: unused import: `std::sync::Arc`
 4 | use std::sync::Arc;
   |     ^^^^^^^^^^^^^^
 
+warning: unused import: `crate::services::meter_verification_service::MeterRegistry`
+   --> src/handlers/user_management.rs:889:5
+    |
+889 | use crate::services::meter_verification_service::MeterRegistry;
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::str::FromStr`
+  --> src/models/energy.rs:37:13
+   |
+37 |         use std::str::FromStr;
+   |             ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `rust_decimal::prelude::*`
+ --> src/services/amm_service.rs:4:5
+  |
+4 | use rust_decimal::prelude::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> src/services/amm_service.rs:7:5
+  |
+7 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `error`
+ --> src/services/amm_service.rs:8:15
+  |
+8 | use tracing::{error, info, instrument};
+  |               ^^^^^
+
+warning: unused import: `std::str::FromStr`
+   --> src/services/erc_service.rs:445:13
+    |
+445 |         use std::str::FromStr;
+    |             ^^^^^^^^^^^^^^^^^
+
 warning: unused import: `EncodedConfirmedTransactionWithStatusMeta`
  --> src/services/event_processor_service.rs:5:33
   |
-5 | use solana_transaction_status::{EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding};
-  |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+5 | ...atus::{EncodedConfirmedTransactionWithStatusMeta, UiTran...
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::str::FromStr`
+  --> src/services/market_clearing.rs:10:5
+   |
+10 | use std::str::FromStr;
+   |     ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::str::FromStr`
+  --> src/services/meter_service.rs:73:13
+   |
+73 |         use std::str::FromStr;
+   |             ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::str::FromStr`
+   --> src/services/meter_service.rs:627:13
+    |
+627 |         use std::str::FromStr;
+    |             ^^^^^^^^^^^^^^^^^
 
 warning: unused import: `Duration`
  --> src/services/meter_verification_service.rs:3:24
@@ -25,41 +78,93 @@ warning: unused import: `Duration`
 3 | use chrono::{DateTime, Duration, Utc};
   |                        ^^^^^^^^
 
-error[E0599]: no variant or associated item named `InternalServerError` found for enum `ApiError` in the current scope
-   --> src/handlers/dashboard.rs:22:32
-    |
- 22 |         .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
-    |                                ^^^^^^^^^^^^^^^^^^^ variant or associated item not found in `ApiError`
-    |
-   ::: src/error.rs:307:1
-    |
-307 | pub enum ApiError {
-    | ----------------- variant or associated item `InternalServerError` not found for this enum
-    |
-note: if you're trying to build a new `ApiError` consider using one of the following associated functions:
-      ApiError::with_code
-      ApiError::with_details
-      ApiError::validation_field
-      ApiError::validation_error
-      and 7 others
-   --> src/error.rs:367:5
-    |
-367 |       pub fn with_code(code: ErrorCode, message: impl Into<String>) -> Self {
-    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-...
-372 | /     pub fn with_details(
-373 | |         code: ErrorCode,
-374 | |         message: impl Into<String>,
-375 | |         details: impl Into<String>,
-376 | |     ) -> Self {
-    | |_____________^
-...
-381 |       pub fn validation_field(field: impl Into<String>, message: impl Into<String>) -> Self {
-    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-...
-390 |       pub fn validation_error(message: impl Into<String>, field: Option<&str>) -> Self {
-    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+warning: unused import: `anyhow::anyhow`
+ --> src/services/order_matching_engine.rs:2:5
+  |
+2 | use anyhow::anyhow;
+  |     ^^^^^^^^^^^^^^
 
-For more information about this error, try `rustc --explain E0599`.
-warning: `api-gateway` (lib) generated 4 warnings
-error: could not compile `api-gateway` (lib) due to 1 previous error; 4 warnings emitted
+warning: unused import: `std::str::FromStr`
+ --> src/services/order_matching_engine.rs:7:5
+  |
+7 | use std::str::FromStr;
+  |     ^^^^^^^^^^^^^^^^^
+
+warning: function `verify_api_key` is never used
+   --> src/auth/middleware.rs:127:10
+    |
+127 | async fn verify_api_key(state: &AppState, key: &str) -> R...
+    |          ^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `energy_token_mint` is never read
+  --> src/services/event_processor_service.rs:76:5
+   |
+72 | pub struct EventProcessorService {
+   |            --------------------- field in this struct
+...
+76 |     energy_token_mint: String,
+   |     ^^^^^^^^^^^^^^^^^
+   |
+   = note: `EventProcessorService` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: `api-gateway` (lib) generated 17 warnings (run `cargo fix --lib -p api-gateway` to apply 15 suggestions)
+    Checking api-gateway v0.1.1 (/Users/chanthawat/Developments/gridtokenx-platform/gridtokenx-apigateway)
+error[E0433]: failed to resolve: could not find `swap` in `handlers`
+   --> src/main.rs:568:54
+    |
+568 |                 .route("/swap/quote", post(handlers::swap::get_quote))
+    |                                                      ^^^^ could not find `swap` in `handlers`
+
+error[E0433]: failed to resolve: could not find `swap` in `handlers`
+   --> src/main.rs:569:56
+    |
+569 |                 .route("/swap/execute", post(handlers::swap::execute_swap))
+    |                                                        ^^^^ could not find `swap` in `handlers`
+
+error[E0433]: failed to resolve: could not find `swap` in `handlers`
+   --> src/main.rs:570:53
+    |
+570 |                 .route("/swap/pools", get(handlers::swap::list_pools))
+    |                                                     ^^^^ could not find `swap` in `handlers`
+
+error[E0433]: failed to resolve: could not find `swap` in `handlers`
+   --> src/main.rs:571:55
+    |
+571 |                 .route("/swap/history", get(handlers::swap::get_swap_history))
+    |                                                       ^^^^ could not find `swap` in `handlers`
+
+warning: unused import: `EncodedConfirmedTransactionWithStatusMeta`
+ --> src/services/event_processor_service.rs:5:33
+  |
+5 | use solana_transaction_status::{EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding};
+  |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `transaction_coordinator::TransactionCoordinator`
+  --> src/services/mod.rs:56:9
+   |
+56 | pub use transaction_coordinator::TransactionCoordinator;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `transaction_service::TransactionService`
+  --> src/services/mod.rs:57:9
+   |
+57 | pub use transaction_service::TransactionService;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `webhook_service::WebhookService`
+  --> src/services/mod.rs:59:9
+   |
+59 | pub use webhook_service::WebhookService;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `transaction_metrics::TransactionMetrics`
+  --> src/services/mod.rs:67:9
+   |
+67 | pub use transaction_metrics::TransactionMetrics;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0433`.
+warning: `api-gateway` (bin "api-gateway") generated 19 warnings (14 duplicates)
+error: could not compile `api-gateway` (bin "api-gateway") due to 4 previous errors; 19 warnings emitted

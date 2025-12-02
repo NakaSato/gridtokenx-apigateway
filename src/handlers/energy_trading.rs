@@ -3,9 +3,9 @@ use axum::{
     response::Json,
 };
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use sqlx::types::BigDecimal;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 use validator::Validate;
@@ -17,6 +17,7 @@ use crate::error::{ApiError, Result};
 use crate::utils::{PaginationMeta, PaginationParams, SortOrder, validation::Validator};
 
 // Helper to parse BigDecimal from string
+use solana_sdk::signer::Signer;
 use std::str::FromStr;
 
 // ==================== REQUEST/RESPONSE TYPES ====================
@@ -27,7 +28,8 @@ pub struct CreateOrderRequest {
     pub energy_amount: f64, // kWh
     #[validate(range(min = 0.01, max = 10.00))]
     pub price_per_kwh: f64, // USD
-    pub order_type: String, // "buy" or "sell"
+    pub order_type: String,                 // "buy" or "sell"
+    pub erc_certificate_id: Option<String>, // Optional: ERC certificate ID for sell orders
 }
 
 impl CreateOrderRequest {
@@ -152,10 +154,10 @@ pub async fn create_order(
     let now = Utc::now();
     let order_id = Uuid::new_v4();
 
-    // Convert to BigDecimal for database
-    let energy_amount_bd = BigDecimal::from_str(&payload.energy_amount.to_string())
+    // Convert to Decimal for database
+    let energy_amount_bd = Decimal::from_str(&payload.energy_amount.to_string())
         .map_err(|_| ApiError::BadRequest("Invalid energy amount".to_string()))?;
-    let price_bd = BigDecimal::from_str(&payload.price_per_kwh.to_string())
+    let price_bd = Decimal::from_str(&payload.price_per_kwh.to_string())
         .map_err(|_| ApiError::BadRequest("Invalid price".to_string()))?;
 
     // Determine order side based on payload
@@ -226,6 +228,48 @@ pub async fn create_order(
             )));
         }
     }
+
+    // =================================================================
+    // NEW: Submit order to blockchain
+    // =================================================================
+    let authority_keypair = state
+        .blockchain_service
+        .get_authority_keypair()
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to load authority wallet: {}", e)))?;
+
+    // Use a default market address or load from env
+    // In a real app, this would be the address of the initialized Market account
+    let market_pubkey = std::env::var("MARKET_PUBKEY")
+        .unwrap_or_else(|_| "GZnqNTJsre6qB4pWCQRE9FiJU2GUeBtBDPp6s7zosctk".to_string());
+
+    // Convert to appropriate units
+    // Energy: kWh -> Wh (x1000)
+    // Price: USD -> microUSD (x1,000,000)
+    let energy_amount_u64 = (payload.energy_amount * 1000.0) as u64;
+    let price_per_kwh_u64 = (payload.price_per_kwh * 1_000_000.0) as u64;
+
+    let instruction = state
+        .blockchain_service
+        .build_create_order_instruction(
+            &market_pubkey,
+            energy_amount_u64,
+            price_per_kwh_u64,
+            &payload.order_type,
+            payload.erc_certificate_id.as_deref(),
+        )
+        .await
+        .map_err(|e| {
+            ApiError::Internal(format!("Failed to build blockchain instruction: {}", e))
+        })?;
+
+    let signature = state
+        .blockchain_service
+        .build_and_send_transaction(vec![instruction], &[&authority_keypair])
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to submit order to blockchain: {}", e)))?;
+
+    tracing::info!("Order created on-chain. Signature: {}", signature);
 
     // Set expiration to 24 hours from now
     let expires_at = now + chrono::Duration::hours(24);
@@ -354,9 +398,9 @@ pub async fn list_orders(
     let orders = rows
         .iter()
         .map(|row| {
-            let energy_amount: BigDecimal = row.get("energy_amount");
-            let price_per_kwh: BigDecimal = row.get("price_per_kwh");
-            let filled_amount: BigDecimal = row.get("filled_amount");
+            let energy_amount: Decimal = row.get("energy_amount");
+            let price_per_kwh: Decimal = row.get("price_per_kwh");
+            let filled_amount: Decimal = row.get("filled_amount");
 
             TradingOrder {
                 id: row.get("id"),
@@ -433,8 +477,8 @@ pub async fn get_orderbook(State(state): State<AppState>) -> Result<Json<serde_j
     let buys: Vec<serde_json::Value> = buy_orders
         .iter()
         .map(|row| {
-            let energy_amount: BigDecimal = row.get("energy_amount");
-            let price_per_kwh: BigDecimal = row.get("price_per_kwh");
+            let energy_amount: Decimal = row.get("energy_amount");
+            let price_per_kwh: Decimal = row.get("price_per_kwh");
             serde_json::json!({
                 "energy_amount": energy_amount.to_string().parse::<f64>().unwrap_or(0.0),
                 "price_per_kwh": price_per_kwh.to_string().parse::<f64>().unwrap_or(0.0),
@@ -446,8 +490,8 @@ pub async fn get_orderbook(State(state): State<AppState>) -> Result<Json<serde_j
     let sells: Vec<serde_json::Value> = sell_orders
         .iter()
         .map(|row| {
-            let energy_amount: BigDecimal = row.get("energy_amount");
-            let price_per_kwh: BigDecimal = row.get("price_per_kwh");
+            let energy_amount: Decimal = row.get("energy_amount");
+            let price_per_kwh: Decimal = row.get("price_per_kwh");
             serde_json::json!({
                 "energy_amount": energy_amount.to_string().parse::<f64>().unwrap_or(0.0),
                 "price_per_kwh": price_per_kwh.to_string().parse::<f64>().unwrap_or(0.0),
@@ -489,12 +533,8 @@ pub async fn get_market_stats(State(state): State<AppState>) -> Result<Json<Mark
     .await
     .map_err(|e| ApiError::Database(e))?;
 
-    let avg_price: BigDecimal = stats_row
-        .try_get("avg_price")
-        .unwrap_or(BigDecimal::from_str("0").unwrap());
-    let total_volume: BigDecimal = stats_row
-        .try_get("total_volume")
-        .unwrap_or(BigDecimal::from_str("0").unwrap());
+    let avg_price: Decimal = stats_row.try_get("avg_price").unwrap_or(Decimal::ZERO);
+    let total_volume: Decimal = stats_row.try_get("total_volume").unwrap_or(Decimal::ZERO);
     let completed_matches: i64 = stats_row.try_get("completed_matches").unwrap_or(0);
 
     // Get active orders count

@@ -1,3 +1,4 @@
+pub mod amm_service;
 pub mod audit_logger;
 pub mod blockchain_instructions;
 pub mod blockchain_service;
@@ -32,6 +33,8 @@ pub mod validation;
 pub mod wallet_service;
 pub mod webhook_service;
 pub mod websocket_service;
+
+pub use amm_service::AmmService;
 
 pub use audit_logger::AuditLogger;
 pub use blockchain_service::BlockchainService;

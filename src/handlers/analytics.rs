@@ -8,9 +8,11 @@ use sqlx::Row;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
+use crate::AppState;
 use crate::auth::middleware::AuthenticatedUser;
 use crate::error::{ApiError, Result};
-use crate::AppState;
+use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 
 // ==================== REQUEST/RESPONSE TYPES ====================
 
@@ -220,11 +222,14 @@ fn parse_timeframe(timeframe: &str) -> Result<Duration> {
     }
 }
 
-fn bigdecimal_to_f64(bd: sqlx::types::BigDecimal) -> f64 {
-    bd.to_string().parse().unwrap_or(0.0)
+fn decimal_to_f64(d: Decimal) -> f64 {
+    d.to_f64().unwrap_or(0.0)
 }
 
-async fn get_market_overview(state: &AppState, start_time: DateTime<Utc>) -> Result<MarketOverview> {
+async fn get_market_overview(
+    state: &AppState,
+    start_time: DateTime<Utc>,
+) -> Result<MarketOverview> {
     let row = sqlx::query(
         r#"
         SELECT 
@@ -285,10 +290,10 @@ async fn get_trading_volume(
     .fetch_one(&state.db)
     .await?;
 
-    let current_energy = bigdecimal_to_f64(current.get("total_energy"));
-    let current_value = bigdecimal_to_f64(current.get("total_value"));
+    let current_energy = decimal_to_f64(current.get("total_energy"));
+    let current_value = decimal_to_f64(current.get("total_value"));
     let transaction_count: i64 = current.get("transaction_count");
-    let previous_energy = bigdecimal_to_f64(previous.get("total_energy"));
+    let previous_energy = decimal_to_f64(previous.get("total_energy"));
 
     let volume_trend = if previous_energy > 0.0 {
         ((current_energy - previous_energy) / previous_energy) * 100.0
@@ -346,12 +351,12 @@ async fn get_price_statistics(
     .fetch_one(&state.db)
     .await?;
 
-    let current_avg = bigdecimal_to_f64(current.get("avg_price"));
-    let min_price = bigdecimal_to_f64(current.get("min_price"));
-    let max_price = bigdecimal_to_f64(current.get("max_price"));
-    let stddev = bigdecimal_to_f64(current.get("stddev_price"));
-    let median = bigdecimal_to_f64(current.get("median_price"));
-    let previous_avg = bigdecimal_to_f64(previous.get("avg_price"));
+    let current_avg = decimal_to_f64(current.get("avg_price"));
+    let min_price = decimal_to_f64(current.get("min_price"));
+    let max_price = decimal_to_f64(current.get("max_price"));
+    let stddev = decimal_to_f64(current.get("stddev_price"));
+    let median = decimal_to_f64(current.get("median_price"));
+    let previous_avg = decimal_to_f64(previous.get("avg_price"));
 
     let price_trend = if previous_avg > 0.0 {
         ((current_avg - previous_avg) / previous_avg) * 100.0
@@ -407,10 +412,10 @@ async fn get_energy_source_breakdown(
         .into_iter()
         .map(|row| EnergySourceStats {
             energy_source: row.get("energy_source"),
-            total_volume_kwh: bigdecimal_to_f64(row.get("total_volume")),
-            average_price_per_kwh: bigdecimal_to_f64(row.get("avg_price")),
+            total_volume_kwh: decimal_to_f64(row.get("total_volume")),
+            average_price_per_kwh: decimal_to_f64(row.get("avg_price")),
             transaction_count: row.get("transaction_count"),
-            market_share_percent: bigdecimal_to_f64(row.get("market_share")),
+            market_share_percent: decimal_to_f64(row.get("market_share")),
         })
         .collect())
 }
@@ -455,9 +460,9 @@ async fn get_top_traders(
         .map(|row| TraderStats {
             user_id: row.get::<Uuid, _>("user_id").to_string(),
             username: row.get("username"),
-            total_volume_kwh: bigdecimal_to_f64(row.get("total_volume")),
+            total_volume_kwh: decimal_to_f64(row.get("total_volume")),
             transaction_count: row.get("transaction_count"),
-            average_price_per_kwh: bigdecimal_to_f64(row.get("avg_price")),
+            average_price_per_kwh: decimal_to_f64(row.get("avg_price")),
             role: row.get("role"),
         })
         .collect())
@@ -489,9 +494,9 @@ async fn get_seller_stats(
     Ok(SellerStats {
         offers_created: row.get("offers_created"),
         offers_fulfilled: row.get("offers_fulfilled"),
-        total_energy_sold_kwh: bigdecimal_to_f64(row.get("total_sold")),
-        total_revenue_usd: bigdecimal_to_f64(row.get("total_revenue")),
-        average_price_per_kwh: bigdecimal_to_f64(row.get("avg_price")),
+        total_energy_sold_kwh: decimal_to_f64(row.get("total_sold")),
+        total_revenue_usd: decimal_to_f64(row.get("total_revenue")),
+        average_price_per_kwh: decimal_to_f64(row.get("avg_price")),
     })
 }
 
@@ -521,9 +526,9 @@ async fn get_buyer_stats(
     Ok(BuyerStats {
         orders_created: row.get("orders_created"),
         orders_fulfilled: row.get("orders_fulfilled"),
-        total_energy_purchased_kwh: bigdecimal_to_f64(row.get("total_purchased")),
-        total_spent_usd: bigdecimal_to_f64(row.get("total_spent")),
-        average_price_per_kwh: bigdecimal_to_f64(row.get("avg_price")),
+        total_energy_purchased_kwh: decimal_to_f64(row.get("total_purchased")),
+        total_spent_usd: decimal_to_f64(row.get("total_spent")),
+        average_price_per_kwh: decimal_to_f64(row.get("avg_price")),
     })
 }
 
@@ -574,8 +579,8 @@ async fn get_overall_user_stats(
 
     Ok(OverallUserStats {
         total_transactions: row.get("total_transactions"),
-        total_volume_kwh: bigdecimal_to_f64(row.get("total_volume")),
-        net_revenue_usd: bigdecimal_to_f64(row.get("net_revenue")),
+        total_volume_kwh: decimal_to_f64(row.get("total_volume")),
+        net_revenue_usd: decimal_to_f64(row.get("net_revenue")),
         favorite_energy_source: row.get("favorite_source"),
     })
 }

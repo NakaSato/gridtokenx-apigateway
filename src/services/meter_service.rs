@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
-use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use tracing::{debug, info, warn};
@@ -12,7 +12,7 @@ pub struct MeterReading {
     pub id: Uuid,
     pub user_id: Option<Uuid>,
     pub wallet_address: String,
-    pub kwh_amount: Option<BigDecimal>,
+    pub kwh_amount: Option<Decimal>,
     pub reading_timestamp: Option<DateTime<Utc>>,
     pub submitted_at: Option<DateTime<Utc>>,
     pub minted: Option<bool>,
@@ -29,7 +29,7 @@ pub struct MeterReading {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SubmitMeterReadingRequest {
     pub wallet_address: String,
-    pub kwh_amount: BigDecimal,
+    pub kwh_amount: Decimal,
     pub reading_timestamp: DateTime<Utc>,
     /// Optional: smart meter signature for verification
     pub meter_signature: Option<String>,
@@ -71,7 +71,7 @@ impl MeterService {
     ) -> Result<MeterReading> {
         // Validate reading amount
         use std::str::FromStr;
-        if request.kwh_amount <= BigDecimal::from_str("0").unwrap() {
+        if request.kwh_amount <= Decimal::ZERO {
             return Err(anyhow!("kWh amount must be positive"));
         }
 
@@ -588,7 +588,7 @@ impl MeterService {
     }
 
     /// Calculate total unminted kWh for a user
-    pub async fn get_unminted_total(&self, user_id: Uuid) -> Result<BigDecimal> {
+    pub async fn get_unminted_total(&self, user_id: Uuid) -> Result<Decimal> {
         let result = sqlx::query!(
             r#"
             SELECT COALESCE(SUM(kwh_amount), 0) as "total!"
@@ -605,7 +605,7 @@ impl MeterService {
     }
 
     /// Get total minted kWh for a user
-    pub async fn get_minted_total(&self, user_id: Uuid) -> Result<BigDecimal> {
+    pub async fn get_minted_total(&self, user_id: Uuid) -> Result<Decimal> {
         let result = sqlx::query!(
             r#"
             SELECT COALESCE(SUM(kwh_amount), 0) as "total!"
@@ -625,12 +625,12 @@ impl MeterService {
     pub fn validate_reading(request: &SubmitMeterReadingRequest) -> Result<()> {
         // Amount validation
         use std::str::FromStr;
-        if request.kwh_amount <= BigDecimal::from_str("0").unwrap() {
+        if request.kwh_amount <= Decimal::ZERO {
             return Err(anyhow!("kWh amount must be positive"));
         }
 
         // Maximum reasonable amount (e.g., 100 kWh per reading)
-        let max_kwh = BigDecimal::from(100);
+        let max_kwh = Decimal::from(100);
         if request.kwh_amount > max_kwh {
             warn!("Unusually high kWh reading: {}", request.kwh_amount);
             return Err(anyhow!("kWh amount exceeds maximum ({} kWh)", max_kwh));
@@ -659,7 +659,7 @@ mod tests {
     fn test_validate_reading_positive_amount() {
         let request = SubmitMeterReadingRequest {
             wallet_address: "test".to_string(),
-            kwh_amount: BigDecimal::from(10),
+            kwh_amount: Decimal::from(10),
             reading_timestamp: Utc::now(),
             meter_signature: None,
             meter_serial: None,
@@ -672,7 +672,7 @@ mod tests {
     fn test_validate_reading_zero_amount() {
         let request = SubmitMeterReadingRequest {
             wallet_address: "test".to_string(),
-            kwh_amount: BigDecimal::from(0),
+            kwh_amount: Decimal::from(0),
             reading_timestamp: Utc::now(),
             meter_signature: None,
             meter_serial: None,
@@ -685,7 +685,7 @@ mod tests {
     fn test_validate_reading_future_timestamp() {
         let request = SubmitMeterReadingRequest {
             wallet_address: "test".to_string(),
-            kwh_amount: BigDecimal::from(10),
+            kwh_amount: Decimal::from(10),
             reading_timestamp: Utc::now() + chrono::Duration::hours(1),
             meter_signature: None,
             meter_serial: None,
@@ -698,7 +698,7 @@ mod tests {
     fn test_validate_reading_excessive_amount() {
         let request = SubmitMeterReadingRequest {
             wallet_address: "test".to_string(),
-            kwh_amount: BigDecimal::from(150), // Over 100 kWh limit
+            kwh_amount: Decimal::from(150), // Over 100 kWh limit
             reading_timestamp: Utc::now(),
             meter_signature: None,
             meter_serial: None,
@@ -711,7 +711,7 @@ mod tests {
     fn test_validate_reading_old_timestamp() {
         let request = SubmitMeterReadingRequest {
             wallet_address: "test".to_string(),
-            kwh_amount: BigDecimal::from(10),
+            kwh_amount: Decimal::from(10),
             reading_timestamp: Utc::now() - chrono::Duration::days(10),
             meter_signature: None,
             meter_serial: None,

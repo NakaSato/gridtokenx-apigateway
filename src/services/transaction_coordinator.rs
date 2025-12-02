@@ -311,7 +311,8 @@ impl TransactionCoordinator {
                     user_id: row.try_get("user_id")?,
                     signature: row.try_get("signature")?,
                     tx_type: row.try_get("tx_type")?,
-                    status: row.try_get::<Option<String>, _>("operation_status")?
+                    status: row
+                        .try_get::<Option<String>, _>("operation_status")?
                         .and_then(|s| s.parse().ok())
                         .unwrap_or(TransactionStatus::Pending),
                     operation_status: row.try_get("operation_status")?,
@@ -337,7 +338,8 @@ impl TransactionCoordinator {
             let pending_duration = if let Some(submitted_at) = operation.submitted_at {
                 now.signed_duration_since(submitted_at).num_seconds()
             } else {
-                now.signed_duration_since(operation.created_at).num_seconds()
+                now.signed_duration_since(operation.created_at)
+                    .num_seconds()
             };
 
             if pending_duration > self.config.transaction_expiry_seconds as i64 {
@@ -354,6 +356,7 @@ impl TransactionCoordinator {
                     TransactionType::GovernanceVote => "governance_votes",
                     TransactionType::OracleUpdate => "oracle_updates",
                     TransactionType::RegistryUpdate => "registry_updates",
+                    TransactionType::Swap => "swap_transactions",
                 };
                 self.mark_transaction_failed(
                     table_name,
@@ -401,6 +404,7 @@ impl TransactionCoordinator {
                                 TransactionType::GovernanceVote => "governance_votes",
                                 TransactionType::OracleUpdate => "oracle_updates",
                                 TransactionType::RegistryUpdate => "registry_updates",
+                                TransactionType::Swap => "swap_transactions",
                             };
                             if self
                                 .mark_transaction_confirmed(
@@ -427,6 +431,7 @@ impl TransactionCoordinator {
                                 TransactionType::GovernanceVote => "governance_votes",
                                 TransactionType::OracleUpdate => "oracle_updates",
                                 TransactionType::RegistryUpdate => "registry_updates",
+                                TransactionType::Swap => "swap_transactions",
                             };
                             if self
                                 .mark_transaction_failed(
@@ -504,7 +509,8 @@ impl TransactionCoordinator {
                     user_id: row.try_get("user_id")?,
                     signature: row.try_get("signature")?,
                     tx_type: row.try_get("tx_type")?,
-                    status: row.try_get::<Option<String>, _>("operation_status")?
+                    status: row
+                        .try_get::<Option<String>, _>("operation_status")?
                         .and_then(|s| s.parse().ok())
                         .unwrap_or(TransactionStatus::Failed),
                     operation_status: row.try_get("operation_status")?,
@@ -692,7 +698,8 @@ impl TransactionCoordinator {
             user_id: row.get("user_id"),
             signature: row.get("signature"),
             tx_type: row.get("tx_type"),
-            status: row.get::<Option<String>, _>("operation_status")
+            status: row
+                .get::<Option<String>, _>("operation_status")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(TransactionStatus::Pending),
             operation_status: row.get("operation_status"),
@@ -940,7 +947,8 @@ impl TransactionCoordinator {
                     user_id: row.try_get("user_id")?,
                     signature: row.try_get("signature")?,
                     tx_type: row.try_get("tx_type")?,
-                    status: row.try_get::<Option<String>, _>("operation_status")?
+                    status: row
+                        .try_get::<Option<String>, _>("operation_status")?
                         .and_then(|s| s.parse().ok())
                         .unwrap_or(TransactionStatus::Pending),
                     operation_status: row.try_get("operation_status")?,

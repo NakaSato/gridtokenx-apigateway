@@ -23,6 +23,14 @@ pub struct TransactionHandler {
     connection_pool: Arc<RwLock<Vec<Arc<RpcClient>>>>,
 }
 
+impl std::fmt::Debug for TransactionHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransactionHandler")
+            .field("rpc_url", &self.rpc_client.url())
+            .finish()
+    }
+}
+
 impl TransactionHandler {
     /// Create a new transaction handler with connection pooling
     pub fn new(rpc_client: Arc<RpcClient>) -> Self {

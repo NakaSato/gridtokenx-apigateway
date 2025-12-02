@@ -413,7 +413,7 @@ pub async fn resend_verification(
     // Send verification email
     let username = user.username.as_deref().unwrap_or("User");
     email_service
-        .send_verification_email(user_email, username, &token)
+        .send_verification_email(user_email, &token, username)
         .await
         .map_err(|e| ApiError::ExternalService(format!("Failed to send email: {}", e)))?;
 

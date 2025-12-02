@@ -2,7 +2,8 @@ use axum::{
     Json,
     extract::{Path, Query, State},
 };
-use bigdecimal::{BigDecimal, ToPrimitive};
+use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use utoipa::{IntoParams, ToSchema};
@@ -39,7 +40,7 @@ fn require_role(user: &crate::auth::Claims, required_role: &str) -> Result<(), A
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct SubmitReadingRequest {
     #[schema(value_type = String)]
-    pub kwh_amount: BigDecimal,
+    pub kwh_amount: Decimal,
     pub reading_timestamp: chrono::DateTime<chrono::Utc>,
     pub meter_signature: Option<String>,
     /// NEW: Required UUID from meter_registry (for verified meters)
@@ -56,7 +57,7 @@ pub struct MeterReadingResponse {
     pub user_id: Uuid,
     pub wallet_address: String,
     #[schema(value_type = String)]
-    pub kwh_amount: BigDecimal,
+    pub kwh_amount: Decimal,
     pub reading_timestamp: chrono::DateTime<chrono::Utc>,
     pub submitted_at: chrono::DateTime<chrono::Utc>,
     pub minted: bool,
@@ -160,7 +161,7 @@ pub struct MintResponse {
     pub message: String,
     pub transaction_signature: String,
     #[schema(value_type = String)]
-    pub kwh_amount: BigDecimal,
+    pub kwh_amount: Decimal,
     pub wallet_address: String,
 }
 
@@ -168,11 +169,11 @@ pub struct MintResponse {
 pub struct UserStatsResponse {
     pub total_readings: i64,
     #[schema(value_type = String)]
-    pub unminted_kwh: BigDecimal,
+    pub unminted_kwh: Decimal,
     #[schema(value_type = String)]
-    pub minted_kwh: BigDecimal,
+    pub minted_kwh: Decimal,
     #[schema(value_type = String)]
-    pub total_kwh: BigDecimal,
+    pub total_kwh: Decimal,
 }
 
 // ============================================================================
@@ -721,7 +722,7 @@ pub async fn get_user_stats(
             ApiError::Internal("Failed to fetch statistics".to_string())
         })?;
 
-    let total_kwh = &unminted_total + &minted_total;
+    let total_kwh = unminted_total + minted_total;
 
     // Count total readings
     let total_readings = state

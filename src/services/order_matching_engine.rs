@@ -1,5 +1,7 @@
 use anyhow::Result;
-use sqlx::types::BigDecimal;
+use anyhow::anyhow;
+use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use sqlx::PgPool;
 use sqlx::Row;
 use std::str::FromStr;
@@ -9,7 +11,6 @@ use tokio::sync::RwLock;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use anyhow::anyhow;
 
 use super::WebSocketService;
 use crate::database::schema::types::OrderStatus;
@@ -49,7 +50,10 @@ impl OrderMatchingEngine {
         *running = true;
         drop(running);
 
-        info!("🚀 Starting automated order matching engine (interval: {}s)", self.match_interval_secs);
+        info!(
+            "🚀 Starting automated order matching engine (interval: {}s)",
+            self.match_interval_secs
+        );
 
         let engine = self.clone();
         tokio::spawn(async move {
@@ -79,7 +83,10 @@ impl OrderMatchingEngine {
             match self.match_orders_cycle().await {
                 Ok(matches) => {
                     if matches > 0 {
-                        info!("✅ Matching cycle completed: {} new transactions created", matches);
+                        info!(
+                            "✅ Matching cycle completed: {} new transactions created",
+                            matches
+                        );
                     } else {
                         debug!("Matching cycle completed: no new matches");
                     }
@@ -113,7 +120,7 @@ impl OrderMatchingEngine {
             FROM trading_orders
             WHERE order_type = 'buy' AND status = $1
             ORDER BY created_at ASC
-            "#
+            "#,
         )
         .bind(OrderStatus::Pending)
         .fetch_all(&self.db)
@@ -132,7 +139,7 @@ impl OrderMatchingEngine {
             FROM trading_orders
             WHERE order_type = 'sell' AND status = $1
             ORDER BY price_per_kwh ASC, created_at ASC
-            "#
+            "#,
         )
         .bind(OrderStatus::Pending)
         .fetch_all(&self.db)
@@ -142,7 +149,11 @@ impl OrderMatchingEngine {
             return Ok(0);
         }
 
-        debug!("Found {} buy orders and {} sell orders to process", buy_orders.len(), sell_orders.len());
+        debug!(
+            "Found {} buy orders and {} sell orders to process",
+            buy_orders.len(),
+            sell_orders.len()
+        );
 
         let mut matches_created = 0;
 
@@ -150,15 +161,14 @@ impl OrderMatchingEngine {
         for buy_order in &buy_orders {
             let buy_order_id: Uuid = buy_order.try_get("id")?;
             let buyer_id: Uuid = buy_order.try_get("user_id")?;
-            let buy_energy_amount: BigDecimal = buy_order.try_get("energy_amount")?;
-            let buy_filled_amount: BigDecimal = buy_order.try_get("filled_amount")?;
-            let buy_price_per_kwh: BigDecimal = buy_order.try_get("price_per_kwh")?;
+            let buy_energy_amount: Decimal = buy_order.try_get("energy_amount")?;
+            let buy_filled_amount: Decimal = buy_order.try_get("filled_amount")?;
+            let buy_price_per_kwh: Decimal = buy_order.try_get("price_per_kwh")?;
             let epoch_id: Option<Uuid> = buy_order.try_get("epoch_id")?;
 
             // Calculate remaining amount needed
-            let remaining_buy_amount = &buy_energy_amount - &buy_filled_amount;
-            let zero = BigDecimal::from_str("0")
-                .map_err(|_| anyhow::anyhow!("Failed to parse zero value"))?;
+            let remaining_buy_amount = buy_energy_amount - buy_filled_amount;
+            let zero = Decimal::ZERO;
             if remaining_buy_amount <= zero {
                 continue; // Order already fully filled
             }
@@ -167,9 +177,9 @@ impl OrderMatchingEngine {
             for sell_order in &sell_orders {
                 let sell_order_id: Uuid = sell_order.try_get("id")?;
                 let seller_id: Uuid = sell_order.try_get("user_id")?;
-                let sell_energy_amount: BigDecimal = sell_order.try_get("energy_amount")?;
-                let sell_filled_amount: BigDecimal = sell_order.try_get("filled_amount")?;
-                let sell_price_per_kwh: BigDecimal = sell_order.try_get("price_per_kwh")?;
+                let sell_energy_amount: Decimal = sell_order.try_get("energy_amount")?;
+                let sell_filled_amount: Decimal = sell_order.try_get("filled_amount")?;
+                let sell_price_per_kwh: Decimal = sell_order.try_get("price_per_kwh")?;
                 let sell_epoch_id: Option<Uuid> = sell_order.try_get("epoch_id")?;
 
                 // Check if sell order is compatible
@@ -187,7 +197,7 @@ impl OrderMatchingEngine {
                 }
 
                 // Calculate remaining amount available to sell
-                let remaining_sell_amount = &sell_energy_amount - &sell_filled_amount;
+                let remaining_sell_amount = sell_energy_amount - sell_filled_amount;
                 if remaining_sell_amount <= zero {
                     continue; // Sell order already fully filled
                 }
@@ -199,8 +209,8 @@ impl OrderMatchingEngine {
                     remaining_sell_amount.clone()
                 };
 
-                let match_price = sell_price_per_kwh.clone(); // Use sell price (market maker advantage)
-                let total_price = &match_amount * &match_price;
+                let match_price = sell_price_per_kwh; // Use sell price (market maker advantage)
+                let total_price = match_amount * match_price;
 
                 debug!(
                     "Matching buy order {} with sell order {}: {} kWh at ${}/kWh (total: ${})",
@@ -208,14 +218,9 @@ impl OrderMatchingEngine {
                 );
 
                 // Create order match - safe to unwrap since we validated both epochs above
-                let epoch_id = epoch_id.ok_or_else(|| anyhow::anyhow!("Epoch ID is required for order matching"))?;
-                
-                // Parse match_amount and match_price safely
-                let energy_amount = match_amount.to_string().parse::<f64>()
-                    .map_err(|e| anyhow!("Failed to parse match amount as f64: {}", e))?;
-                let price_per_kwh = match_price.to_string().parse::<f64>()
-                    .map_err(|e| anyhow!("Failed to parse match price as f64: {}", e))?;
-                
+                let epoch_id = epoch_id
+                    .ok_or_else(|| anyhow::anyhow!("Epoch ID is required for order matching"))?;
+
                 match self
                     .create_order_match(
                         epoch_id,
@@ -223,9 +228,9 @@ impl OrderMatchingEngine {
                         sell_order_id,
                         buyer_id,
                         seller_id,
-                        energy_amount,
-                        price_per_kwh,
-                        total_price.clone(),
+                        match_amount,
+                        match_price,
+                        total_price,
                     )
                     .await
                 {
@@ -237,10 +242,16 @@ impl OrderMatchingEngine {
                         matches_created += 1;
 
                         // Update buy order filled amount
-                        let new_buy_filled = &buy_filled_amount + &match_amount;
+                        let new_buy_filled = buy_filled_amount + match_amount;
                         let buy_complete = new_buy_filled >= buy_energy_amount;
-                        let new_buy_status = if buy_complete { OrderStatus::Filled } else { OrderStatus::Active };
-                        
+                        let new_buy_status = if buy_complete {
+                            OrderStatus::Filled
+                        } else if new_buy_filled > Decimal::ZERO {
+                            OrderStatus::PartiallyFilled
+                        } else {
+                            OrderStatus::Active
+                        };
+
                         sqlx::query(
                             r#"
                             UPDATE trading_orders 
@@ -257,10 +268,16 @@ impl OrderMatchingEngine {
                         .await?;
 
                         // Update sell order filled amount
-                        let new_sell_filled = &sell_filled_amount + &match_amount;
+                        let new_sell_filled = sell_filled_amount + match_amount;
                         let sell_complete = new_sell_filled >= sell_energy_amount;
-                        let new_sell_status = if sell_complete { OrderStatus::Filled } else { OrderStatus::Active };
-                        
+                        let new_sell_status = if sell_complete {
+                            OrderStatus::Filled
+                        } else if new_sell_filled > Decimal::ZERO {
+                            OrderStatus::PartiallyFilled
+                        } else {
+                            OrderStatus::Active
+                        };
+
                         sqlx::query(
                             r#"
                             UPDATE trading_orders 
@@ -300,9 +317,9 @@ impl OrderMatchingEngine {
         sell_order_id: Uuid,
         _buyer_id: Uuid,
         _seller_id: Uuid,
-        energy_amount: f64,
-        price_per_kwh: f64,
-        _total_price: BigDecimal,
+        energy_amount: Decimal,
+        price_per_kwh: Decimal,
+        _total_price: Decimal,
     ) -> Result<Uuid> {
         let match_id = Uuid::new_v4();
 
@@ -335,16 +352,17 @@ impl OrderMatchingEngine {
         // Broadcast order matched event via WebSocket
         if let Some(ws_service) = &self.websocket_service {
             // energy_amount and price_per_kwh are already f64, no need to parse
-            let energy_f64 = energy_amount;
-            let price_f64 = price_per_kwh;
-            
+            let energy_f64 = energy_amount.to_f64().unwrap_or(0.0);
+            let price_f64 = price_per_kwh.to_f64().unwrap_or(0.0);
+
             tokio::spawn({
                 let ws = ws_service.clone();
                 let mid = match_id.to_string();
                 let buy_id = buy_order_id.to_string();
                 let sell_id = sell_order_id.to_string();
                 async move {
-                    ws.broadcast_order_matched(buy_id, sell_id, mid, energy_f64, price_f64).await;
+                    ws.broadcast_order_matched(buy_id, sell_id, mid, energy_f64, price_f64)
+                        .await;
                 }
             });
         }

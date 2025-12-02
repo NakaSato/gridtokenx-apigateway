@@ -1,6 +1,8 @@
 use anyhow::Result;
-use bigdecimal::BigDecimal;
 use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
+use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
+use solana_sdk::pubkey::Pubkey;
 use sqlx::PgPool;
 use std::str::FromStr;
 use tracing::{error, info};
@@ -8,6 +10,7 @@ use uuid::Uuid;
 
 use crate::database::schema::types::{EpochStatus, OrderSide, OrderStatus};
 use crate::error::ApiError;
+use crate::services::BlockchainService;
 
 #[derive(Debug, Clone)]
 pub struct MarketEpoch {
@@ -16,8 +19,8 @@ pub struct MarketEpoch {
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
     pub status: EpochStatus,
-    pub clearing_price: Option<BigDecimal>,
-    pub total_volume: Option<BigDecimal>,
+    pub clearing_price: Option<Decimal>,
+    pub total_volume: Option<Decimal>,
     pub total_orders: Option<i64>,
     pub matched_orders: Option<i64>,
 }
@@ -28,8 +31,8 @@ pub struct OrderMatch {
     pub epoch_id: Uuid,
     pub buy_order_id: Uuid,
     pub sell_order_id: Uuid,
-    pub matched_amount: BigDecimal,
-    pub match_price: BigDecimal,
+    pub matched_amount: Decimal,
+    pub match_price: Decimal,
     pub match_time: DateTime<Utc>,
     pub status: String,
 }
@@ -40,11 +43,11 @@ pub struct Settlement {
     pub epoch_id: Uuid,
     pub buyer_id: Uuid,
     pub seller_id: Uuid,
-    pub energy_amount: BigDecimal,
-    pub price_per_kwh: BigDecimal,
-    pub total_amount: BigDecimal,
-    pub fee_amount: BigDecimal,
-    pub net_amount: BigDecimal,
+    pub energy_amount: Decimal,
+    pub price_per_kwh: Decimal,
+    pub total_amount: Decimal,
+    pub fee_amount: Decimal,
+    pub net_amount: Decimal,
     pub status: String,
 }
 
@@ -53,19 +56,23 @@ pub struct OrderBookEntry {
     pub order_id: Uuid,
     pub user_id: Uuid,
     pub side: Option<OrderSide>,
-    pub energy_amount: BigDecimal,
-    pub price_per_kwh: BigDecimal,
+    pub energy_amount: Decimal,
+    pub price_per_kwh: Decimal,
     pub created_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct MarketClearingService {
     db: PgPool,
+    blockchain_service: BlockchainService,
 }
 
 impl MarketClearingService {
-    pub fn new(db: PgPool) -> Self {
-        Self { db }
+    pub fn new(db: PgPool, blockchain_service: BlockchainService) -> Self {
+        Self {
+            db,
+            blockchain_service,
+        }
     }
 
     /// Get current market epoch (15-minute intervals)
@@ -264,7 +271,7 @@ impl MarketClearingService {
         }
 
         let mut matches = Vec::new();
-        let mut total_volume = BigDecimal::from_str("0").unwrap();
+        let mut total_volume = Decimal::ZERO;
         let mut total_match_count = 0;
 
         // Order matching algorithm: price-time priority
@@ -281,7 +288,7 @@ impl MarketClearingService {
                         .clone()
                         .min(sell_order.energy_amount.clone());
 
-                    if match_amount > BigDecimal::from_str("0").unwrap() {
+                    if match_amount > Decimal::ZERO {
                         let match_amount_clone = match_amount.clone();
                         let match_price_clone = match_price.clone();
 
@@ -322,7 +329,7 @@ impl MarketClearingService {
                             "Buy order {} remaining amount: {}",
                             buy_order.order_id, buy_order.energy_amount
                         );
-                        if buy_order.energy_amount <= BigDecimal::from_str("0").unwrap() {
+                        if buy_order.energy_amount <= Decimal::ZERO {
                             info!(
                                 "Buy order {} is fully filled, updating status",
                                 buy_order.order_id
@@ -346,7 +353,7 @@ impl MarketClearingService {
                             "Sell order {} remaining amount: {}",
                             sell_order.order_id, sell_order.energy_amount
                         );
-                        if sell_order.energy_amount <= BigDecimal::from_str("0").unwrap() {
+                        if sell_order.energy_amount <= Decimal::ZERO {
                             info!(
                                 "Sell order {} is fully filled, updating status",
                                 sell_order.order_id
@@ -381,10 +388,10 @@ impl MarketClearingService {
 
         // Calculate and set clearing price (average of match prices)
         if !matches.is_empty() {
-            let total_match_value: BigDecimal = matches
+            let total_match_value: Decimal = matches
                 .iter()
-                .map(|m| m.matched_amount.clone() * m.match_price.clone())
-                .fold(BigDecimal::from_str("0").unwrap(), |acc, val| acc + val);
+                .map(|m| m.matched_amount * m.match_price)
+                .fold(Decimal::ZERO, |acc, val| acc + val);
             let clearing_price = total_match_value / total_volume.clone();
 
             sqlx::query!(
@@ -472,7 +479,7 @@ impl MarketClearingService {
     }
 
     /// Update order filled amount
-    async fn update_order_filled_amount(&self, order_id: Uuid, amount: BigDecimal) -> Result<()> {
+    async fn update_order_filled_amount(&self, order_id: Uuid, amount: Decimal) -> Result<()> {
         sqlx::query!(
             "UPDATE trading_orders SET filled_amount = filled_amount + $1 WHERE id = $2",
             amount,
@@ -488,7 +495,7 @@ impl MarketClearingService {
     async fn update_epoch_statistics(
         &self,
         epoch_id: Uuid,
-        total_volume: BigDecimal,
+        total_volume: Decimal,
         matched_orders: i64,
     ) -> Result<()> {
         // Get total orders count for this epoch
@@ -536,10 +543,103 @@ impl MarketClearingService {
         .await?;
 
         // Calculate settlement amounts
-        let total_amount = order_match.matched_amount.clone() * order_match.match_price.clone();
-        let fee_rate = BigDecimal::from_str("0.01").unwrap(); // 1% fee
-        let fee_amount = total_amount.clone() * fee_rate.clone();
-        let net_amount = total_amount.clone() - fee_amount.clone();
+        let total_amount = order_match.matched_amount * order_match.match_price;
+        let fee_rate = Decimal::from_str("0.01").unwrap(); // 1% fee
+        let fee_amount = total_amount * fee_rate;
+        let net_amount = total_amount - fee_amount;
+
+        // =================================================================
+        // NEW: Execute On-Chain Transfer (Settlement)
+        // =================================================================
+
+        // 1. Fetch Wallets
+        let buyer_wallet_row = sqlx::query!(
+            "SELECT wallet_address FROM users WHERE id = $1",
+            buy_order.user_id
+        )
+        .fetch_one(&self.db)
+        .await
+        .map_err(|e| ApiError::Database(e))?;
+        let seller_wallet_row = sqlx::query!(
+            "SELECT wallet_address FROM users WHERE id = $1",
+            sell_order.user_id
+        )
+        .fetch_one(&self.db)
+        .await
+        .map_err(|e| ApiError::Database(e))?;
+
+        if let (Some(buyer_wallet_str), Some(seller_wallet_str)) = (
+            buyer_wallet_row.wallet_address,
+            seller_wallet_row.wallet_address,
+        ) {
+            // We wrap blockchain operations in a block to catch errors without failing the DB transaction
+            // In a real system, this should be a robust distributed transaction or queue-based
+            let blockchain_result = async {
+                let authority_keypair = self
+                    .blockchain_service
+                    .get_authority_keypair()
+                    .await
+                    .map_err(|e| format!("Failed to load authority: {}", e))?;
+
+                let token_mint_str = std::env::var("ENERGY_TOKEN_MINT")
+                    .unwrap_or_else(|_| "94G1r674LmRDmLN2UPjDFD8Eh7zT8JaSaxv9v68GyEur".to_string());
+                let token_mint = Pubkey::from_str(&token_mint_str)
+                    .map_err(|e| format!("Invalid mint: {}", e))?;
+
+                let buyer_wallet = Pubkey::from_str(&buyer_wallet_str)
+                    .map_err(|e| format!("Invalid buyer wallet: {}", e))?;
+                let seller_wallet = Pubkey::from_str(&seller_wallet_str)
+                    .map_err(|e| format!("Invalid seller wallet: {}", e))?;
+
+                // 2. Ensure ATAs exist
+                let buyer_ata = self
+                    .blockchain_service
+                    .ensure_token_account_exists(&authority_keypair, &buyer_wallet, &token_mint)
+                    .await
+                    .map_err(|e| format!("Failed to get buyer ATA: {}", e))?;
+                let seller_ata = self
+                    .blockchain_service
+                    .ensure_token_account_exists(&authority_keypair, &seller_wallet, &token_mint)
+                    .await
+                    .map_err(|e| format!("Failed to get seller ATA: {}", e))?;
+
+                // 3. Transfer Energy Tokens (Seller -> Buyer)
+                // Assuming 9 decimals (1 GRX = 1 kWh = 1_000_000_000 units)
+                let transfer_amount = (order_match.matched_amount * Decimal::from(1_000_000_000))
+                    .to_u64()
+                    .unwrap_or(0);
+
+                if transfer_amount > 0 {
+                    let signature = self
+                        .blockchain_service
+                        .transfer_tokens(
+                            &authority_keypair,
+                            &seller_ata, // From Seller
+                            &buyer_ata,  // To Buyer
+                            &token_mint,
+                            transfer_amount,
+                            9, // Decimals
+                        )
+                        .await
+                        .map_err(|e| format!("Transfer failed: {}", e))?;
+
+                    Ok::<String, String>(signature.to_string())
+                } else {
+                    Ok("Zero amount".to_string())
+                }
+            }
+            .await;
+
+            match blockchain_result {
+                Ok(sig) => tracing::info!(
+                    "Settlement on-chain transfer successful. Signature: {}",
+                    sig
+                ),
+                Err(e) => tracing::error!("Settlement on-chain transfer failed: {}", e),
+            }
+        } else {
+            tracing::warn!("Skipping on-chain settlement: Buyer or Seller missing wallet address");
+        }
 
         let settlement = Settlement {
             id: Uuid::new_v4(),

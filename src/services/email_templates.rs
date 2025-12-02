@@ -8,93 +8,81 @@ impl EmailTemplates {
     pub fn verification_email(username: &str, verification_url: &str) -> String {
         format!(
             r#"<!DOCTYPE html>
-            <html lang="en">
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Verify Your Email - GridTokenX</title>
-            </head>
-            <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
-                <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f5f5f5;">
-                    <tr>
-                        <td align="center" style="padding: 40px 0;">
-                            <table role="presentation" style="width: 600px; max-width: 100%; border-collapse: collapse; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
-                                <!-- Header -->
-                                <tr>
-                                    <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center; border-radius: 10px 10px 0 0;">
-                                        <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 600;">GridTokenX Platform</h1>
-                                        <p style="color: #e0e7ff; margin: 10px 0 0 0; font-size: 14px;">P2P Energy Trading Network</p>
-                                    </td>
-                                </tr>
-                                
-                                <!-- Body -->
-                                <tr>
-                                    <td style="padding: 40px 30px; background-color: #ffffff;">
-                                        <h2 style="color: #1f2937; margin: 0 0 20px 0; font-size: 24px; font-weight: 600;">Welcome, {}!</h2>
-                                        
-                                        <p style="color: #4b5563; line-height: 1.6; margin: 0 0 20px 0; font-size: 16px;">
-                                            Thank you for registering with GridTokenX Platform. We're excited to have you join our 
-                                            peer-to-peer energy trading network!
-                                        </p>
-                                        
-                                        <p style="color: #4b5563; line-height: 1.6; margin: 0 0 30px 0; font-size: 16px;">
-                                            To complete your registration and start trading energy tokens, please verify your email address 
-                                            by clicking the button below:
-                                        </p>
-                                        
-                                        <!-- Button -->
-                                        <table role="presentation" style="width: 100%; border-collapse: collapse;">
-                                            <tr>
-                                                <td align="center" style="padding: 0 0 30px 0;">
-                                                    <a href="{}" 
-                                                      style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                                              color: #ffffff; padding: 16px 40px; text-decoration: none; border-radius: 8px; 
-                                                              font-weight: 600; font-size: 16px; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.4);">
-                                                        Verify Email Address
-                                                    </a>
-                                                </td>
-                                            </tr>
-                                        </table>
-                                        
-                                        <!-- Fallback Link -->
-                                        <p style="color: #6b7280; font-size: 14px; line-height: 1.6; margin: 0 0 10px 0;">
-                                            If the button doesn't work, copy and paste this link into your browser:
-                                        </p>
-                                        <p style="background-color: #f3f4f6; padding: 12px; border-radius: 6px; word-break: break-all; 
-                                                  font-size: 13px; color: #667eea; margin: 0 0 30px 0;">
-                                            <a href="{}" style="color: #667eea; text-decoration: none;">{}</a>
-                                        </p>
-                                        
-                                        <!-- Expiry Notice -->
-                                        <div style="background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 6px; margin: 0 0 20px 0;">
-                                            <p style="color: #92400e; margin: 0; font-size: 14px; line-height: 1.5;">
-                                                <strong>⏱️ Important:</strong> This verification link will expire in 24 hours for security purposes.
-                                            </p>
-                                        </div>
-                                        
-                                        <p style="color: #6b7280; font-size: 14px; line-height: 1.6; margin: 0;">
-                                            If you didn't create an account with GridTokenX, you can safely ignore this email.
-                                        </p>
-                                    </td>
-                                </tr>
-                                
-                                <!-- Footer -->
-                                <tr>
-                                    <td style="background-color: #f9fafb; padding: 30px; text-align: center; border-radius: 0 0 10px 10px; border-top: 1px solid #e5e7eb;">
-                                        <p style="color: #9ca3af; margin: 0 0 10px 0; font-size: 13px;">
-                                            © 2025 GridTokenX Platform. All rights reserved.
-                                        </p>
-                                        <p style="color: #9ca3af; margin: 0; font-size: 12px;">
-                                            This is an automated email. Please do not reply to this message.
-                                        </p>
-                                    </td>
-                                </tr>
-                            </table>
-                        </td>
-                    </tr>
-                </table>
-            </body>
-            </html>"#,
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verify Your Email - GridTokenX</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f5f5f5;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; border-collapse: collapse; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          
+          <!-- Body -->
+          <tr>
+            <td style="padding: 40px 30px; background-color: #ffffff;">
+              <h2 style="color: #1f2937; margin: 0 0 20px 0; font-size: 24px; font-weight: 600;">Welcome, {}!</h2>
+              
+              <p style="color: #4b5563; line-height: 1.6; margin: 0 0 20px 0; font-size: 16px;">
+                Thank you for registering with <strong>GridTokenX</strong> Platform. We're excited to have you join our 
+                peer-to-peer energy trading network!
+              </p>
+              
+              <p style="color: #4b5563; line-height: 1.6; margin: 0 0 30px 0; font-size: 16px;">
+                To complete your registration and start trading energy tokens, please verify your email address 
+                by clicking the button below:
+              </p>
+              
+              <!-- Button -->
+              <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td align="center" style="padding: 0 0 30px 0;">
+                    <a href="{}" 
+                      style="display: inline-block; background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
+                          color: #ffffff; padding: 16px 40px; text-decoration: none; 
+                          font-weight: 600; font-size: 16px; box-shadow: 0 4px 6px rgba(16, 185, 129, 0.4);">
+                      Verify Email Address
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              
+              <!-- Fallback Link -->
+              <p style="color: #6b7280; font-size: 14px; line-height: 1.6; margin: 0 0 10px 0;">
+                If the button doesn't work, copy and paste this link into your browser:
+              </p>
+              <p style="background-color: #f3f4f6; padding: 12px; 
+                    font-size: 13px; color: #10b981; margin: 0 0 30px 0;">
+                <a href="{}" style="color: #10b981; text-decoration: none;">{}</a>
+              </p>
+              <p style="color: #6b7280; margin: 0; font-size: 14px; line-height: 1.5; text-underline-offset: inherit;">
+                This verification link will expire in 24 hours for security purposes.
+              </p>
+              <p style="color: #6b7280; font-size: 14px; line-height: 1.6; margin: 0;">
+                If you didn't create an account with GridTokenX, you can safely ignore this email.
+              </p>
+            </td>
+          </tr>
+          
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f9fafb; padding: 10px; text-align: center; border-top: 1px solid #e5e7eb;">
+              <p style="color: #9ca3af; margin: 0 0 10px 0; font-size: 13px;">
+                © 2025 GridTokenX Platform. All rights reserved.
+              </p>
+              <p style="color: #9ca3af; margin: 0; font-size: 12px;">
+                This is an automated email. Please do not reply to this message.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"#,
             username, verification_url, verification_url, verification_url
         )
     }
@@ -269,7 +257,8 @@ mod tests {
 
     #[test]
     fn test_verification_email_contains_username() {
-        let email = EmailTemplates::verification_email("testuser", "http://example.com/verify?token=abc");
+        let email =
+            EmailTemplates::verification_email("testuser", "http://example.com/verify?token=abc");
         assert!(email.contains("testuser"));
     }
 
@@ -288,9 +277,10 @@ mod tests {
 
     #[test]
     fn test_text_emails_are_generated() {
-        let verification_text = EmailTemplates::verification_email_text("testuser", "http://example.com");
+        let verification_text =
+            EmailTemplates::verification_email_text("testuser", "http://example.com");
         let welcome_text = EmailTemplates::welcome_email_text("testuser", "http://example.com");
-        
+
         assert!(!verification_text.is_empty());
         assert!(!welcome_text.is_empty());
         assert!(verification_text.contains("testuser"));

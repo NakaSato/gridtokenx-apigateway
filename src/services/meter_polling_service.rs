@@ -10,7 +10,7 @@ use crate::models::meter::MeterReading;
 use crate::services::blockchain_service::BlockchainService;
 use crate::services::meter_service::MeterService;
 use crate::services::websocket_service::WebSocketService;
-use bigdecimal::ToPrimitive;
+use rust_decimal::prelude::ToPrimitive;
 use solana_sdk::pubkey::Pubkey;
 use sqlx::PgPool;
 use std::str::FromStr;
@@ -341,8 +341,8 @@ impl MeterPollingService {
 mod tests {
     use super::*;
     use crate::config::TokenizationConfig;
-    use bigdecimal::BigDecimal;
     use chrono::Utc;
+    use rust_decimal::Decimal;
     use std::str::FromStr;
     use uuid::Uuid;
 
@@ -351,7 +351,7 @@ mod tests {
             id: Uuid::new_v4(),
             user_id: Some(Uuid::new_v4()),
             wallet_address: "test_wallet_address".to_string(),
-            kwh_amount: Some(BigDecimal::from_str("10.0").unwrap()),
+            kwh_amount: Some(Decimal::from_str("10.0").unwrap()),
             reading_timestamp: Some(Utc::now()),
             submitted_at: Some(Utc::now()),
             minted: Some(false),
@@ -412,7 +412,7 @@ mod tests {
 
         let mut reading = create_test_meter_reading();
         reading.submitted_at = Some(Utc::now());
-        reading.kwh_amount = Some(BigDecimal::from_str("50.0").unwrap());
+        reading.kwh_amount = Some(Decimal::from_str("50.0").unwrap());
         reading.verification_status = Some("verified".to_string());
 
         // This should not return an error
@@ -457,7 +457,7 @@ mod tests {
 
         // Create a reading with an excessive amount
         let mut reading = create_test_meter_reading();
-        reading.kwh_amount = Some(BigDecimal::from_str("500.0").unwrap()); // Exceeds max_reading_kwh
+        reading.kwh_amount = Some(Decimal::from_str("500.0").unwrap()); // Exceeds max_reading_kwh
 
         // Test validation conditions
         // Check amount - this should fail with 500.0 kWh

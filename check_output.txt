@@ -1,24 +1,198 @@
-    Checking api-gateway v0.1.1 (/Users/chanthawat/Developments/weekend/gridtokenx-apigateway)
-error[E0412]: cannot find type `DashboardMetrics` in this scope
-  --> src/handlers/dashboard.rs:12:66
+    Checking api-gateway v0.1.1 (/Users/chanthawat/Developments/gridtokenx-platform/gridtokenx-apigateway)
+error[E0432]: unresolved import `sqlx::types::BigDecimal`
+ --> src/models/energy.rs:3:5
+  |
+3 | use sqlx::types::BigDecimal;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^ no `BigDecimal` in `types`
+  |
+help: a similar name exists in the module
+  |
+3 - use sqlx::types::BigDecimal;
+3 + use sqlx::types::Decimal;
+  |
+help: consider importing this struct instead
+  |
+3 - use sqlx::types::BigDecimal;
+3 + use bigdecimal::BigDecimal;
+  |
+
+error[E0433]: failed to resolve: use of undeclared type `Utc`
+  --> src/handlers/transactions/mod.rs:80:55
    |
-12 |         (status = 200, description = "Dashboard metrics", body = DashboardMetrics),
-   |                                                                  ^^^^^^^^^^^^^^^^
+80 |             created_at: row.created_at.unwrap_or_else(Utc::now),
+   |                                                       ^^^ use of undeclared type `Utc`
    |
-  ::: src/services/dashboard_service.rs:16:1
+help: consider importing one of these structs
    |
-16 | pub struct DashboardService {
-   | --------------------------- similarly named struct `DashboardService` defined here
+ 4 + use chrono::Utc;
    |
+ 4 + use sqlx::types::chrono::Utc;
+   |
+
+error[E0433]: failed to resolve: use of undeclared type `Utc`
+   --> src/handlers/transactions/mod.rs:158:55
+    |
+158 |             created_at: row.created_at.unwrap_or_else(Utc::now),
+    |                                                       ^^^ use of undeclared type `Utc`
+    |
+help: consider importing one of these structs
+    |
+  4 + use chrono::Utc;
+    |
+  4 + use sqlx::types::chrono::Utc;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Utc`
+   --> src/handlers/transactions/mod.rs:251:59
+    |
+251 |                 created_at: row.created_at.unwrap_or_else(Utc::now),
+    |                                                           ^^^ use of undeclared type `Utc`
+    |
+help: consider importing one of these structs
+    |
+  4 + use chrono::Utc;
+    |
+  4 + use sqlx::types::chrono::Utc;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Utc`
+   --> src/handlers/transactions/mod.rs:342:55
+    |
+342 |             created_at: row.created_at.unwrap_or_else(Utc::now), // Fallback
+    |                                                       ^^^ use of undeclared type `Utc`
+    |
+help: consider importing one of these structs
+    |
+  4 + use chrono::Utc;
+    |
+  4 + use sqlx::types::chrono::Utc;
+    |
+
+error[E0412]: cannot find type `BigDecimal` in this scope
+   --> src/services/erc_service.rs:888:17
+    |
+888 |     active_kwh: BigDecimal,
+    |                 ^^^^^^^^^^
+    |
+   ::: /Users/chanthawat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rust_decimal-1.39.0/src/decimal.rs:116:1
+    |
+116 | pub struct Decimal {
+    | ------------------ similarly named struct `Decimal` defined here
+    |
 help: a struct with a similar name exists
-   |
-12 -         (status = 200, description = "Dashboard metrics", body = DashboardMetrics),
-12 +         (status = 200, description = "Dashboard metrics", body = DashboardService),
-   |
+    |
+888 -     active_kwh: BigDecimal,
+888 +     active_kwh: Decimal,
+    |
 help: consider importing this struct
-   |
- 1 + use crate::services::dashboard_service::DashboardMetrics;
-   |
+    |
+  1 + use bigdecimal::BigDecimal;
+    |
+
+error[E0412]: cannot find type `BigDecimal` in this scope
+   --> src/services/erc_service.rs:889:18
+    |
+889 |     retired_kwh: BigDecimal,
+    |                  ^^^^^^^^^^
+    |
+   ::: /Users/chanthawat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rust_decimal-1.39.0/src/decimal.rs:116:1
+    |
+116 | pub struct Decimal {
+    | ------------------ similarly named struct `Decimal` defined here
+    |
+help: a struct with a similar name exists
+    |
+889 -     retired_kwh: BigDecimal,
+889 +     retired_kwh: Decimal,
+    |
+help: consider importing this struct
+    |
+  1 + use bigdecimal::BigDecimal;
+    |
+
+error[E0412]: cannot find type `BigDecimal` in this scope
+   --> src/services/erc_service.rs:890:16
+    |
+890 |     total_kwh: BigDecimal,
+    |                ^^^^^^^^^^
+    |
+   ::: /Users/chanthawat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rust_decimal-1.39.0/src/decimal.rs:116:1
+    |
+116 | pub struct Decimal {
+    | ------------------ similarly named struct `Decimal` defined here
+    |
+help: a struct with a similar name exists
+    |
+890 -     total_kwh: BigDecimal,
+890 +     total_kwh: Decimal,
+    |
+help: consider importing this struct
+    |
+  1 + use bigdecimal::BigDecimal;
+    |
+
+error[E0412]: cannot find type `BigDecimal` in this scope
+   --> src/services/erc_service.rs:896:21
+    |
+896 |     pub active_kwh: BigDecimal,
+    |                     ^^^^^^^^^^
+    |
+   ::: /Users/chanthawat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rust_decimal-1.39.0/src/decimal.rs:116:1
+    |
+116 | pub struct Decimal {
+    | ------------------ similarly named struct `Decimal` defined here
+    |
+help: a struct with a similar name exists
+    |
+896 -     pub active_kwh: BigDecimal,
+896 +     pub active_kwh: Decimal,
+    |
+help: consider importing this struct
+    |
+  1 + use bigdecimal::BigDecimal;
+    |
+
+error[E0412]: cannot find type `BigDecimal` in this scope
+   --> src/services/erc_service.rs:897:22
+    |
+897 |     pub retired_kwh: BigDecimal,
+    |                      ^^^^^^^^^^
+    |
+   ::: /Users/chanthawat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rust_decimal-1.39.0/src/decimal.rs:116:1
+    |
+116 | pub struct Decimal {
+    | ------------------ similarly named struct `Decimal` defined here
+    |
+help: a struct with a similar name exists
+    |
+897 -     pub retired_kwh: BigDecimal,
+897 +     pub retired_kwh: Decimal,
+    |
+help: consider importing this struct
+    |
+  1 + use bigdecimal::BigDecimal;
+    |
+
+error[E0412]: cannot find type `BigDecimal` in this scope
+   --> src/services/erc_service.rs:898:20
+    |
+898 |     pub total_kwh: BigDecimal,
+    |                    ^^^^^^^^^^
+    |
+   ::: /Users/chanthawat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rust_decimal-1.39.0/src/decimal.rs:116:1
+    |
+116 | pub struct Decimal {
+    | ------------------ similarly named struct `Decimal` defined here
+    |
+help: a struct with a similar name exists
+    |
+898 -     pub total_kwh: BigDecimal,
+898 +     pub total_kwh: Decimal,
+    |
+help: consider importing this struct
+    |
+  1 + use bigdecimal::BigDecimal;
+    |
 
 warning: unused import: `std::str::FromStr`
  --> src/error.rs:8:5
@@ -34,11 +208,59 @@ warning: unused import: `std::sync::Arc`
 4 | use std::sync::Arc;
   |     ^^^^^^^^^^^^^^
 
+warning: unused import: `crate::services::meter_verification_service::MeterRegistry`
+   --> src/handlers/user_management.rs:889:5
+    |
+889 | use crate::services::meter_verification_service::MeterRegistry;
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `rust_decimal::prelude::*`
+ --> src/services/amm_service.rs:4:5
+  |
+4 | use rust_decimal::prelude::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> src/services/amm_service.rs:7:5
+  |
+7 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `error`
+ --> src/services/amm_service.rs:8:15
+  |
+8 | use tracing::{error, info, instrument};
+  |               ^^^^^
+
+warning: unused import: `std::str::FromStr`
+   --> src/services/erc_service.rs:445:13
+    |
+445 |         use std::str::FromStr;
+    |             ^^^^^^^^^^^^^^^^^
+
 warning: unused import: `EncodedConfirmedTransactionWithStatusMeta`
  --> src/services/event_processor_service.rs:5:33
   |
 5 | use solana_transaction_status::{EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding};
   |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::str::FromStr`
+  --> src/services/market_clearing.rs:10:5
+   |
+10 | use std::str::FromStr;
+   |     ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::str::FromStr`
+  --> src/services/meter_service.rs:73:13
+   |
+73 |         use std::str::FromStr;
+   |             ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::str::FromStr`
+   --> src/services/meter_service.rs:627:13
+    |
+627 |         use std::str::FromStr;
+    |             ^^^^^^^^^^^^^^^^^
 
 warning: unused import: `Duration`
  --> src/services/meter_verification_service.rs:3:24
@@ -46,147 +268,19 @@ warning: unused import: `Duration`
 3 | use chrono::{DateTime, Duration, Utc};
   |                        ^^^^^^^^
 
-error[E0277]: `?` couldn't convert the error to `ApiError`
-   --> src/handlers/dashboard.rs:19:56
-    |
- 19 |     let metrics = dashboard_service.get_metrics().await?;
-    |                   -------------------------------------^ the trait `std::convert::From<anyhow::Error>` is not implemented for `ApiError`
-    |                   |
-    |                   this can't be annotated with `?` because it has type `Result<_, anyhow::Error>`
-    |
-note: `ApiError` needs to implement `From<anyhow::Error>`
-   --> src/error.rs:307:1
-    |
-307 | pub enum ApiError {
-    | ^^^^^^^^^^^^^^^^^
-    = note: the question mark operation (`?`) implicitly performs a conversion on the error value using the `From` trait
-    = help: the following other types implement trait `std::convert::From<T>`:
-              `ApiError` implements `std::convert::From<RedisError>`
-              `ApiError` implements `std::convert::From<sqlx::Error>`
+warning: unused import: `anyhow::anyhow`
+ --> src/services/order_matching_engine.rs:2:5
+  |
+2 | use anyhow::anyhow;
+  |     ^^^^^^^^^^^^^^
 
-error[E0277]: the trait bound `EventProcessorStats: ToSchema` is not satisfied
-   --> src/handlers/health.rs:88:75
-    |
- 88 |         (status = 200, description = "Event processor statistics", body = EventProcessorStats),
-    |                                                                           ^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
-    |
-help: the trait `ToSchema` is not implemented for `EventProcessorStats`
-   --> src/services/event_processor_service.rs:586:1
-    |
-586 | pub struct EventProcessorStats {
-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    = help: the following other types implement trait `ToSchema`:
-              &'t [T]
-              &'t mut [T]
-              &str
-              ()
-              ActivityListResponse
-              ActivityQuery
-              AdminUpdateUserRequest
-              AuditEventRecord
-            and 213 others
+warning: unused import: `std::str::FromStr`
+ --> src/services/order_matching_engine.rs:7:5
+  |
+7 | use std::str::FromStr;
+  |     ^^^^^^^^^^^^^^^^^
 
-error[E0277]: the trait bound `EventProcessorStats: PartialSchema` is not satisfied
-   --> src/handlers/health.rs:88:75
-    |
- 88 |         (status = 200, description = "Event processor statistics", body = EventProcessorStats),
-    |                                                                           ^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
-    |
-help: the trait `ComposeSchema` is not implemented for `EventProcessorStats`
-   --> src/services/event_processor_service.rs:586:1
-    |
-586 | pub struct EventProcessorStats {
-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    = help: the following other types implement trait `ComposeSchema`:
-              &[T]
-              &mut [T]
-              &str
-              ActivityListResponse
-              ActivityQuery
-              AdminUpdateUserRequest
-              AuditEventRecord
-              AuditLogQuery
-            and 211 others
-    = note: required for `EventProcessorStats` to implement `PartialSchema`
-note: required by a bound in `utoipa::ToSchema::name`
-   --> /Users/chanthawat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/utoipa-5.4.0/src/lib.rs:374:21
-    |
-374 | pub trait ToSchema: PartialSchema {
-    |                     ^^^^^^^^^^^^^ required by this bound in `ToSchema::name`
-...
-405 |     fn name() -> Cow<'static, str> {
-    |        ---- required by a bound in this associated function
-
-error[E0277]: the trait bound `EventProcessorStats: Clone` is not satisfied
-  --> src/services/dashboard_service.rs:11:5
-   |
- 8 | #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-   |                 ----- in this derive macro expansion
-...
-11 |     pub event_processor: EventProcessorStats,
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `Clone` is not implemented for `EventProcessorStats`
-   |
-help: consider annotating `EventProcessorStats` with `#[derive(Clone)]`
-  --> src/services/event_processor_service.rs:586:1
-   |
-586+ #[derive(Clone)]
-587| pub struct EventProcessorStats {
-   |
-
-error[E0277]: the trait bound `EventProcessorStats: ToSchema` is not satisfied
-   --> src/services/dashboard_service.rs:11:26
-    |
- 11 |     pub event_processor: EventProcessorStats,
-    |                          ^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
-    |
-help: the trait `ToSchema` is not implemented for `EventProcessorStats`
-   --> src/services/event_processor_service.rs:586:1
-    |
-586 | pub struct EventProcessorStats {
-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    = help: the following other types implement trait `ToSchema`:
-              &'t [T]
-              &'t mut [T]
-              &str
-              ()
-              ActivityListResponse
-              ActivityQuery
-              AdminUpdateUserRequest
-              AuditEventRecord
-            and 213 others
-
-error[E0277]: the trait bound `EventProcessorStats: PartialSchema` is not satisfied
-   --> src/services/dashboard_service.rs:11:26
-    |
- 11 |     pub event_processor: EventProcessorStats,
-    |                          ^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
-    |
-help: the trait `ComposeSchema` is not implemented for `EventProcessorStats`
-   --> src/services/event_processor_service.rs:586:1
-    |
-586 | pub struct EventProcessorStats {
-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    = help: the following other types implement trait `ComposeSchema`:
-              &[T]
-              &mut [T]
-              &str
-              ActivityListResponse
-              ActivityQuery
-              AdminUpdateUserRequest
-              AuditEventRecord
-              AuditLogQuery
-            and 211 others
-    = note: required for `EventProcessorStats` to implement `PartialSchema`
-note: required by a bound in `utoipa::ToSchema::name`
-   --> /Users/chanthawat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/utoipa-5.4.0/src/lib.rs:374:21
-    |
-374 | pub trait ToSchema: PartialSchema {
-    |                     ^^^^^^^^^^^^^ required by this bound in `ToSchema::name`
-...
-405 |     fn name() -> Cow<'static, str> {
-    |        ---- required by a bound in this associated function
-
-Some errors have detailed explanations: E0277, E0412.
-For more information about an error, try `rustc --explain E0277`.
-warning: `api-gateway` (lib) generated 4 warnings
-error: could not compile `api-gateway` (lib) due to 11 previous errors; 4 warnings emitted
+Some errors have detailed explanations: E0412, E0432, E0433.
+For more information about an error, try `rustc --explain E0412`.
+warning: `api-gateway` (lib) generated 14 warnings
+error: could not compile `api-gateway` (lib) due to 11 previous errors; 14 warnings emitted

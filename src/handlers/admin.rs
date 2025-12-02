@@ -3,8 +3,9 @@
 
 use axum::{extract::State, response::Json};
 use chrono::Utc;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use sqlx::{Row, types::BigDecimal};
+use sqlx::Row;
 use std::str::FromStr;
 use utoipa::ToSchema;
 
@@ -229,11 +230,11 @@ pub async fn get_market_health(
                 .try_get::<i64, _>("total_matches")
                 .unwrap_or(0),
             total_volume_24h: matching_stats_row
-                .try_get::<BigDecimal, _>("total_volume")
+                .try_get::<Decimal, _>("total_volume")
                 .unwrap_or_default()
                 .to_string(),
             average_price_24h: matching_stats_row
-                .try_get::<BigDecimal, _>("average_price")
+                .try_get::<Decimal, _>("average_price")
                 .unwrap_or_default()
                 .to_string(),
             last_match_time: matching_stats_row
@@ -299,12 +300,12 @@ pub async fn get_trading_analytics(
     .map_err(ApiError::Database)?;
 
     let open_24h = price_stats
-        .try_get::<Option<BigDecimal>, _>("open_24h")
+        .try_get::<Option<Decimal>, _>("open_24h")
         .ok()
         .flatten()
         .and_then(|d| rust_decimal::Decimal::from_str(&d.to_string()).ok());
     let close_24h = price_stats
-        .try_get::<Option<BigDecimal>, _>("close_24h")
+        .try_get::<Option<Decimal>, _>("close_24h")
         .ok()
         .flatten()
         .and_then(|d| rust_decimal::Decimal::from_str(&d.to_string()).ok());
@@ -348,11 +349,11 @@ pub async fn get_trading_analytics(
             user_id: row.try_get::<uuid::Uuid, _>("user_id").unwrap().to_string(),
             total_trades: row.try_get::<i64, _>("total_trades").unwrap_or(0),
             total_volume: row
-                .try_get::<BigDecimal, _>("total_volume")
+                .try_get::<Decimal, _>("total_volume")
                 .unwrap_or_default()
                 .to_string(),
             buy_volume: row
-                .try_get::<BigDecimal, _>("total_volume")
+                .try_get::<Decimal, _>("total_volume")
                 .unwrap_or_default()
                 .to_string(),
             sell_volume: "0".to_string(),
@@ -386,7 +387,7 @@ pub async fn get_trading_analytics(
                 .map(|h| h.to_rfc3339())
                 .unwrap_or_default(),
             volume: row
-                .try_get::<BigDecimal, _>("volume")
+                .try_get::<Decimal, _>("volume")
                 .unwrap_or_default()
                 .to_string(),
             trade_count: row.try_get::<i64, _>("trade_count").unwrap_or(0),
@@ -396,15 +397,15 @@ pub async fn get_trading_analytics(
     Ok(Json(TradingAnalytics {
         total_trades: overall_stats.try_get::<i64, _>("total_trades").unwrap_or(0),
         total_volume: overall_stats
-            .try_get::<BigDecimal, _>("total_volume")
+            .try_get::<Decimal, _>("total_volume")
             .unwrap_or_default()
             .to_string(),
         total_value: overall_stats
-            .try_get::<BigDecimal, _>("total_value")
+            .try_get::<Decimal, _>("total_value")
             .unwrap_or_default()
             .to_string(),
         average_trade_size: overall_stats
-            .try_get::<BigDecimal, _>("avg_trade_size")
+            .try_get::<Decimal, _>("avg_trade_size")
             .unwrap_or_default()
             .to_string(),
         price_statistics: PriceStatistics {
@@ -413,12 +414,12 @@ pub async fn get_trading_analytics(
                 .ok()
                 .flatten(),
             high_24h: price_stats
-                .try_get::<Option<BigDecimal>, _>("high_24h")
+                .try_get::<Option<Decimal>, _>("high_24h")
                 .ok()
                 .flatten()
                 .map(|p| p.to_string()),
             low_24h: price_stats
-                .try_get::<Option<BigDecimal>, _>("low_24h")
+                .try_get::<Option<Decimal>, _>("low_24h")
                 .ok()
                 .flatten()
                 .map(|p| p.to_string()),

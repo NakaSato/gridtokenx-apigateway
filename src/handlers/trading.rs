@@ -29,6 +29,9 @@ pub struct OrderQuery {
     /// Filter by order side (buy/sell)
     pub side: Option<OrderSide>,
 
+    /// Filter by order type (limit/market)
+    pub order_type: Option<OrderType>,
+
     /// Page number (1-indexed)
     #[serde(default = "default_page")]
     pub page: u32,
@@ -143,18 +146,31 @@ pub async fn create_order(
 ) -> Result<Json<CreateOrderResponse>> {
     tracing::info!("Creating trading order for user: {}", user.0.sub);
 
-    // Validate order parameters (allow negative for sell orders)
-    if payload.energy_amount == rust_decimal::Decimal::ZERO {
+    // Validate energy amount
+    if payload.energy_amount <= rust_decimal::Decimal::ZERO {
         return Err(ApiError::BadRequest(
-            "Energy amount cannot be zero".to_string(),
+            "Energy amount must be positive".to_string(),
         ));
     }
 
-    if payload.price_per_kwh <= rust_decimal::Decimal::ZERO {
-        return Err(ApiError::BadRequest(
-            "Price per kWh must be positive".to_string(),
-        ));
-    }
+    // Validate price based on order type
+    let price_per_kwh_bd = match payload.order_type {
+        OrderType::Limit => {
+            let price = payload.price_per_kwh.ok_or_else(|| {
+                ApiError::BadRequest("Price per kWh is required for Limit orders".to_string())
+            })?;
+            if price <= rust_decimal::Decimal::ZERO {
+                return Err(ApiError::BadRequest(
+                    "Price per kWh must be positive".to_string(),
+                ));
+            }
+            price
+        }
+        OrderType::Market => {
+            // For market orders, price is not set (or ignored)
+            rust_decimal::Decimal::ZERO
+        }
+    };
 
     // Create trading order
     let order_id = Uuid::new_v4();
@@ -162,13 +178,6 @@ pub async fn create_order(
     let expires_at = payload
         .expiry_time
         .unwrap_or_else(|| now + chrono::Duration::days(1));
-
-    // Determine order side based on user role/permissions (simplified logic)
-    let order_side = if payload.energy_amount > rust_decimal::Decimal::ZERO {
-        OrderSide::Buy // For now, treat positive amounts as buy orders
-    } else {
-        OrderSide::Sell
-    };
 
     // Get or create current epoch for Market Clearing Engine
     let epoch = _state
@@ -187,30 +196,8 @@ pub async fn create_order(
         epoch.epoch_number
     );
 
-    // Convert Decimal to BigDecimal for database storage
-    let energy_amount_bd = {
-        use std::str::FromStr;
-        sqlx::types::BigDecimal::from_str(&payload.energy_amount.to_string()).map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to convert energy_amount to BigDecimal: {}",
-                e
-            ))
-        })?
-    };
-    let price_per_kwh_bd = {
-        use std::str::FromStr;
-        sqlx::types::BigDecimal::from_str(&payload.price_per_kwh.to_string()).map_err(|e| {
-            ApiError::Internal(format!(
-                "Failed to convert price_per_kwh to BigDecimal: {}",
-                e
-            ))
-        })?
-    };
-    let filled_amount_bd = {
-        use std::str::FromStr;
-        sqlx::types::BigDecimal::from_str("0")
-            .map_err(|e| ApiError::Internal(format!("Failed to create zero BigDecimal: {}", e)))?
-    };
+    let energy_amount_bd = payload.energy_amount;
+    let filled_amount_bd = rust_decimal::Decimal::ZERO;
 
     sqlx::query!(
         r#"
@@ -222,7 +209,7 @@ pub async fn create_order(
         order_id,
         user.0.sub,
         payload.order_type as OrderType,
-        order_side as OrderSide,
+        payload.side as OrderSide,
         energy_amount_bd,
         price_per_kwh_bd,
         filled_amount_bd,
@@ -242,9 +229,9 @@ pub async fn create_order(
     _state.audit_logger.log_async(AuditEvent::OrderCreated {
         user_id: user.0.sub,
         order_id,
-        order_type: format!("{:?}", order_side),
+        order_type: format!("{:?}", payload.side),
         amount: payload.energy_amount.to_string(),
-        price: payload.price_per_kwh.to_string(),
+        price: price_per_kwh_bd.to_string(),
     });
 
     Ok(Json(CreateOrderResponse {
@@ -301,6 +288,11 @@ pub async fn get_user_orders(
         bind_count += 1;
     }
 
+    if params.order_type.is_some() {
+        where_conditions.push(format!("order_type = ${}", bind_count));
+        bind_count += 1;
+    }
+
     let where_clause = where_conditions.join(" AND ");
 
     // Count total
@@ -312,6 +304,9 @@ pub async fn get_user_orders(
     }
     if let Some(side) = &params.side {
         count_sqlx = count_sqlx.bind(side);
+    }
+    if let Some(order_type) = &params.order_type {
+        count_sqlx = count_sqlx.bind(order_type);
     }
 
     let total = count_sqlx.fetch_one(&_state.db).await.map_err(|e| {
@@ -338,6 +333,9 @@ pub async fn get_user_orders(
     }
     if let Some(side) = &params.side {
         sqlx_query = sqlx_query.bind(side);
+    }
+    if let Some(order_type) = &params.order_type {
+        sqlx_query = sqlx_query.bind(order_type);
     }
 
     sqlx_query = sqlx_query.bind(limit);
@@ -680,9 +678,9 @@ pub async fn create_blockchain_order(
         _ => return Err(ApiError::BadRequest("Invalid order type".into())),
     };
 
-    // Convert u64 to BigDecimal
-    let energy_amount = sqlx::types::BigDecimal::from(payload.energy_amount);
-    let price = sqlx::types::BigDecimal::from(payload.price_per_kwh);
+    // Convert u64 to Decimal
+    let energy_amount = rust_decimal::Decimal::from(payload.energy_amount);
+    let price = rust_decimal::Decimal::from(payload.price_per_kwh);
 
     sqlx::query!(
         r#"
@@ -697,7 +695,7 @@ pub async fn create_blockchain_order(
         side as OrderSide,
         energy_amount,
         price,
-        sqlx::types::BigDecimal::from(0),
+        rust_decimal::Decimal::ZERO,
         OrderStatus::Pending as OrderStatus,
         now + chrono::Duration::days(1),
         now,
@@ -793,3 +791,26 @@ pub async fn match_blockchain_orders(
 // Temporarily disabled for email verification testing
 // Phase 5 endpoints (order-book, cancel_order, get_current_epoch_info, get_trading_history, run_order_matching)
 // will be re-enabled after email verification testing is complete
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_create_order_request_validation() {
+        // Test Limit order with valid price
+        let req = CreateOrderRequest {
+            energy_amount: Decimal::from(100),
+            price_per_kwh: Some(Decimal::from(10)),
+            order_type: OrderType::Limit,
+            side: OrderSide::Buy,
+            expiry_time: None,
+        };
+        // Validation logic is inside the handler, so we can't easily test it directly without mocking State.
+        // However, we can verify the struct creation and types here.
+        assert_eq!(req.order_type, OrderType::Limit);
+        assert!(req.price_per_kwh.is_some());
+    }
+}

@@ -13,11 +13,11 @@ pub mod types {
         Admin,
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, ToSchema)]
+    #[derive(Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type, PartialEq, ToSchema)]
     #[sqlx(type_name = "order_type", rename_all = "lowercase")]
     pub enum OrderType {
-        Market,
         Limit,
+        Market,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, sqlx::Type, ToSchema)]
@@ -40,6 +40,26 @@ pub mod types {
         Settled,
         Cancelled,
         Expired,
+    }
+
+    impl OrderStatus {
+        pub fn as_str(&self) -> &'static str {
+            match self {
+                OrderStatus::Pending => "pending",
+                OrderStatus::Active => "active",
+                OrderStatus::PartiallyFilled => "partially_filled",
+                OrderStatus::Filled => "filled",
+                OrderStatus::Settled => "settled",
+                OrderStatus::Cancelled => "cancelled",
+                OrderStatus::Expired => "expired",
+            }
+        }
+    }
+
+    impl fmt::Display for OrderStatus {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.as_str())
+        }
     }
 
     #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, sqlx::Type, ToSchema)]
