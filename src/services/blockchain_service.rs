@@ -391,12 +391,14 @@ impl BlockchainService {
         &self,
         authority: &Keypair,
         user_token_account: &Pubkey,
+        user_wallet: &Pubkey,
         mint: &Pubkey,
         amount_kwh: f64,
     ) -> Result<Signature> {
         let mint_instruction = BlockchainUtils::create_mint_instruction(
             authority,
             user_token_account,
+            user_wallet,
             mint,
             amount_kwh,
         )?;
@@ -534,6 +536,7 @@ impl BlockchainService {
         self.mint_energy_tokens(
             &authority,
             &user_token_account,
+            user_wallet,
             &mint,
             amount as f64 / 1_000_000_000.0,
         )
@@ -543,7 +546,7 @@ impl BlockchainService {
     // Helper method to calculate ATA address
     fn calculate_ata_address(&self, user_wallet: &Pubkey, mint: &Pubkey) -> Result<Pubkey> {
         let ata_program_id = Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")?;
-        let token_program_id = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")?;
+        let token_program_id = Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")?;
 
         let (ata_address, _bump) = Pubkey::find_program_address(
             &[

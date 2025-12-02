@@ -77,8 +77,8 @@ pub async fn get_token_balance(
         })?;
 
     // Get token mint address from environment
-    let token_mint_str = std::env::var("GRID_TOKEN_MINT").map_err(|_| {
-        error!("GRID_TOKEN_MINT environment variable not set");
+    let token_mint_str = std::env::var("ENERGY_TOKEN_MINT").map_err(|_| {
+        error!("ENERGY_TOKEN_MINT environment variable not set");
         ApiError::Internal("Token mint address not configured".to_string())
     })?;
 
@@ -494,8 +494,8 @@ pub async fn mint_from_reading(
         })?;
 
     // Get token mint address from environment
-    let token_mint_str = std::env::var("GRID_TOKEN_MINT").map_err(|_| {
-        error!("GRID_TOKEN_MINT environment variable not set");
+    let token_mint_str = std::env::var("ENERGY_TOKEN_MINT").map_err(|_| {
+        error!("ENERGY_TOKEN_MINT environment variable not set");
         ApiError::Internal("Token mint address not configured".to_string())
     })?;
 
@@ -543,6 +543,7 @@ pub async fn mint_from_reading(
         .mint_energy_tokens(
             &authority_keypair,
             &user_token_account,
+            &wallet_pubkey,
             &token_mint,
             kwh_amount,
         )

@@ -241,7 +241,8 @@ impl MeterService {
                 SELECT
                     id, user_id, wallet_address,
                     kwh_amount, reading_timestamp, submitted_at,
-                    minted, mint_tx_signature, meter_id, verification_status
+                    minted, mint_tx_signature, meter_id, verification_status,
+                    meter_serial
                 FROM meter_readings
                 WHERE user_id = $1 AND minted = $2
                 ORDER BY {} {}
@@ -255,7 +256,8 @@ impl MeterService {
                 SELECT
                     id, user_id, wallet_address,
                     kwh_amount, reading_timestamp, submitted_at,
-                    minted, mint_tx_signature, meter_id, verification_status
+                    minted, mint_tx_signature, meter_id, verification_status,
+                    meter_serial
                 FROM meter_readings
                 WHERE user_id = $1
                 ORDER BY {} {}
@@ -353,7 +355,8 @@ impl MeterService {
                 SELECT
                     id, user_id, wallet_address,
                     kwh_amount, reading_timestamp, submitted_at,
-                    minted, mint_tx_signature, meter_id, verification_status
+                    minted, mint_tx_signature, meter_id, verification_status,
+                    meter_serial
                 FROM meter_readings
                 WHERE wallet_address = $1 AND minted = $2
                 ORDER BY {} {}
@@ -367,7 +370,8 @@ impl MeterService {
                 SELECT
                     id, user_id, wallet_address,
                     kwh_amount, reading_timestamp, submitted_at,
-                    minted, mint_tx_signature, meter_id, verification_status
+                    minted, mint_tx_signature, meter_id, verification_status,
+                    meter_serial
                 FROM meter_readings
                 WHERE wallet_address = $1
                 ORDER BY {} {}

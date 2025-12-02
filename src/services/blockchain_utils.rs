@@ -55,10 +55,11 @@ impl BlockchainUtils {
     }
 
     /// Mint energy tokens directly to a user's token account
-    /// This calls the energy_token program's mint_tokens_direct instruction
+    /// This calls the energy_token program's mint_to_wallet instruction
     pub fn create_mint_instruction(
         authority: &Keypair,
         user_token_account: &Pubkey,
+        user_wallet: &Pubkey,
         mint: &Pubkey,
         amount_kwh: f64,
     ) -> Result<Instruction> {
@@ -73,21 +74,53 @@ impl BlockchainUtils {
         info!("Mint: {}", mint);
         info!("Amount (lamports): {}", amount_lamports);
 
-        // Use SPL Token program directly
-        let token_program_id = spl_token::id();
+        let energy_token_program_id = Self::energy_token_program_id()?;
 
-        // Create mint_to instruction
-        let instruction = spl_token::instruction::mint_to(
-            &token_program_id,
-            mint,
-            user_token_account,
-            &authority.pubkey(),
-            &[], // single signer
-            amount_lamports,
-        )
-        .map_err(|e| anyhow!("Failed to create mint instruction: {}", e))?;
+        // Derive token_info PDA
+        let (token_info_pda, _) =
+            Pubkey::find_program_address(&[b"token_info"], &energy_token_program_id);
 
-        Ok(instruction)
+        // Build instruction data
+        let mut instruction_data = Vec::new();
+
+        // Discriminator for "mint_to_wallet"
+        // global:mint_to_wallet = 59e5acb52a926574
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(b"global:mint_to_wallet");
+        let hash = hasher.finalize();
+        instruction_data.extend_from_slice(&hash[0..8]);
+
+        // Arguments
+        instruction_data.extend_from_slice(&amount_lamports.to_le_bytes());
+
+        // Accounts
+        let accounts = vec![
+            solana_sdk::instruction::AccountMeta::new(*mint, false),
+            solana_sdk::instruction::AccountMeta::new(token_info_pda, false),
+            solana_sdk::instruction::AccountMeta::new(*user_token_account, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(*user_wallet, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(authority.pubkey(), true), // authority
+            solana_sdk::instruction::AccountMeta::new(authority.pubkey(), true),          // payer
+            solana_sdk::instruction::AccountMeta::new_readonly(
+                solana_sdk::pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
+                false,
+            ), // Token 2022 program
+            solana_sdk::instruction::AccountMeta::new_readonly(
+                solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"),
+                false,
+            ), // Associated Token program
+            solana_sdk::instruction::AccountMeta::new_readonly(
+                solana_sdk::pubkey!("11111111111111111111111111111111"),
+                false,
+            ), // System program
+        ];
+
+        Ok(Instruction::new_with_bytes(
+            energy_token_program_id,
+            &instruction_data,
+            accounts,
+        ))
     }
 
     /// Ensures user has an Associated Token Account for the token mint
@@ -102,7 +135,7 @@ impl BlockchainUtils {
         let ata_program_id = Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
             .map_err(|e| anyhow!("Invalid ATA program ID: {}", e))?;
 
-        let token_program_id = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+        let token_program_id = Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
             .map_err(|e| anyhow!("Invalid token program ID: {}", e))?;
 
         let (ata_address, _bump) = Pubkey::find_program_address(
@@ -155,7 +188,9 @@ impl BlockchainUtils {
         );
 
         // Create transfer instruction manually to avoid type conflicts
-        let token_program_id = solana_sdk::pubkey::Pubkey::from(spl_token::id().to_bytes());
+        let token_program_id =
+            solana_sdk::pubkey::Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+                .map_err(|e| anyhow!("Invalid token program ID: {}", e))?;
 
         // Build instruction data for transfer_checked
         // Instruction layout: discriminator(1) + amount(8) + decimals(1) + optional extra
@@ -337,14 +372,20 @@ impl BlockchainUtils {
 
     /// Get Registry program ID
     fn registry_program_id() -> Result<Pubkey> {
-        "2XPQmFYMdXjP7ffoBB3mXeCdboSFg5Yeb6QmTSGbW8a7"
+        let program_id = std::env::var("REGISTRY_PROGRAM_ID")
+            .unwrap_or_else(|_| "2XPQmFYMdXjP7ffoBB3mXeCdboSFg5Yeb6QmTSGbW8a7".to_string());
+
+        program_id
             .parse()
             .map_err(|e| anyhow!("Failed to parse registry program ID: {}", e))
     }
 
     /// Get Oracle program ID
     fn oracle_program_id() -> Result<Pubkey> {
-        "DvdtU4quEbuxUY2FckmvcXwTpC9qp4HLJKb1PMLaqAoE"
+        let program_id = std::env::var("ORACLE_PROGRAM_ID")
+            .unwrap_or_else(|_| "DvdtU4quEbuxUY2FckmvcXwTpC9qp4HLJKb1PMLaqAoE".to_string());
+
+        program_id
             .parse()
             .map_err(|e| anyhow!("Failed to parse oracle program ID: {}", e))
     }
@@ -352,14 +393,20 @@ impl BlockchainUtils {
     /// Get Governance program ID
     #[allow(dead_code)]
     fn governance_program_id() -> Result<Pubkey> {
-        "4DY97YYBt4bxvG7xaSmWy3MhYhmA6HoMajBHVqhySvXe"
+        let program_id = std::env::var("GOVERNANCE_PROGRAM_ID")
+            .unwrap_or_else(|_| "4DY97YYBt4bxvG7xaSmWy3MhYhmA6HoMajBHVqhySvXe".to_string());
+
+        program_id
             .parse()
             .map_err(|e| anyhow!("Failed to parse governance program ID: {}", e))
     }
 
     /// Get Energy Token program ID
     fn energy_token_program_id() -> Result<Pubkey> {
-        "94G1r674LmRDmLN2UPjDFD8Eh7zT8JaSaxv9v68GyEur"
+        let program_id = std::env::var("ENERGY_TOKEN_PROGRAM_ID")
+            .unwrap_or_else(|_| "94G1r674LmRDmLN2UPjDFD8Eh7zT8JaSaxv9v68GyEur".to_string());
+
+        program_id
             .parse()
             .map_err(|e| anyhow!("Failed to parse energy token program ID: {}", e))
     }
@@ -367,7 +414,10 @@ impl BlockchainUtils {
     /// Get Trading program ID
     #[allow(dead_code)]
     fn trading_program_id() -> Result<Pubkey> {
-        "GZnqNTJsre6qB4pWCQRE9FiJU2GUeBtBDPp6s7zosctk"
+        let program_id = std::env::var("TRADING_PROGRAM_ID")
+            .unwrap_or_else(|_| "GZnqNTJsre6qB4pWCQRE9FiJU2GUeBtBDPp6s7zosctk".to_string());
+
+        program_id
             .parse()
             .map_err(|e| anyhow!("Failed to parse trading program ID: {}", e))
     }
@@ -432,7 +482,7 @@ pub mod transaction_utils {
             (kwh_amount * kwh_to_token_ratio * 10_f64.powi(decimals as i32)) as u64;
 
         // Get or create associated token account
-        let token_program_id = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+        let token_program_id = Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
             .map_err(|e| anyhow!("Invalid token program ID: {}", e))?;
 
         let ata_program_id = Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")

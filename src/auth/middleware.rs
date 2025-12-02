@@ -7,6 +7,7 @@ use axum::{
 };
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
+use uuid::Uuid;
 
 use crate::auth::{Claims, Role};
 use crate::error::{ApiError, Result};
@@ -28,12 +29,39 @@ pub async fn auth_middleware(
             &auth_value[7..] // Remove "Bearer " prefix
         }
         _ => {
+            // Check for X-API-Key header
+            if let Some(api_key) = request.headers().get("X-API-Key").and_then(|h| h.to_str().ok()) {
+                 // Check if it matches engineering API key
+                 if api_key == state.config.engineering_api_key {
+                     // Create synthetic claims for simulator
+                     let claims = Claims::new(
+                         Uuid::parse_str("63c1d015-6765-4843-9ca3-5ba21ee54d7e").unwrap(), // Use nil UUID for simulator
+                         "simulator".to_string(),
+                         "ami".to_string(), // Use AMI role
+                     );
+                     request.extensions_mut().insert(claims);
+                     return next.run(request).await;
+                 }
+            }
+
             return Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
                 .body(Body::from("Missing or invalid Authorization header"))
                 .expect("Failed to build unauthorized response");
         }
     };
+
+    // Check if token matches engineering API key (Simulator sends it as Bearer token)
+    if token == state.config.engineering_api_key {
+         // Create synthetic claims for simulator
+         let claims = Claims::new(
+             Uuid::parse_str("63c1d015-6765-4843-9ca3-5ba21ee54d7e").unwrap(), // Use nil UUID for simulator
+             "simulator".to_string(),
+             "ami".to_string(), // Use AMI role
+         );
+         request.extensions_mut().insert(claims);
+         return next.run(request).await;
+    }
 
     match state.jwt_service.decode_token(token) {
         Ok(claims) => {

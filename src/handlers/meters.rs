@@ -47,6 +47,7 @@ pub struct SubmitReadingRequest {
     pub meter_id: Option<Uuid>,
     /// Legacy meter serial number (for unverified meters)
     pub meter_serial: Option<String>,
+    pub wallet_address: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -206,25 +207,32 @@ pub async fn submit_reading(
         user.sub, request.kwh_amount
     );
 
-    // Verify user is a prosumer
-    if user.role != "prosumer" && user.role != "admin" {
+    // Verify user is a prosumer or admin or AMI (simulator)
+    if user.role != "prosumer" && user.role != "admin" && user.role != "ami" {
         return Err(ApiError::Forbidden(
-            "Only prosumers can submit meter readings".to_string(),
+            "Only prosumers or AMI can submit meter readings".to_string(),
         ));
     }
 
-    // Validate wallet address - get from user object in database
-    let user_record = sqlx::query!("SELECT wallet_address FROM users WHERE id = $1", user.sub)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            error!("Failed to fetch user: {}", e);
-            ApiError::Internal("Failed to fetch user data".to_string())
-        })?;
+    let wallet_address = if user.role == "ami" {
+        // For AMI/Simulator, get wallet address from request
+        request.wallet_address.clone().ok_or_else(|| {
+            ApiError::BadRequest("Wallet address required for AMI submission".to_string())
+        })?
+    } else {
+        // Validate wallet address - get from user object in database
+        let user_record = sqlx::query!("SELECT wallet_address FROM users WHERE id = $1", user.sub)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| {
+                error!("Failed to fetch user: {}", e);
+                ApiError::Internal("Failed to fetch user data".to_string())
+            })?;
 
-    let wallet_address = user_record
-        .wallet_address
-        .ok_or_else(|| ApiError::BadRequest("Wallet address not set for user".to_string()))?;
+        user_record
+            .wallet_address
+            .ok_or_else(|| ApiError::BadRequest("Wallet address not set for user".to_string()))?
+    };
 
     // NEW: Verify meter ownership if meter_id is provided
     let verification_status = if let Some(meter_id) = request.meter_id {
@@ -637,6 +645,7 @@ pub async fn mint_from_reading(
         .mint_energy_tokens(
             &authority_keypair,
             &user_token_account,
+            &wallet_pubkey,
             &token_mint,
             amount_kwh,
         )
