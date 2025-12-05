@@ -3,6 +3,7 @@
 // This test requires a running Solana localnet validator and PostgreSQL database
 
 use anyhow::Result;
+use api_gateway::config::SolanaProgramsConfig;
 use api_gateway::services::{
     blockchain_service::BlockchainService,
     market_clearing::{OrderSide, TradeMatch},
@@ -82,8 +83,12 @@ async fn setup_settlement_test() -> Result<(PgPool, Arc<BlockchainService>, Sett
 
     // Initialize blockchain service (localnet)
     let blockchain_service = Arc::new(
-        BlockchainService::new("http://127.0.0.1:8899".to_string(), "localnet".to_string())
-            .expect("Failed to create blockchain service"),
+        BlockchainService::new(
+            "http://127.0.0.1:8899".to_string(),
+            "localnet".to_string(),
+            SolanaProgramsConfig::default(),
+        )
+        .expect("Failed to create blockchain service"),
     );
 
     // Initialize settlement service

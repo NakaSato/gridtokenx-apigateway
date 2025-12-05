@@ -1,3 +1,10 @@
+//! Meter management handlers.
+//!
+//! This module provides endpoints for:
+//! - Submitting meter readings
+//! - Retrieving reading history
+//! - Meter statistics and minting
+
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -8,30 +15,15 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
-// use solana_sdk::{pubkey::Pubkey, signature::Keypair}; // Not used yet
 
 use crate::{
     AppState,
     auth::middleware::AuthenticatedUser,
-    error::ApiError,
-    services::BlockchainService, // MeterService, WalletService used through state
+    error::{ApiError, Result},
+    handlers::{require_role, SortOrder},
+    services::BlockchainService,
     utils::PaginationParams,
 };
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/// Check if user has required role
-fn require_role(user: &crate::auth::Claims, required_role: &str) -> Result<(), ApiError> {
-    if user.role != required_role {
-        return Err(ApiError::Forbidden(format!(
-            "Required role: {}",
-            required_role
-        )));
-    }
-    Ok(())
-}
 
 // ============================================================================
 // Request/Response Types
@@ -64,6 +56,7 @@ pub struct MeterReadingResponse {
     pub mint_tx_signature: Option<String>,
 }
 
+/// Query parameters for meter readings
 #[derive(Debug, Deserialize, ToSchema, IntoParams)]
 pub struct GetReadingsQuery {
     /// Page number (1-indexed)
@@ -71,77 +64,80 @@ pub struct GetReadingsQuery {
     pub page: u32,
 
     /// Number of items per page (max 100)
-    #[serde(default = "default_page_size")]
-    pub page_size: u32,
+    #[serde(default = "default_per_page")]
+    pub per_page: u32,
 
     /// Sort field: "submitted_at", "reading_timestamp", "kwh_amount"
-    pub sort_by: Option<String>,
+    #[serde(default = "default_sort_field")]
+    pub sort_by: String,
 
     /// Sort direction: "asc" or "desc"
-    #[serde(default = "default_sort_order")]
-    pub sort_order: crate::utils::SortOrder,
+    #[serde(default)]
+    pub sort_order: SortOrder,
 
     /// Filter by minted status
     pub minted: Option<bool>,
 }
 
 fn default_page() -> u32 {
-    1
+    crate::constants::pagination::DEFAULT_PAGE
 }
 
-fn default_page_size() -> u32 {
-    20
+fn default_per_page() -> u32 {
+    crate::constants::pagination::DEFAULT_PER_PAGE
 }
 
-fn default_sort_order() -> crate::utils::SortOrder {
-    crate::utils::SortOrder::Desc
+fn default_sort_field() -> String {
+    "submitted_at".to_string()
 }
 
 impl GetReadingsQuery {
-    pub fn validate(&mut self) -> Result<(), ApiError> {
+    const ALLOWED_SORT_FIELDS: &'static [&'static str] = &[
+        "submitted_at",
+        "reading_timestamp",
+        "kwh_amount",
+    ];
+
+    pub fn validate(&mut self) -> Result<()> {
+        // Normalize pagination
         if self.page < 1 {
             self.page = 1;
         }
-
-        if self.page_size < 1 {
-            self.page_size = 20;
-        } else if self.page_size > 100 {
-            self.page_size = 100;
-        }
+        self.per_page = self.per_page.clamp(1, crate::constants::pagination::MAX_PER_PAGE);
 
         // Validate sort field
-        if let Some(sort_by) = &self.sort_by {
-            match sort_by.as_str() {
-                "submitted_at" | "reading_timestamp" | "kwh_amount" => {}
-                _ => {
-                    return Err(ApiError::validation_error(
-                        "Invalid sort_by field. Allowed values: submitted_at, reading_timestamp, kwh_amount",
-                        Some("sort_by"),
-                    ));
-                }
-            }
+        if !Self::ALLOWED_SORT_FIELDS.contains(&self.sort_by.as_str()) {
+            return Err(ApiError::validation_error(
+                format!(
+                    "Invalid sort_by field. Allowed values: {}",
+                    Self::ALLOWED_SORT_FIELDS.join(", ")
+                ),
+                Some("sort_by"),
+            ));
         }
 
         Ok(())
     }
 
     pub fn limit(&self) -> i64 {
-        self.page_size as i64
+        self.per_page as i64
     }
 
     pub fn offset(&self) -> i64 {
-        ((self.page - 1) * self.page_size) as i64
+        ((self.page.saturating_sub(1)) * self.per_page) as i64
     }
 
-    pub fn sort_direction(&self) -> &str {
-        match self.sort_order {
-            crate::utils::SortOrder::Asc => "ASC",
-            crate::utils::SortOrder::Desc => "DESC",
-        }
+    pub fn sort_direction(&self) -> &'static str {
+        self.sort_order.as_sql()
     }
 
     pub fn get_sort_field(&self) -> &str {
-        self.sort_by.as_deref().unwrap_or("submitted_at")
+        &self.sort_by
+    }
+
+    /// Alias for per_page for backward compatibility
+    pub fn page_size(&self) -> u32 {
+        self.per_page
     }
 }
 
@@ -202,7 +198,7 @@ pub async fn submit_reading(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<SubmitReadingRequest>,
-) -> Result<Json<MeterReadingResponse>, ApiError> {
+) -> Result<Json<MeterReadingResponse>> {
     info!(
         "User {} submitting meter reading: {} kWh",
         user.sub, request.kwh_amount
@@ -627,7 +623,7 @@ pub async fn get_my_readings(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
     Query(mut query): Query<GetReadingsQuery>,
-) -> Result<Json<MeterReadingsResponse>, ApiError> {
+) -> Result<Json<MeterReadingsResponse>> {
     info!("User {} fetching their meter readings", user.sub);
 
     // Validate query parameters
@@ -676,12 +672,16 @@ pub async fn get_my_readings(
         .collect();
 
     // Create pagination metadata
+    let sort_order_util = match query.sort_order {
+        SortOrder::Asc => crate::utils::SortOrder::Asc,
+        SortOrder::Desc => crate::utils::SortOrder::Desc,
+    };
     let pagination = crate::utils::PaginationMeta::new(
         &PaginationParams {
             page: query.page,
-            page_size: query.page_size,
-            sort_by: query.sort_by.clone(),
-            sort_order: query.sort_order,
+            page_size: query.per_page,
+            sort_by: Some(query.sort_by.clone()),
+            sort_order: sort_order_util,
         },
         total,
     );
@@ -711,7 +711,7 @@ pub async fn get_readings_by_wallet(
     AuthenticatedUser(_user): AuthenticatedUser,
     Path(wallet_address): Path<String>,
     Query(mut query): Query<GetReadingsQuery>,
-) -> Result<Json<MeterReadingsResponse>, ApiError> {
+) -> Result<Json<MeterReadingsResponse>> {
     info!("Fetching readings for wallet: {}", wallet_address);
 
     // Validate query parameters
@@ -767,12 +767,16 @@ pub async fn get_readings_by_wallet(
         .collect();
 
     // Create pagination metadata
+    let sort_order_util = match query.sort_order {
+        SortOrder::Asc => crate::utils::SortOrder::Asc,
+        SortOrder::Desc => crate::utils::SortOrder::Desc,
+    };
     let pagination = crate::utils::PaginationMeta::new(
         &PaginationParams {
             page: query.page,
-            page_size: query.page_size,
-            sort_by: query.sort_by.clone(),
-            sort_order: query.sort_order,
+            page_size: query.per_page,
+            sort_by: Some(query.sort_by.clone()),
+            sort_order: sort_order_util,
         },
         total,
     );
@@ -799,7 +803,7 @@ pub async fn get_unminted_readings(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
     Query(mut query): Query<GetReadingsQuery>,
-) -> Result<Json<Vec<MeterReadingResponse>>, ApiError> {
+) -> Result<Json<Vec<MeterReadingResponse>>> {
     // Check admin permission
     require_role(&user, "admin")?;
 
@@ -860,7 +864,7 @@ pub async fn mint_from_reading(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<MintFromReadingRequest>,
-) -> Result<Json<MintResponse>, ApiError> {
+) -> Result<Json<MintResponse>> {
     // Check admin permission
     require_role(&user, "admin")?;
 
@@ -982,7 +986,7 @@ pub async fn mint_from_reading(
 pub async fn get_user_stats(
     State(state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
-) -> Result<Json<UserStatsResponse>, ApiError> {
+) -> Result<Json<UserStatsResponse>> {
     info!("User {} fetching meter statistics", user.sub);
 
     // Get unminted and minted totals

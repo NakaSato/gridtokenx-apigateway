@@ -1,3 +1,22 @@
+//! User Management Handlers
+//!
+//! This module provides API endpoints for user account management including:
+//! - User registration with email verification
+//! - Wallet address management  
+//! - Admin user management (update, activate, deactivate)
+//! - User activity logging and retrieval
+//! - Meter registration for users
+//!
+//! # Authentication
+//! All endpoints except registration require JWT authentication.
+//! Admin endpoints require the "admin" role.
+//!
+//! # Email Verification Flow
+//! 1. User registers via POST /api/auth/register
+//! 2. Verification email sent with token
+//! 3. User clicks link to verify email
+//! 4. User can then set wallet address and register meters
+
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -10,13 +29,18 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::AppState;
-use crate::auth::UserInfo;
 use crate::auth::middleware::AuthenticatedUser;
 use crate::auth::password::PasswordService;
+use crate::auth::UserInfo;
 use crate::error::{ApiError, Result};
+use crate::handlers::authorization::{require_admin, require_admin_or_owner};
+use crate::AppState;
 
-/// user registration request with additional validation
+// ============================================================================
+// Request/Response Types
+// ============================================================================
+
+/// User registration request with validation
 #[derive(Debug, Deserialize, Serialize, Validate, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RegisterRequest {
@@ -432,9 +456,7 @@ pub async fn admin_update_user(
     Json(request): Json<AdminUpdateUserRequest>,
 ) -> Result<Json<UserInfo>> {
     // Check admin permissions
-    if !user.0.has_any_role(&["admin"]) {
-        return Err(ApiError::Authorization("Admin access required".to_string()));
-    }
+    require_admin(&user.0)?;
 
     // Validate request
     request
@@ -569,9 +591,7 @@ pub async fn admin_deactivate_user(
     user: AuthenticatedUser,
 ) -> Result<StatusCode> {
     // Check admin permissions
-    if !user.0.has_any_role(&["admin"]) {
-        return Err(ApiError::Authorization("Admin access required".to_string()));
-    }
+    require_admin(&user.0)?;
 
     // Cannot deactivate self
     if user_id == user.0.sub {
@@ -632,9 +652,7 @@ pub async fn admin_reactivate_user(
     user: AuthenticatedUser,
 ) -> Result<StatusCode> {
     // Check admin permissions
-    if !user.0.has_any_role(&["admin"]) {
-        return Err(ApiError::Authorization("Admin access required".to_string()));
-    }
+    require_admin(&user.0)?;
 
     // Reactivate user
     let result = sqlx::query("UPDATE users SET is_active = true, updated_at = NOW() WHERE id = $1")
@@ -768,11 +786,7 @@ pub async fn get_user_activity(
     user: AuthenticatedUser,
 ) -> Result<Json<ActivityListResponse>> {
     // Check admin permissions or self-access
-    if !user.0.has_any_role(&["admin"]) && user_id != user.0.sub {
-        return Err(ApiError::Authorization(
-            "Admin access required or can only view own activity".to_string(),
-        ));
-    }
+    require_admin_or_owner(&user.0, user_id)?;
 
     let page = params.page.unwrap_or(1).max(1);
     let per_page = params.per_page.unwrap_or(20).min(100).max(1);

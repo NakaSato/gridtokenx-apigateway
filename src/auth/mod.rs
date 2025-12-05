@@ -4,8 +4,14 @@ use chrono::{DateTime, Utc};
 use utoipa::ToSchema;
 
 pub mod jwt;
-pub mod password;
 pub mod middleware;
+pub mod password;
+pub mod roles;
+
+// Re-export Permission from the new roles module
+// Note: Role is defined locally in this file and also in roles module
+// The local Role is used for legacy compatibility, roles::Role for new code
+pub use roles::Permission;
 
 /// User claims for JWT tokens
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

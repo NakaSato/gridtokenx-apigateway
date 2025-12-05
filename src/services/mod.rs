@@ -26,6 +26,7 @@ pub mod priority_fee_service;
 // pub mod redis_timeseries;
 pub mod settlement_service;
 pub mod token_service;
+pub mod traits;
 pub mod transaction_coordinator;
 pub mod transaction_metrics;
 pub mod transaction_service;

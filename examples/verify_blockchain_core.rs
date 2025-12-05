@@ -1,4 +1,5 @@
 use anyhow::Result;
+use api_gateway::config::SolanaProgramsConfig;
 use api_gateway::services::BlockchainService;
 use solana_sdk::{
     pubkey::Pubkey,
@@ -41,9 +42,12 @@ async fn main() -> Result<()> {
 
     // Test 1.2: Initialize blockchain service
     print!("Test 1.2: Initializing blockchain service... ");
-    let blockchain_service =
-        match BlockchainService::new("http://127.0.0.1:8899".to_string(), "localnet".to_string()) {
-            Ok(service) => {
+    let blockchain_service = match BlockchainService::new(
+        "http://127.0.0.1:8899".to_string(),
+        "localnet".to_string(),
+        SolanaProgramsConfig::default(),
+    ) {
+        Ok(service) => {
                 println!("✅");
                 service
             }
@@ -157,7 +161,7 @@ async fn main() -> Result<()> {
 
     // Test 3.1: Registry Program ID
     print!("Test 3.1: Registry Program ID... ");
-    match BlockchainService::registry_program_id() {
+    match blockchain_service.registry_program_id() {
         Ok(program_id) => {
             println!("✅");
             println!("  Program ID: {}", program_id);
@@ -171,7 +175,7 @@ async fn main() -> Result<()> {
 
     // Test 3.2: Oracle Program ID
     print!("Test 3.2: Oracle Program ID... ");
-    match BlockchainService::oracle_program_id() {
+    match blockchain_service.oracle_program_id() {
         Ok(program_id) => {
             println!("✅");
             println!("  Program ID: {}", program_id);
@@ -185,7 +189,7 @@ async fn main() -> Result<()> {
 
     // Test 3.3: Governance Program ID
     print!("Test 3.3: Governance Program ID... ");
-    match BlockchainService::governance_program_id() {
+    match blockchain_service.governance_program_id() {
         Ok(program_id) => {
             println!("✅");
             println!("  Program ID: {}", program_id);
@@ -199,7 +203,7 @@ async fn main() -> Result<()> {
 
     // Test 3.4: Energy Token Program ID
     print!("Test 3.4: Energy Token Program ID... ");
-    match BlockchainService::energy_token_program_id() {
+    match blockchain_service.energy_token_program_id() {
         Ok(program_id) => {
             println!("✅");
             println!("  Program ID: {}", program_id);
@@ -213,7 +217,7 @@ async fn main() -> Result<()> {
 
     // Test 3.5: Trading Program ID
     print!("Test 3.5: Trading Program ID... ");
-    match BlockchainService::trading_program_id() {
+    match blockchain_service.trading_program_id() {
         Ok(program_id) => {
             println!("✅");
             println!("  Program ID: {}", program_id);
@@ -273,7 +277,7 @@ async fn main() -> Result<()> {
 
     // Test 5.1: Governance program ID for ERC
     print!("Test 5.1: Getting governance program for ERC... ");
-    match BlockchainService::governance_program_id() {
+    match blockchain_service.governance_program_id() {
         Ok(governance_program) => {
             println!("✅");
             println!("  Governance Program: {}", governance_program);

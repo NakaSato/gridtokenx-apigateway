@@ -44,6 +44,18 @@ pub struct SolanaProgramsConfig {
     pub trading_program_id: String,
 }
 
+impl Default for SolanaProgramsConfig {
+    fn default() -> Self {
+        Self {
+            registry_program_id: "GTX1111111111111111111111111111111111111111".to_string(),
+            oracle_program_id: "GTX2222222222222222222222222222222222222222".to_string(),
+            governance_program_id: "GTX3333333333333333333333333333333333333333".to_string(),
+            energy_token_program_id: "GTX4444444444444444444444444444444444444444".to_string(),
+            trading_program_id: "GTX5555555555555555555555555555555555555555".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventProcessorConfig {
     pub enabled: bool,
