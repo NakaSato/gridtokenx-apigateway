@@ -41,7 +41,11 @@ impl std::fmt::Debug for BlockchainService {
 
 impl BlockchainService {
     /// Create a new blockchain service with program IDs from config
-    pub fn new(rpc_url: String, cluster: String, program_ids: SolanaProgramsConfig) -> Result<Self> {
+    pub fn new(
+        rpc_url: String,
+        cluster: String,
+        program_ids: SolanaProgramsConfig,
+    ) -> Result<Self> {
         info!("Initializing blockchain service for cluster: {}", cluster);
 
         let rpc_client = Arc::new(RpcClient::new(rpc_url));
@@ -204,32 +208,57 @@ impl BlockchainService {
 
     /// Get Registry program ID from config
     pub fn registry_program_id(&self) -> Result<Pubkey> {
-        Pubkey::from_str(&self.program_ids.registry_program_id)
-            .map_err(|e| anyhow!("Invalid Registry Program ID '{}': {}", self.program_ids.registry_program_id, e))
+        Pubkey::from_str(&self.program_ids.registry_program_id).map_err(|e| {
+            anyhow!(
+                "Invalid Registry Program ID '{}': {}",
+                self.program_ids.registry_program_id,
+                e
+            )
+        })
     }
 
     /// Get Oracle program ID from config
     pub fn oracle_program_id(&self) -> Result<Pubkey> {
-        Pubkey::from_str(&self.program_ids.oracle_program_id)
-            .map_err(|e| anyhow!("Invalid Oracle Program ID '{}': {}", self.program_ids.oracle_program_id, e))
+        Pubkey::from_str(&self.program_ids.oracle_program_id).map_err(|e| {
+            anyhow!(
+                "Invalid Oracle Program ID '{}': {}",
+                self.program_ids.oracle_program_id,
+                e
+            )
+        })
     }
 
     /// Get Governance program ID from config
     pub fn governance_program_id(&self) -> Result<Pubkey> {
-        Pubkey::from_str(&self.program_ids.governance_program_id)
-            .map_err(|e| anyhow!("Invalid Governance Program ID '{}': {}", self.program_ids.governance_program_id, e))
+        Pubkey::from_str(&self.program_ids.governance_program_id).map_err(|e| {
+            anyhow!(
+                "Invalid Governance Program ID '{}': {}",
+                self.program_ids.governance_program_id,
+                e
+            )
+        })
     }
 
     /// Get Energy Token program ID from config
     pub fn energy_token_program_id(&self) -> Result<Pubkey> {
-        Pubkey::from_str(&self.program_ids.energy_token_program_id)
-            .map_err(|e| anyhow!("Invalid Energy Token Program ID '{}': {}", self.program_ids.energy_token_program_id, e))
+        Pubkey::from_str(&self.program_ids.energy_token_program_id).map_err(|e| {
+            anyhow!(
+                "Invalid Energy Token Program ID '{}': {}",
+                self.program_ids.energy_token_program_id,
+                e
+            )
+        })
     }
 
     /// Get Trading program ID from config
     pub fn trading_program_id(&self) -> Result<Pubkey> {
-        Pubkey::from_str(&self.program_ids.trading_program_id)
-            .map_err(|e| anyhow!("Invalid Trading Program ID '{}': {}", self.program_ids.trading_program_id, e))
+        Pubkey::from_str(&self.program_ids.trading_program_id).map_err(|e| {
+            anyhow!(
+                "Invalid Trading Program ID '{}': {}",
+                self.program_ids.trading_program_id,
+                e
+            )
+        })
     }
 
     // ====================================================================
@@ -780,7 +809,8 @@ mod tests {
             "http://localhost:8899".to_string(),
             "localnet".to_string(),
             test_config(),
-        ).unwrap();
+        )
+        .unwrap();
         assert!(service.registry_program_id().is_ok());
         assert!(service.oracle_program_id().is_ok());
         assert!(service.governance_program_id().is_ok());

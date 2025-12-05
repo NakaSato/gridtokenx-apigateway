@@ -51,3 +51,4 @@ temp/
 
 test-ledger/
 **/*.sqlx
+*.pid
