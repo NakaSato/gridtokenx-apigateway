@@ -1,0 +1,41 @@
+Note: Unnecessary use of -X or --request, POST is already inferred.
+* Host localhost:8080 was resolved.
+* IPv6: ::1
+* IPv4: 127.0.0.1
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying [::1]:8080...
+* connect to ::1 port 8080 from ::1 port 60460 failed: Connection refused
+*   Trying 127.0.0.1:8080...
+* Connected to localhost (127.0.0.1) port 8080
+> POST /api/admin/tokens/mint HTTP/1.1
+> Host: localhost:8080
+> User-Agent: curl/8.7.1
+> Accept: */*
+> X-API-Key: engineering-department-api-key-2025
+> X-Impersonate-User: 09c53626-3854-4698-8010-aa857575fe13
+> Content-Type: application/json
+> Content-Length: 101
+> 
+} [101 bytes data]
+* upload completely sent off: 101 bytes
+< HTTP/1.1 500 Internal Server Error
+< content-type: application/json
+< vary: origin, access-control-request-method, access-control-request-headers
+< access-control-allow-origin: *
+< access-control-expose-headers: *
+< x-request-id: c7f8ee9f-5644-4e0f-a94a-7d7f334e795c
+< x-content-type-options: nosniff
+< x-frame-options: DENY
+< x-xss-protection: 1; mode=block
+< content-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+< referrer-policy: strict-origin-when-cross-origin
+< permissions-policy: geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()
+< x-api-version: 1.0
+< content-length: 208
+< date: Sat, 06 Dec 2025 18:36:52 GMT
+< 
+{ [208 bytes data]
+100   309  100   208  100   101  13419   6516 --:--:-- --:--:-- --:--:-- 20600
+* Connection #0 to host localhost left intact
+{"error":{"code":"INT_9999","code_number":9999,"message":"An internal server error occurred","details":null},"request_id":"079f562e-3a13-44b5-88b1-2786e10cb643","timestamp":"2025-12-06T18:36:52.452317+00:00"}

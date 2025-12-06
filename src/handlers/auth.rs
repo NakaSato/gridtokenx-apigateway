@@ -248,12 +248,13 @@ pub async fn login(
         let keypair = crate::services::WalletService::create_keypair();
         let pubkey = keypair.pubkey().to_string();
 
-        // Encrypt private key with password
-        // Note: In a real app, we should probably use a key derived from the password + a global pepper
-        // But for this requirement "simple protect by password", derived from password is correct.
+        // Encrypt private key with master secret (consistent with trading handlers)
+        // This allows the system to decrypt keys for blockchain operations without user password
+        let master_secret =
+            std::env::var("WALLET_MASTER_SECRET").unwrap_or_else(|_| "dev-secret-key".to_string());
         let (encrypted_key_b64, salt_b64, iv_b64) =
             crate::services::WalletService::encrypt_private_key(
-                &request.password,
+                &master_secret,
                 &keypair.to_bytes(),
             )
             .map_err(|e| ApiError::Internal(format!("Failed to secure wallet: {}", e)))?;

@@ -33,6 +33,7 @@ pub mod transaction_metrics;
 pub mod transaction_service;
 pub mod validation;
 pub mod wallet_audit_logger;
+pub mod wallet_initialization_service;
 pub mod wallet_service;
 pub mod webhook_service;
 pub mod websocket_service;
@@ -60,6 +61,10 @@ pub use token_service::TokenService;
 pub use transaction_coordinator::TransactionCoordinator;
 pub use transaction_service::TransactionService;
 pub use wallet_audit_logger::WalletAuditLogger;
+pub use wallet_initialization_service::{
+    WalletDiagnosis, WalletFixResult, WalletInitializationReport, WalletInitializationService,
+    WalletStatus,
+};
 pub use wallet_service::WalletService;
 pub use webhook_service::WebhookService;
 pub use websocket_service::WebSocketService;

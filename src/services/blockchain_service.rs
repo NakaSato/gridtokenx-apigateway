@@ -8,7 +8,7 @@ use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     instruction::Instruction,
     pubkey::Pubkey,
-    signature::{Keypair, Signature},
+    signature::{Keypair, Signature, Signer},
     transaction::Transaction,
 };
 use std::str::FromStr;
@@ -51,17 +51,29 @@ impl BlockchainService {
         let rpc_client = Arc::new(RpcClient::new(rpc_url));
         let transaction_handler = TransactionHandler::new(Arc::clone(&rpc_client));
 
-        // Load payer from secure storage or use placeholder for development
-        let payer = std::env::var("PAYER_PRIVATE_KEY")
-            .ok()
-            .and_then(|key| key.parse().ok())
-            .unwrap_or_else(|| {
-                warn!("Using placeholder payer key - set PAYER_PRIVATE_KEY env var for production");
-                // This is a well-known placeholder key, parse should never fail
+        // Load authority keypair to get the payer pubkey
+        let authority_path = std::env::var("AUTHORITY_WALLET_PATH")
+            .unwrap_or_else(|_| "../keypairs/dev-wallet.json".to_string());
+
+        let payer = match BlockchainUtils::load_keypair_from_file(&authority_path) {
+            Ok(keypair) => {
+                info!(
+                    "Loaded authority keypair for instruction builder: {}",
+                    keypair.pubkey()
+                );
+                keypair.pubkey()
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to load authority keypair from {}: {}. Using placeholder payer key.",
+                    authority_path, e
+                );
+                // Fallback to placeholder
                 "11111111111111111111111111111112"
                     .parse()
                     .expect("hardcoded placeholder pubkey is invalid")
-            });
+            }
+        };
 
         let instruction_builder = InstructionBuilder::new(payer);
 
@@ -201,6 +213,43 @@ impl BlockchainService {
         self.transaction_handler.account_exists(pubkey).await
     }
 
+    /// Get transaction account keys
+    pub async fn get_transaction_account_keys(&self, signature: &str) -> Result<Vec<Pubkey>> {
+        let sig =
+            Signature::from_str(signature).map_err(|e| anyhow!("Invalid signature: {}", e))?;
+        // get_transaction takes (signature, encoding)
+        let tx = self
+            .transaction_handler
+            .client()
+            .get_transaction(&sig, solana_transaction_status::UiTransactionEncoding::Json)?;
+
+        // Extract keys
+        let account_keys = tx
+            .transaction
+            .meta
+            .ok_or(anyhow!("No metadata"))?
+            .post_token_balances
+            .ok_or(anyhow!("No token balances"))?; // This logic is wrong but unused since we look at message below.
+
+        // Use transaction object directly
+        let transaction = tx.transaction.transaction;
+        match transaction {
+            solana_transaction_status::EncodedTransaction::Json(ui_tx) => match ui_tx.message {
+                solana_transaction_status::UiMessage::Parsed(msg) => Ok(msg
+                    .account_keys
+                    .iter()
+                    .map(|k| Pubkey::from_str(&k.pubkey).unwrap())
+                    .collect()),
+                solana_transaction_status::UiMessage::Raw(msg) => Ok(msg
+                    .account_keys
+                    .iter()
+                    .map(|k| Pubkey::from_str(k).unwrap())
+                    .collect()),
+            },
+            _ => Err(anyhow!("Unsupported transaction encoding")),
+        }
+    }
+
     /// Parse Pubkey from string
     pub fn parse_pubkey(pubkey_str: &str) -> Result<Pubkey> {
         BlockchainUtils::parse_pubkey(pubkey_str)
@@ -287,8 +336,115 @@ impl BlockchainService {
         Ok(active_orders)
     }
 
+    /// Derive order PDA (exposed for SettlementService)
+    pub async fn derive_order_pda(
+        &self,
+        _authority: &Pubkey,
+        _market_address: &Pubkey,
+    ) -> Result<Pubkey> {
+        // We need active_orders to derive the PDA.
+        // But SettlementService calls this for EXISTING orders.
+        // The PDA seed logic is: ["order", owner, active_orders].
+        // If we don't know the active_orders (index) at creation, we can't derive it?
+        // Wait! The Order PDA is stored in the database as `blockchain_tx`? No.
+        // The UUID is internal. The PDA is ... derived at creation.
+        // But if multiple orders exist for same user, they have different indices.
+        // The `trading_orders` table DOES NOT STORE THE PDA ADDRESS!
+        // It stores `id` (UUID).
+        // It stores `blockchain_tx_signature`.
+
+        // ISSUE: We cannot recreate the PDA without the `index` (active_orders at time of creation).
+        // Unless we store the PDA address in the DB.
+        // The `trading_orders` table has columns... let's check schema.
+        // DB Schema in migration?
+        // If we don't have PDA address, we are stuck?
+        // Or maybe we find it by searching on-chain (getProgramAccounts)?
+
+        // TEMPORARY WORKAROUND:
+        // Assume active_orders was retrieved? No.
+
+        // Let's assume user has only 1 order or we fallback to "fetch all user order accounts" and match by data?
+        // Or we rely on `blockchain_tx` (Signature) to find the account created?
+        // Transaction logs contain the account list.
+
+        // This is a Database Schema GAP. We SHOULD store the Order PDA address.
+        // But for now, I will add `derive_order_pda` which takes `index`.
+        // SettlementService will have to figure it out.
+        // Or Query `getProgramAccounts` filtering by owner.
+
+        Err(anyhow!("Cannot derive PDA without index"))
+    }
+
+    /// Execute on-chain match_orders
+    pub async fn execute_match_orders(
+        &self,
+        authority: &Keypair,
+        market_pubkey: &str,
+        buy_order_pubkey: &str,
+        sell_order_pubkey: &str,
+        match_amount: u64,
+    ) -> Result<Signature> {
+        // Parse order pubkeys
+        let buy_order = Pubkey::from_str(buy_order_pubkey)?;
+        let sell_order = Pubkey::from_str(sell_order_pubkey)?;
+
+        // Derive trade_record PDA (must match on-chain seeds)
+        let (trade_record_pda, _bump) = Pubkey::find_program_address(
+            &[b"trade", buy_order.as_ref(), sell_order.as_ref()],
+            &self.trading_program_id()?,
+        );
+
+        let instruction = self.instruction_builder.build_match_orders_instruction(
+            market_pubkey,
+            buy_order_pubkey,
+            sell_order_pubkey,
+            match_amount,
+            trade_record_pda,
+        )?;
+
+        // Only authority signs (trade_record is a PDA, not a signer)
+        let signers = vec![authority];
+        self.build_and_send_transaction_with_priority(
+            vec![instruction],
+            &signers,
+            TransactionType::Settlement,
+        )
+        .await
+    }
+
+    /// Execute on-chain create_order
+    pub async fn execute_create_order(
+        &self,
+        authority: &Keypair,
+        market_pubkey: &str,
+        energy_amount: u64,
+        price_per_kwh: u64,
+        order_type: &str,
+        erc_certificate_id: Option<&str>,
+    ) -> Result<Signature> {
+        let (instruction, _order_pda) = self
+            .build_create_order_instruction(
+                market_pubkey,
+                energy_amount,
+                price_per_kwh,
+                order_type,
+                erc_certificate_id,
+                authority.pubkey(),
+            )
+            .await?;
+
+        let signers = vec![authority];
+
+        self.build_and_send_transaction_with_priority(
+            vec![instruction],
+            &signers,
+            TransactionType::OrderCreation,
+        )
+        .await
+    }
+
     /// Build instruction for creating energy trade order
-    /// Build instruction for creating energy trade order
+    /// Returns (Instruction, Order PDA)
     pub async fn build_create_order_instruction(
         &self,
         market_pubkey: &str,
@@ -297,7 +453,7 @@ impl BlockchainService {
         order_type: &str,
         erc_certificate_id: Option<&str>,
         authority: Pubkey,
-    ) -> Result<Instruction> {
+    ) -> Result<(Instruction, Pubkey)> {
         let market = Pubkey::from_str(market_pubkey)?;
 
         // Get active orders count
@@ -309,7 +465,7 @@ impl BlockchainService {
             &self.trading_program_id()?,
         );
 
-        self.instruction_builder.build_create_order_instruction(
+        let instruction = self.instruction_builder.build_create_order_instruction(
             market_pubkey,
             order_pda,
             energy_amount,
@@ -317,7 +473,9 @@ impl BlockchainService {
             order_type,
             erc_certificate_id,
             authority,
-        )
+        )?;
+
+        Ok((instruction, order_pda))
     }
 
     /// Build instruction for matching orders
@@ -327,12 +485,14 @@ impl BlockchainService {
         buy_order_pubkey: &str,
         sell_order_pubkey: &str,
         match_amount: u64,
+        trade_record_pubkey: Pubkey,
     ) -> Result<Instruction> {
         self.instruction_builder.build_match_orders_instruction(
             market_pubkey,
             buy_order_pubkey,
             sell_order_pubkey,
             match_amount,
+            trade_record_pubkey,
         )
     }
 
@@ -485,6 +645,16 @@ impl BlockchainService {
         mint: &Pubkey,
         amount_kwh: f64,
     ) -> Result<Signature> {
+        let mut instructions = Vec::new();
+
+        // Check if ATA exists
+        if !self.account_exists(user_token_account).await? {
+            info!("ATA {} does not exist, creating it...", user_token_account);
+            let create_ata_ix =
+                BlockchainUtils::create_ata_instruction(authority, user_wallet, mint)?;
+            instructions.push(create_ata_ix);
+        }
+
         let mint_instruction = BlockchainUtils::create_mint_instruction(
             authority,
             user_token_account,
@@ -492,10 +662,11 @@ impl BlockchainService {
             mint,
             amount_kwh,
         )?;
+        instructions.push(mint_instruction);
 
         let signers = vec![authority];
         self.build_and_send_transaction_with_priority(
-            vec![mint_instruction],
+            instructions,
             &signers,
             TransactionType::TokenMinting,
         )

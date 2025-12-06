@@ -108,6 +108,7 @@ impl InstructionBuilder {
         buy_order_pubkey: &str,
         sell_order_pubkey: &str,
         match_amount: u64,
+        trade_record_pubkey: Pubkey,
     ) -> Result<Instruction> {
         // Parse pubkeys
         let program_id = Pubkey::from_str(TRADING_PROGRAM_ID)?;
@@ -115,17 +116,13 @@ impl InstructionBuilder {
         let buy_order = Pubkey::from_str(buy_order_pubkey)?;
         let sell_order = Pubkey::from_str(sell_order_pubkey)?;
 
-        // Generate new trade record account
-        let trade_record_keypair = Keypair::new();
-        let trade_record_pubkey = trade_record_keypair.pubkey();
-
         // Build accounts array
         let accounts = vec![
             AccountMeta::new(market, false),
             AccountMeta::new(buy_order, false),
             AccountMeta::new(sell_order, false),
-            AccountMeta::new(trade_record_pubkey, false),
-            AccountMeta::new_readonly(self.payer, true),
+            AccountMeta::new(trade_record_pubkey, false), // PDA doesn't sign, Anchor verifies seeds
+            AccountMeta::new(self.payer, true), // Changed to mut - payer pays for trade_record init
             AccountMeta::new_readonly(Pubkey::from_str(SYSTEM_PROGRAM_ID)?, false),
         ];
 

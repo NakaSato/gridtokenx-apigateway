@@ -192,6 +192,18 @@ fn admin_routes() -> Router<AppState> {
             "/event-processor/replay",
             post(admin::trigger_event_replay).get(admin::get_replay_status),
         )
+        // Wallet management routes
+        .route("/wallets/diagnose", get(admin::diagnose_all_wallets))
+        .route(
+            "/wallets/diagnose/{user_id}",
+            get(admin::diagnose_user_wallet),
+        )
+        .route("/wallets/fix", post(admin::fix_user_wallet))
+        .route("/wallets/fix-all", post(admin::fix_all_wallets))
+        .route(
+            "/wallets/fix-test-users",
+            post(admin::fix_test_users_wallets),
+        )
         // Audit log routes
         .route("/audit/user/{user_id}", get(audit::get_user_audit_logs))
         .route(

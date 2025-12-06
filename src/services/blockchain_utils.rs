@@ -109,13 +109,18 @@ impl BlockchainUtils {
     ) -> Result<Instruction> {
         info!("Creating ATA instruction for user: {}", user_wallet);
 
-        // Use create_associated_token_account_idempotent to be safer and potentially avoid
-        // issues with the standard creation instruction on some validator versions
+        let token_program_id = Self::get_token_program_id()?;
+
+        // Use get_associated_token_address_with_program_id to correctly derive ATA for Token-2022
+        let derived_ata =
+            spl_associated_token_account::get_associated_token_address_with_program_id(
+                user_wallet,
+                mint,
+                &token_program_id,
+            );
+
         // Manual instruction construction to force legacy Create (opcode 0/empty) behavior
         // accounts: [payer, ata, owner, mint, system_program, token_program]
-        let derived_ata =
-            spl_associated_token_account::get_associated_token_address(user_wallet, mint);
-
         let account_metas = vec![
             solana_sdk::instruction::AccountMeta::new(authority.pubkey(), true),
             solana_sdk::instruction::AccountMeta::new(derived_ata, false),
@@ -125,10 +130,7 @@ impl BlockchainUtils {
                 Pubkey::from_str("11111111111111111111111111111111").unwrap(),
                 false,
             ),
-            solana_sdk::instruction::AccountMeta::new_readonly(
-                Self::get_token_program_id()?,
-                false,
-            ),
+            solana_sdk::instruction::AccountMeta::new_readonly(token_program_id, false),
         ];
 
         let instruction = Instruction {
@@ -136,12 +138,6 @@ impl BlockchainUtils {
             accounts: account_metas,
             data: vec![0], // Opcode 0 = Create
         };
-
-        println!(
-            "DEBUG: Created manual ATA instruction with Program ID: {}",
-            instruction.program_id
-        );
-        println!("DEBUG: Instruction Data: {:?}", instruction.data);
 
         Ok(instruction)
     }

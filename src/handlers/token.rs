@@ -8,9 +8,9 @@ use std::str::FromStr;
 use tracing::{error, info};
 use utoipa::ToSchema;
 
-use crate::AppState;
 use crate::auth::middleware::AuthenticatedUser;
 use crate::error::{ApiError, Result};
+use crate::AppState;
 
 /// Token balance response
 #[derive(Debug, Serialize, ToSchema)]
@@ -203,11 +203,14 @@ pub async fn get_token_info(
     info!("Fetching token info from blockchain");
 
     // Get the Energy Token program ID
-    let energy_token_program_id = state.blockchain_service.energy_token_program_id()
-        .map_err(|e| {
-            error!("Failed to parse energy token program ID: {}", e);
-            ApiError::Internal(format!("Invalid program ID: {}", e))
-        })?;
+    let energy_token_program_id =
+        state
+            .blockchain_service
+            .energy_token_program_id()
+            .map_err(|e| {
+                error!("Failed to parse energy token program ID: {}", e);
+                ApiError::Internal(format!("Invalid program ID: {}", e))
+            })?;
 
     // Derive the token info PDA
     // Token info PDA seeds: ["token_info"]
@@ -384,9 +387,87 @@ pub async fn mint_tokens(
         ));
     }
 
+    // Get authority keypair for minting
+    let authority_keypair = state
+        .wallet_service
+        .get_authority_keypair()
+        .await
+        .map_err(|e| {
+            error!("Failed to get authority keypair: {}", e);
+            ApiError::Internal("Authority wallet not configured".to_string())
+        })?;
+
+    // Get token mint address from environment
+    let token_mint_str = std::env::var("ENERGY_TOKEN_MINT").map_err(|_| {
+        error!("ENERGY_TOKEN_MINT environment variable not set");
+        ApiError::Internal("Token mint address not configured".to_string())
+    })?;
+
+    let token_mint = Pubkey::from_str(&token_mint_str).map_err(|e| {
+        error!("Invalid GRID_TOKEN_MINT address: {}", e);
+        ApiError::Internal("Invalid token mint configuration".to_string())
+    })?;
+
+    // Parse wallet address
+    let wallet_pubkey = Pubkey::from_str(&payload.wallet_address).map_err(|e| {
+        error!("Invalid wallet address: {}", e);
+        ApiError::BadRequest(format!("Invalid wallet address: {}", e))
+    })?;
+
+    // Derive user's associated token account
+    let user_token_account = {
+        let token_program_id =
+            crate::services::blockchain_utils::BlockchainUtils::get_token_program_id().map_err(
+                |e| ApiError::Internal(format!("Failed to get token program ID: {}", e)),
+            )?;
+
+        // Convert types for spl_associated_token_account
+        let wallet_bytes = wallet_pubkey.to_bytes();
+        let mint_bytes = token_mint.to_bytes();
+        let prog_bytes = token_program_id.to_bytes();
+
+        let wallet_spl = spl_token::solana_program::pubkey::Pubkey::new_from_array(wallet_bytes);
+        let mint_spl = spl_token::solana_program::pubkey::Pubkey::new_from_array(mint_bytes);
+        let prog_spl = spl_token::solana_program::pubkey::Pubkey::new_from_array(prog_bytes);
+
+        let ata_spl = spl_associated_token_account::get_associated_token_address_with_program_id(
+            &wallet_spl,
+            &mint_spl,
+            &prog_spl,
+        );
+
+        // Convert back to solana_sdk pubkey
+        Pubkey::new_from_array(ata_spl.to_bytes())
+    };
+
     info!(
-        "Mint tokens initiated: {} tokens to {}",
-        payload.amount, payload.wallet_address
+        "Minting {} tokens to {} (ATA: {})",
+        payload.amount, payload.wallet_address, user_token_account
+    );
+
+    // Call blockchain service to mint tokens
+    // Treat payload.amount as kWh (tokens)
+    let amount_kwh = payload.amount as f64;
+
+    let tx_signature = state
+        .blockchain_service
+        .mint_energy_tokens(
+            &authority_keypair,
+            &user_token_account,
+            &wallet_pubkey,
+            &token_mint,
+            amount_kwh,
+        )
+        .await
+        .map_err(|e| {
+            error!("Blockchain minting failed: {}", e);
+            ApiError::Internal(format!("Failed to mint tokens on blockchain: {}", e))
+        })?;
+
+    let tx_signature_str = tx_signature.to_string();
+    info!(
+        "Tokens minted successfully. Transaction: {}",
+        tx_signature_str
     );
 
     Ok(Json(MintTokensResponse {
@@ -397,7 +478,7 @@ pub async fn mint_tokens(
         ),
         wallet_address: payload.wallet_address,
         amount: payload.amount,
-        transaction_signature: None,
+        transaction_signature: Some(tx_signature_str),
     }))
 }
 

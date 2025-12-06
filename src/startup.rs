@@ -51,7 +51,12 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
     info!("Blockchain service initialized");
 
     // Initialize wallet service
-    let wallet_service = services::WalletService::new(&config.solana_rpc_url);
+    let wallet_service = if let Ok(path) = std::env::var("AUTHORITY_WALLET_PATH") {
+        info!("Initializing wallet service with authority path: {}", path);
+        services::WalletService::with_path(&config.solana_rpc_url, path)
+    } else {
+        services::WalletService::new(&config.solana_rpc_url)
+    };
     initialize_wallet(&wallet_service).await;
 
     // Initialize meter service
