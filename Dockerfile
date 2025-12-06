@@ -19,7 +19,16 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     libpq-dev \
     curl \
+    bzip2 \
+    ca-certificates \
+    libudev-dev \
     && rm -rf /var/lib/apt/lists/*
+
+
+
+# Install spl-token CLI via Cargo (network safe fallback)
+RUN cargo install spl-token-cli
+
 
 # Enable offline mode for sqlx
 ENV SQLX_OFFLINE=true
@@ -50,6 +59,9 @@ WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /app/target/release/api-gateway /usr/local/bin/api-gateway
+# Copy spl-token binary
+COPY --from=builder /usr/local/cargo/bin/spl-token /usr/local/bin/
+
 
 # Create non-root user
 RUN useradd -m -u 1000 apigateway && \

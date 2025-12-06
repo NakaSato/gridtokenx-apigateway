@@ -288,6 +288,7 @@ impl BlockchainService {
     }
 
     /// Build instruction for creating energy trade order
+    /// Build instruction for creating energy trade order
     pub async fn build_create_order_instruction(
         &self,
         market_pubkey: &str,
@@ -295,6 +296,7 @@ impl BlockchainService {
         price_per_kwh: u64,
         order_type: &str,
         erc_certificate_id: Option<&str>,
+        authority: Pubkey,
     ) -> Result<Instruction> {
         let market = Pubkey::from_str(market_pubkey)?;
 
@@ -302,8 +304,6 @@ impl BlockchainService {
         let active_orders = self.get_market_active_orders(&market).await?;
 
         // Derive order PDA
-        let authority = self.instruction_builder.payer();
-
         let (order_pda, _) = Pubkey::find_program_address(
             &[b"order", authority.as_ref(), &active_orders.to_le_bytes()],
             &self.trading_program_id()?,
@@ -316,6 +316,7 @@ impl BlockchainService {
             price_per_kwh,
             order_type,
             erc_certificate_id,
+            authority,
         )
     }
 

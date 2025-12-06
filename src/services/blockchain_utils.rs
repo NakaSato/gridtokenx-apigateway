@@ -76,17 +76,13 @@ impl BlockchainUtils {
         // Convert kWh to token amount (with 9 decimals)
         let amount_lamports = (amount_kwh * 1_000_000_000.0) as u64;
 
-        info!("Mint: {}", mint);
-        info!("Amount (lamports): {}", amount_lamports);
-
-        // Manually build Token-2022 MintTo instruction
-        // We need to build it manually because spl_token::instruction::mint_to
-        // doesn't properly set the program_id in account metadata for Token-2022
+        // Manually build MintTo instruction to bypass spl_token library validation
+        // The spl_token library's check_spl_token_program_account() rejects our Token-2022 program ID
         let token_program_id = Self::get_token_program_id()?;
 
-        // MintTo instruction data: discriminator(1) + amount(8)
+        // MintTo instruction discriminator is 7
         let mut instruction_data = Vec::with_capacity(9);
-        instruction_data.push(7); // MintTo instruction discriminator
+        instruction_data.push(7); // MintTo discriminator
         instruction_data.extend_from_slice(&amount_lamports.to_le_bytes());
 
         use solana_sdk::instruction::{AccountMeta, Instruction};
@@ -95,7 +91,7 @@ impl BlockchainUtils {
             program_id: token_program_id,
             accounts: vec![
                 AccountMeta::new(*mint, false),                      // Mint account
-                AccountMeta::new(*user_token_account, false),        // Destination account
+                AccountMeta::new(*user_token_account, false),        // Destination token account
                 AccountMeta::new_readonly(authority.pubkey(), true), // Mint authority (signer)
             ],
             data: instruction_data,

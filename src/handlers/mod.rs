@@ -15,6 +15,7 @@ pub mod governance;
 pub mod health;
 pub mod market_data;
 // pub mod meter_registration;  // Using user_management handlers instead
+pub mod key_rotation;
 pub mod meter_verification;
 pub mod meters;
 pub mod metrics;
@@ -32,8 +33,8 @@ pub mod websocket;
 
 // Re-export commonly used types
 pub use authorization::{
-    can_access_user_data, can_submit_meter_readings, can_trade, can_view_analytics,
-    require_admin, require_admin_or_owner, require_any_role, require_role, roles,
+    can_access_user_data, can_submit_meter_readings, can_trade, can_view_analytics, require_admin,
+    require_admin_or_owner, require_any_role, require_role, roles,
 };
 pub use extractors::{DateRangeParams, PaginationParams, SearchParams, SortOrder, ValidatedUuid};
 pub use queries::{

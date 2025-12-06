@@ -215,9 +215,14 @@ impl MeterService {
             record.map(|r| r.id)
         };
 
-        if existing.is_some() {
+        if let Some(existing_id) = existing {
+            warn!(
+                "Duplicate reading check failed. Existing reading ID: {}",
+                existing_id
+            );
             return Err(anyhow!(
-                "Duplicate reading detected within 15-minute window"
+                "Duplicate reading detected within 15-minute window (matches reading {})",
+                existing_id
             ));
         }
 

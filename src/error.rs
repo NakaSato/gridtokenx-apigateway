@@ -1,8 +1,8 @@
 use axum::{
-    Json,
     extract::rejection::JsonRejection,
     http::StatusCode,
     response::{IntoResponse, Response},
+    Json,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -346,6 +346,9 @@ pub enum ApiError {
     #[error("Internal server error: {0}")]
     Internal(String),
 
+    #[error("Rate limit exceeded: {0}")]
+    RateLimitExceeded(String),
+
     // Enhanced error types with codes
     #[error("{1}")]
     WithCode(ErrorCode, String),
@@ -457,6 +460,7 @@ impl ApiError {
             ApiError::ExternalService(_) => ErrorCode::ExternalServiceError,
             ApiError::Configuration(_) => ErrorCode::ConfigurationError,
             ApiError::Internal(_) => ErrorCode::InternalServerError,
+            ApiError::RateLimitExceeded(_) => ErrorCode::RateLimitExceeded,
             ApiError::WithCode(code, _) => *code,
             ApiError::WithCodeAndDetails(code, _, _) => *code,
             ApiError::ValidationWithField { code, .. } => *code,
@@ -514,6 +518,9 @@ impl ApiError {
             | ApiError::WithCode(ErrorCode::BlockchainConnectionFailed, _)
             | ApiError::WithCode(ErrorCode::ExternalServiceUnavailable, _)
             | ApiError::WithCode(ErrorCode::ServiceUnavailable, _) => StatusCode::BAD_GATEWAY,
+
+            ApiError::RateLimitExceeded(_)
+            | ApiError::WithCode(ErrorCode::RateLimitExceeded, _) => StatusCode::TOO_MANY_REQUESTS,
 
             ApiError::Database(_)
             | ApiError::Redis(_)
@@ -597,6 +604,7 @@ impl ApiError {
             ApiError::NotFound(_) => "not_found",
             ApiError::Conflict(_) => "conflict",
             ApiError::Internal(_) => "internal_error",
+            ApiError::RateLimitExceeded(_) => "rate_limit_exceeded",
             ApiError::WithCode(code, _) => match code {
                 ErrorCode::InvalidCredentials => "authentication_error",
                 ErrorCode::InsufficientPermissions => "authorization_error",

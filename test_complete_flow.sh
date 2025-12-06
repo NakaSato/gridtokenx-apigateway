@@ -215,8 +215,18 @@ step_1_add_smart_meter() {
         fi
     fi
     
-    # Generate a simulated public key for meter signing
-    METER_PUBLIC_KEY="MeterPubKey$(openssl rand -hex 20 | cut -c1-32)"
+    # Generate REAL public key using solana-keygen or fallback
+    if command -v solana-keygen &> /dev/null; then
+        # Generate temporary keypair
+        solana-keygen new --no-bip39-passphrase --outfile /tmp/temp-meter-key-flow.json > /dev/null 2>&1
+        METER_PUBLIC_KEY=$(solana-keygen pubkey /tmp/temp-meter-key-flow.json)
+        rm /tmp/temp-meter-key-flow.json
+        print_info "Generated real Solana Key: $METER_PUBLIC_KEY"
+    else
+        # Fallback to a valid hardcoded pubkey
+        METER_PUBLIC_KEY="GHoWp5RcujaeqimAAf9RwyRQCCF23mXxVYX9iGwBYGrH" 
+        print_info "solana-keygen not found. Using valid fallback PubKey: $METER_PUBLIC_KEY"
+    fi
     print_data "Public Key" "${METER_PUBLIC_KEY:0:20}..."
     
     echo ""

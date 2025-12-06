@@ -41,6 +41,7 @@ impl InstructionBuilder {
         price_per_kwh: u64,
         order_type: &str,
         erc_certificate_id: Option<&str>,
+        payer: Pubkey,
     ) -> Result<Instruction> {
         // Parse program and market pubkeys
         let program_id = Pubkey::from_str(TRADING_PROGRAM_ID)?;
@@ -54,26 +55,39 @@ impl InstructionBuilder {
         };
 
         // Build accounts array
-        let mut accounts = vec![
-            AccountMeta::new(market, false),
-            AccountMeta::new(order_pda, false),
-            AccountMeta::new_readonly(self.payer, true),
-            AccountMeta::new_readonly(Pubkey::from_str(SYSTEM_PROGRAM_ID)?, false),
-        ];
+        let system_program = Pubkey::from_str(SYSTEM_PROGRAM_ID)?;
 
-        // Add ERC certificate if provided
-        if let Some(erc) = erc_certificate {
-            accounts.push(AccountMeta::new_readonly(erc, false));
-        }
+        let accounts = if order_type == "sell" {
+            // Sell orders have an optional ERC certificate account at index 2
+            let erc_key = erc_certificate.unwrap_or(program_id);
+            vec![
+                AccountMeta::new(market, false),
+                AccountMeta::new(order_pda, false),
+                AccountMeta::new_readonly(erc_key, false),
+                AccountMeta::new_readonly(payer, true),
+                AccountMeta::new_readonly(system_program, false),
+            ]
+        } else {
+            // Buy orders do NOT have the ERC certificate account
+            // IDL: market, order, authority, systemProgram
+            vec![
+                AccountMeta::new(market, false),
+                AccountMeta::new(order_pda, false),
+                AccountMeta::new_readonly(payer, true),
+                AccountMeta::new_readonly(system_program, false),
+            ]
+        };
 
         // Build instruction data
         let mut data = Vec::new();
 
         // Add instruction discriminator based on order type
         if order_type == "sell" {
-            data.extend_from_slice(&[1, 0, 0, 0]); // CreateSellOrder discriminator
+            // createSellOrder discriminator: [53, 52, 255, 44, 191, 74, 171, 225]
+            data.extend_from_slice(&[53, 52, 255, 44, 191, 74, 171, 225]);
         } else {
-            data.extend_from_slice(&[2, 0, 0, 0]); // CreateBuyOrder discriminator
+            // createBuyOrder discriminator: [182, 87, 0, 160, 192, 66, 151, 130]
+            data.extend_from_slice(&[182, 87, 0, 160, 192, 66, 151, 130]);
         }
 
         // Add parameters
@@ -117,7 +131,8 @@ impl InstructionBuilder {
 
         // Build instruction data
         let mut data = Vec::new();
-        data.extend_from_slice(&[3, 0, 0, 0]); // MatchOrders discriminator
+        // MatchOrders discriminator: [17, 1, 201, 93, 7, 51, 251, 134]
+        data.extend_from_slice(&[17, 1, 201, 93, 7, 51, 251, 134]);
         data.extend_from_slice(&match_amount.to_le_bytes());
 
         Ok(Instruction {

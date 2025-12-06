@@ -61,6 +61,8 @@ pub struct AppState {
     pub dashboard_service: services::DashboardService,
     /// Automated Market Maker service
     pub amm_service: services::AmmService,
+    /// Wallet audit logger for security monitoring
+    pub wallet_audit_logger: services::WalletAuditLogger,
 }
 
 // Implement FromRef for services that need to be extracted from AppState

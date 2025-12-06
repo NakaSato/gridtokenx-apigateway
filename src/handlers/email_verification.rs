@@ -1,19 +1,18 @@
 use axum::{
-    Json,
     extract::{Query, State},
     http::StatusCode,
+    Json,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use solana_sdk::signature::Signer;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
-    AppState,
     auth::{Claims, SecureAuthResponse, SecureUserInfo},
     error::ApiError,
-    services::{AuditEvent, token_service::TokenService},
+    services::{token_service::TokenService, AuditEvent},
+    AppState,
 };
 
 // ============================================================================
@@ -167,17 +166,10 @@ pub async fn verify_email(
         ));
     }
 
-    // Generate a new Solana wallet for the user
-    let keypair = crate::services::WalletService::create_keypair();
-    let wallet_address = keypair.pubkey().to_string();
+    // Generate a new Solana wallet for the user - MOVED TO FIRST LOGIN
+    // We defer wallet creation to the login step so we can encrypt the private key with the user's password.
 
-    tracing::info!(
-        "Generated new wallet for user {}: {}",
-        user.id,
-        wallet_address
-    );
-
-    // Update user: set email_verified = true, clear token, set verified_at, and assign wallet
+    // Update user: set email_verified = true, clear token, set verified_at
     let verified_at = Utc::now();
     sqlx::query!(
         r#"
@@ -186,12 +178,10 @@ pub async fn verify_email(
             email_verified = true,
             email_verification_token = NULL,
             email_verification_expires_at = NULL,
-            email_verified_at = $1,
-            wallet_address = $2
-        WHERE id = $3
+            email_verified_at = $1
+        WHERE id = $2
         "#,
         verified_at,
-        wallet_address,
         user.id
     )
     .execute(&state.db)
@@ -202,14 +192,6 @@ pub async fn verify_email(
     state
         .audit_logger
         .log_async(AuditEvent::EmailVerified { user_id: user.id });
-
-    // Log wallet creation for audit trail
-    state
-        .audit_logger
-        .log_async(AuditEvent::BlockchainRegistration {
-            user_id: user.id,
-            wallet_address: wallet_address.clone(),
-        });
 
     // Send welcome email if email service is available
     if let Some(ref email_service) = state.email_service {
@@ -236,7 +218,7 @@ pub async fn verify_email(
                 username: username_str,
                 email: user_email.to_string(),
                 role: role_str,
-                blockchain_registered: true, // Wallet was just created
+                blockchain_registered: false, // Wallet will be created on first login
             },
         })
     } else {
@@ -244,10 +226,10 @@ pub async fn verify_email(
     };
 
     Ok(Json(VerifyEmailResponse {
-        message: "Email verified successfully! Your Solana wallet has been created.".to_string(),
+        message: "Email verified successfully! Please login to secure your wallet.".to_string(),
         email_verified: true,
         verified_at: verified_at.to_rfc3339(),
-        wallet_address: wallet_address.clone(),
+        wallet_address: "".to_string(), // Placeholder, will be generated at login
         auth: auth_response,
     }))
 }

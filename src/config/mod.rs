@@ -32,6 +32,7 @@ pub struct Config {
     pub solana_programs: SolanaProgramsConfig,
     /// Default simulator user UUID for engineering/test mode
     pub simulator_user_id: String,
+    pub encryption_secret: String,
 }
 
 /// Solana program IDs configuration - moved from hardcoded values
@@ -202,6 +203,9 @@ impl Config {
             },
             simulator_user_id: env::var("SIMULATOR_USER_ID")
                 .unwrap_or_else(|_| "63c1d015-6765-4843-9ca3-5ba21ee54d7e".to_string()),
+            encryption_secret: env::var("ENCRYPTION_SECRET").map_err(|_| {
+                anyhow::anyhow!("ENCRYPTION_SECRET environment variable is required")
+            })?,
         })
     }
 }

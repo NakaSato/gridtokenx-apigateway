@@ -86,7 +86,8 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
 
     // Initialize order matching engine
     let order_matching_engine = services::OrderMatchingEngine::new(db_pool.clone())
-        .with_websocket(websocket_service.clone());
+        .with_websocket(websocket_service.clone())
+        .with_settlement_service(settlement_service.clone());
     info!("Order matching engine initialized");
 
     // Initialize market clearing engine
@@ -145,6 +146,10 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
         config.tokenization.clone(),
     );
 
+    // Initialize wallet audit logger
+    let wallet_audit_logger = services::WalletAuditLogger::new(db_pool.clone());
+    info!("✅ Wallet audit logger initialized for security monitoring");
+
     // Create application state
     let app_state = AppState {
         db: db_pool,
@@ -171,6 +176,7 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
         cache_service,
         dashboard_service,
         amm_service,
+        wallet_audit_logger,
     };
 
     Ok(app_state)

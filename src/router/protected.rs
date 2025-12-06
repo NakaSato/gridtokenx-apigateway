@@ -26,6 +26,11 @@ pub fn protected_routes(app_state: AppState) -> Router<AppState> {
             post(auth_handlers::update_profile),
         )
         .route("/api/auth/password", post(auth_handlers::change_password))
+        // Wallet management routes
+        .route(
+            "/api/wallet/export",
+            post(handlers::wallet_auth::export_wallet_handler),
+        )
         // User management routes
         .nest("/api/user", user_routes())
         // Admin-only user management routes
@@ -93,9 +98,18 @@ fn user_routes() -> Router<AppState> {
 fn admin_user_routes() -> Router<AppState> {
     Router::new()
         .route("/{id}", get(auth_handlers::get_user))
-        .route("/{id}", axum::routing::put(user_management::admin_update_user))
-        .route("/{id}/deactivate", post(user_management::admin_deactivate_user))
-        .route("/{id}/reactivate", post(user_management::admin_reactivate_user))
+        .route(
+            "/{id}",
+            axum::routing::put(user_management::admin_update_user),
+        )
+        .route(
+            "/{id}/deactivate",
+            post(user_management::admin_deactivate_user),
+        )
+        .route(
+            "/{id}/reactivate",
+            post(user_management::admin_reactivate_user),
+        )
         .route("/{id}/activity", get(user_management::get_user_activity))
         .route("/", get(auth_handlers::list_users))
 }
@@ -112,13 +126,19 @@ fn blockchain_routes() -> Router<AppState> {
         .route("/programs/{name}", post(blockchain::interact_with_program))
         .route("/accounts/{address}", get(blockchain::get_account_info))
         .route("/network", get(blockchain::get_network_status))
-        .route("/users/{wallet_address}", get(registry::get_blockchain_user))
+        .route(
+            "/users/{wallet_address}",
+            get(registry::get_blockchain_user),
+        )
 }
 
 /// Blockchain testing routes
 fn test_routes() -> Router<AppState> {
     Router::new()
-        .route("/transactions", post(blockchain_test::create_test_transaction))
+        .route(
+            "/transactions",
+            post(blockchain_test::create_test_transaction),
+        )
         .route(
             "/transactions/{signature}",
             get(blockchain_test::get_test_transaction_status),
@@ -131,7 +151,10 @@ fn admin_routes() -> Router<AppState> {
     Router::new()
         .route("/users/{id}/update-role", post(registry::update_user_role))
         // Governance admin routes
-        .route("/governance/emergency-pause", post(governance::emergency_pause))
+        .route(
+            "/governance/emergency-pause",
+            post(governance::emergency_pause),
+        )
         .route("/governance/unpause", post(governance::emergency_unpause))
         // Token admin routes
         .route("/tokens/mint", post(token::mint_tokens))
@@ -143,11 +166,27 @@ fn admin_routes() -> Router<AppState> {
         // Transaction routes
         .nest("/api/tx", transaction_routes())
         // Trading admin routes
-        .route("/trading/match-orders", post(trading::match_blockchain_orders))
+        .route(
+            "/trading/match-orders",
+            post(trading::match_blockchain_orders),
+        )
         // Market admin routes
         .route("/market/health", get(admin::get_market_health))
         .route("/market/analytics", get(admin::get_trading_analytics))
         .route("/market/control", post(admin::market_control))
+        // Key rotation admin routes
+        .route(
+            "/keys/rotate",
+            post(handlers::key_rotation::initiate_rotation_handler),
+        )
+        .route(
+            "/keys/status",
+            get(handlers::key_rotation::get_rotation_status_handler),
+        )
+        .route(
+            "/keys/rollback",
+            post(handlers::key_rotation::rollback_rotation_handler),
+        )
         // Event Processor routes
         .route(
             "/event-processor/replay",
@@ -155,12 +194,18 @@ fn admin_routes() -> Router<AppState> {
         )
         // Audit log routes
         .route("/audit/user/{user_id}", get(audit::get_user_audit_logs))
-        .route("/audit/type/{event_type}", get(audit::get_audit_logs_by_type))
+        .route(
+            "/audit/type/{event_type}",
+            get(audit::get_audit_logs_by_type),
+        )
         .route("/audit/security", get(audit::get_security_events))
         // Epoch management
         .route("/epochs", get(epochs::list_all_epochs))
         .route("/epochs/{epoch_id}/stats", get(epochs::get_epoch_stats))
-        .route("/epochs/{epoch_id}/trigger", post(epochs::trigger_manual_clearing))
+        .route(
+            "/epochs/{epoch_id}/trigger",
+            post(epochs::trigger_manual_clearing),
+        )
 }
 
 /// Transaction routes
@@ -190,9 +235,18 @@ fn governance_routes() -> Router<AppState> {
 fn market_data_routes() -> Router<AppState> {
     Router::new()
         .route("/depth", get(handlers::market_data::get_order_book_depth))
-        .route("/depth-chart", get(handlers::market_data::get_market_depth_chart))
-        .route("/clearing-price", get(handlers::market_data::get_clearing_price))
-        .route("/trades/my-history", get(handlers::market_data::get_my_trade_history))
+        .route(
+            "/depth-chart",
+            get(handlers::market_data::get_market_depth_chart),
+        )
+        .route(
+            "/clearing-price",
+            get(handlers::market_data::get_clearing_price),
+        )
+        .route(
+            "/trades/my-history",
+            get(handlers::market_data::get_my_trade_history),
+        )
 }
 
 /// Trading routes
@@ -213,14 +267,20 @@ fn token_routes() -> Router<AppState> {
 /// Meter routes
 fn meter_routes() -> Router<AppState> {
     Router::new()
-        .route("/verify", post(handlers::meter_verification::verify_meter_handler))
+        .route(
+            "/verify",
+            post(handlers::meter_verification::verify_meter_handler),
+        )
         .route(
             "/registered",
             get(handlers::meter_verification::get_registered_meters_handler),
         )
         .route("/submit-reading", post(meters::submit_reading))
         .route("/my-readings", get(meters::get_my_readings))
-        .route("/readings/{wallet_address}", get(meters::get_readings_by_wallet))
+        .route(
+            "/readings/{wallet_address}",
+            get(meters::get_readings_by_wallet),
+        )
         .route("/stats", get(meters::get_user_stats))
 }
 
@@ -239,5 +299,8 @@ fn erc_routes() -> Router<AppState> {
         .route("/my-stats", get(erc::get_my_certificate_stats))
         .route("/{certificate_id}", get(erc::get_certificate))
         .route("/{certificate_id}/retire", post(erc::retire_certificate))
-        .route("/wallet/{wallet_address}", get(erc::get_certificates_by_wallet))
+        .route(
+            "/wallet/{wallet_address}",
+            get(erc::get_certificates_by_wallet),
+        )
 }

@@ -6,23 +6,23 @@
 //! - Meter statistics and minting
 
 use axum::{
-    Json,
     extract::{Path, Query, State},
+    Json,
 };
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::{
-    AppState,
     auth::middleware::AuthenticatedUser,
     error::{ApiError, Result},
     handlers::{require_role, SortOrder},
     services::BlockchainService,
     utils::PaginationParams,
+    AppState,
 };
 
 // ============================================================================
@@ -92,18 +92,17 @@ fn default_sort_field() -> String {
 }
 
 impl GetReadingsQuery {
-    const ALLOWED_SORT_FIELDS: &'static [&'static str] = &[
-        "submitted_at",
-        "reading_timestamp",
-        "kwh_amount",
-    ];
+    const ALLOWED_SORT_FIELDS: &'static [&'static str] =
+        &["submitted_at", "reading_timestamp", "kwh_amount"];
 
     pub fn validate(&mut self) -> Result<()> {
         // Normalize pagination
         if self.page < 1 {
             self.page = 1;
         }
-        self.per_page = self.per_page.clamp(1, crate::constants::pagination::MAX_PER_PAGE);
+        self.per_page = self
+            .per_page
+            .clamp(1, crate::constants::pagination::MAX_PER_PAGE);
 
         // Validate sort field
         if !Self::ALLOWED_SORT_FIELDS.contains(&self.sort_by.as_str()) {
@@ -238,13 +237,16 @@ pub async fn submit_reading(
         request.meter_signature.is_some()
     );
 
+    // Track resolved meter ID from registry lookup
+    let mut resolved_meter_id = request.meter_id;
+
     if let (Some(meter_serial), Some(signature)) = (&request.meter_serial, &request.meter_signature)
     {
         info!("Verifying signature for meter: {}", meter_serial);
 
         // Lookup meter registration and public key
         let meter_record = sqlx::query!(
-            "SELECT meter_public_key, user_id, verification_status FROM meter_registry WHERE meter_serial = $1",
+            "SELECT id, meter_public_key, user_id, verification_status FROM meter_registry WHERE meter_serial = $1",
             meter_serial
         )
         .fetch_optional(&state.db)
@@ -279,7 +281,10 @@ pub async fn submit_reading(
 
             let owner_wallet = owner_record
                 .wallet_address
-                .ok_or_else(|| ApiError::Internal("Meter owner has no wallet".to_string()))?;
+                .ok_or_else(|| {
+                    // This happens if the user registered but hasn't logged in yet (new flow)
+                    ApiError::BadRequest("Meter owner has not initialized their wallet. Please login to the dashboard first.".to_string())
+                })?;
 
             // Verify wallet address matches
             if owner_wallet != wallet_address {
@@ -289,7 +294,8 @@ pub async fn submit_reading(
             }
 
             // Verify signature if public key is available
-            if let Some(public_key) = meter.meter_public_key.as_deref() {
+            if let Some(public_key) = &meter.meter_public_key {
+                let public_key = public_key.as_str();
                 info!("Verifying signature with public key");
 
                 // Create canonical message
@@ -299,6 +305,12 @@ pub async fn submit_reading(
                     request.kwh_amount,
                     wallet_address.clone(),
                 );
+
+                // Auto-resolve meter_id if not provided but found in registry
+                if resolved_meter_id.is_none() {
+                    resolved_meter_id = Some(meter.id);
+                    info!("Auto-resolved verified meter_id from serial: {}", meter.id);
+                }
 
                 // Verify signature
                 match crate::utils::verify_signature(&public_key, signature, &message) {
@@ -336,17 +348,21 @@ pub async fn submit_reading(
         }
     }
 
-    // NEW: Verify meter ownership if meter_id is provided
-    let verification_status = if let Some(meter_id) = request.meter_id {
+    // Verify meter ownership if meter_id is provided
+    let (verification_status, meter_owner_id) = if let Some(meter_id) = resolved_meter_id {
         // Verify meter ownership
-        let is_owner = state
-            .meter_verification_service
-            .verify_meter_ownership(&user.sub.to_string(), &meter_id)
-            .await
-            .map_err(|e| {
-                error!("Failed to verify meter ownership: {}", e);
-                ApiError::Internal(format!("Failed to verify meter ownership: {}", e))
-            })?;
+        let is_owner = if user.role == "ami" {
+            true // AMI is trusted
+        } else {
+            state
+                .meter_verification_service
+                .verify_meter_ownership(&user.sub.to_string(), &meter_id)
+                .await
+                .map_err(|e| {
+                    error!("Failed to verify meter ownership: {}", e);
+                    ApiError::Internal(format!("Failed to verify meter ownership: {}", e))
+                })?
+        };
 
         if !is_owner {
             return Err(ApiError::Forbidden(
@@ -355,15 +371,51 @@ pub async fn submit_reading(
         }
 
         info!("Meter ownership verified for meter_id: {}", meter_id);
-        "verified"
+
+        // Lookup owner for AMI
+        let owner = if user.role == "ami" {
+            let m = sqlx::query!("SELECT user_id FROM meter_registry WHERE id = $1", meter_id)
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?
+                .ok_or(ApiError::BadRequest("Meter not found".to_string()))?;
+            Some(m.user_id)
+        } else {
+            Some(user.sub)
+        };
+
+        ("verified", owner)
     } else {
         // Legacy support during grace period
         warn!(
             "User {} submitting reading without meter_id - using legacy_unverified status",
             user.sub
         );
-        "legacy_unverified"
+        let owner = if user.role == "ami" {
+            // For legacy AMI without meter_id, we need looking up by serial if possible or fail
+            if let Some(serial) = &request.meter_serial {
+                let m = sqlx::query!(
+                    "SELECT user_id FROM meter_registry WHERE meter_serial = $1",
+                    serial
+                )
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?
+                .ok_or(ApiError::BadRequest("Meter not found".to_string()))?;
+                Some(m.user_id)
+            } else {
+                return Err(ApiError::BadRequest(
+                    "AMI must provide meter_id or serial".to_string(),
+                ));
+            }
+        } else {
+            Some(user.sub)
+        };
+        ("legacy_unverified", owner)
     };
+
+    let submission_user_id =
+        meter_owner_id.ok_or(ApiError::Internal("No owner for meter".to_string()))?;
 
     // Broadcast meter reading received event via WebSocket
     let meter_serial = "default"; // Using default value since meter_serial is not available
@@ -390,9 +442,9 @@ pub async fn submit_reading(
     let reading = state
         .meter_service
         .submit_reading_with_verification(
-            user.sub,
+            submission_user_id,
             meter_request,
-            request.meter_id,
+            resolved_meter_id,
             verification_status,
         )
         .await

@@ -175,7 +175,7 @@ pub async fn register(
         "INSERT INTO users (id, username, email, password_hash, role,
                            first_name, last_name, is_active,
                            email_verified, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true, false, NOW(), NOW())",
+         VALUES ($1, $2, $3, $4, $5::user_role, $6, $7, true, false, NOW(), NOW())",
     )
     .bind(user_id)
     .bind(&request.username)
@@ -1069,6 +1069,85 @@ pub async fn register_meter_handler(
     .fetch_one(&state.db)
     .await
     .map_err(|e| ApiError::Internal(format!("Failed to register meter: {}", e)))?;
+
+    // INTEGRATION: Register meter on-chain using User's Custodial Wallet
+    // 1. Fetch encrypted key from DB
+    let user_wallet = sqlx::query!(
+        "SELECT encrypted_private_key, wallet_salt, encryption_iv FROM users WHERE id = $1",
+        user.0.sub
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+
+    if let Some(wallet) = user_wallet {
+        if let (Some(enc_key), Some(salt), Some(iv)) = (
+            wallet.encrypted_private_key,
+            wallet.wallet_salt,
+            wallet.encryption_iv,
+        ) {
+            // 2. Decrypt private key
+            let decrypted_bytes = crate::utils::crypto::decrypt_bytes(
+                &enc_key,
+                &salt,
+                &iv,
+                &state.config.encryption_secret,
+            )
+            .map_err(|e| {
+                tracing::error!("Failed to decrypt user wallet: {}", e);
+                ApiError::Internal("Wallet decryption failed".to_string())
+            })?;
+
+            // For solana-sdk 3.0, use new_from_array with 32-byte secret key
+            let mut secret_key_bytes = [0u8; 32];
+            secret_key_bytes.copy_from_slice(&decrypted_bytes[0..32]);
+            let user_keypair = solana_sdk::signature::Keypair::new_from_array(secret_key_bytes);
+
+            // Log wallet decryption for security monitoring
+            state
+                .wallet_audit_logger
+                .log_decryption(user.0.sub, "meter_registration", true, None, None, None)
+                .await
+                .ok(); // Don't fail meter registration if audit logging fails
+
+            // 3. Register on-chain with USER keypair
+            let meter_type_str = request
+                .meter_type
+                .clone()
+                .unwrap_or_else(|| "grid".to_string());
+
+            let meter_type_u8: u8 = match meter_type_str.to_lowercase().as_str() {
+                "solar" => 0,
+                "wind" => 1,
+                "battery" => 2,
+                _ => 3, // Grid/Other
+            };
+
+            match state
+                .blockchain_service
+                .register_meter_on_chain(&user_keypair, &request.meter_serial, meter_type_u8)
+                .await
+            {
+                Ok(sig) => {
+                    tracing::info!(
+                        "Meter registered on-chain successfully with User Key. Signature: {}",
+                        sig
+                    );
+                }
+                Err(e) => {
+                    tracing::error!("Failed to register meter on-chain: {}", e);
+                    // Non-blocking error
+                }
+            }
+        } else {
+            tracing::warn!(
+                "User {} has no encrypted wallet, skipping on-chain registration",
+                user.0.sub
+            );
+        }
+    } else {
+        tracing::error!("User {} not found for wallet fetch", user.0.sub);
+    }
 
     // Log activity
     let _ = log_user_activity(

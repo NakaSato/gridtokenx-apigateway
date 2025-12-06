@@ -1,0 +1,1592 @@
+    Checking api-gateway v0.1.1 (/Users/chanthawat/Developments/gridtokenx-platform/gridtokenx-apigateway)
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/auth.rs:261:9
+    |
+261 | /         sqlx::query!(
+262 | |             "UPDATE users 
+263 | |              SET wallet_address = $1, 
+264 | |                  encrypted_private_key = $2, 
+...   |
+273 | |             user.id
+274 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/blockchain.rs:120:5
+    |
+120 | /     sqlx::query!(
+121 | |         r#"
+122 | |         INSERT INTO blockchain_transactions 
+123 | |         (signature, user_id, program_id, instruction_name, status, fee, compute_units_consumed, submitted_at)
+...   |
+131 | |         payload.compute_units as i32
+132 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/blockchain.rs:240:21
+    |
+240 |       let tx_record = sqlx::query!(
+    |  _____________________^
+241 | |         "SELECT * FROM blockchain_transactions WHERE signature = $1 AND user_id = $2",
+242 | |         signature,
+243 | |         user.0.sub
+244 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/blockchain.rs:354:5
+    |
+354 | /     sqlx::query!(
+355 | |         r#"
+356 | |         INSERT INTO blockchain_transactions 
+357 | |         (signature, user_id, program_id, instruction_name, status, compute_units_consumed, submitted_at)
+...   |
+364 | |         payload.compute_units.unwrap_or(10000) as i32
+365 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/email_verification.rs:124:16
+    |
+124 |       let user = sqlx::query_as!(
+    |  ________________^
+125 | |         UserVerificationRecord,
+126 | |         r#"
+127 | |         SELECT 
+...   |
+139 | |         hashed_token
+140 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/email_verification.rs:175:5
+    |
+175 | /     sqlx::query!(
+176 | |         r#"
+177 | |         UPDATE users
+178 | |         SET 
+...   |
+186 | |         user.id
+187 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/email_verification.rs:287:16
+    |
+287 |       let user = sqlx::query_as!(
+    |  ________________^
+288 | |         UserVerificationRecord,
+289 | |         r#"
+290 | |         SELECT 
+...   |
+302 | |         payload.email
+303 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/email_verification.rs:378:5
+    |
+378 | /     sqlx::query!(
+379 | |         r#"
+380 | |         UPDATE users
+381 | |         SET 
+...   |
+390 | |         user.id
+391 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/epochs.rs:118:17
+    |
+118 |       let epoch = sqlx::query!(
+    |  _________________^
+119 | |         r#"
+120 | |         SELECT 
+121 | |             id, epoch_number, start_time, end_time, status as "status: EpochStatus",
+...   |
+128 | |         "#
+129 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/epochs.rs:185:17
+    |
+185 |       let epoch = sqlx::query!(
+    |  _________________^
+186 | |         r#"
+187 | |         SELECT 
+188 | |             id, epoch_number, start_time, end_time, status as "status: EpochStatus",
+...   |
+195 | |         "#
+196 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/epochs.rs:247:22
+    |
+247 |       let mut epochs = sqlx::query!(
+    |  ______________________^
+248 | |         r#"
+249 | |         SELECT 
+250 | |             id, epoch_number, start_time, end_time, status as "status: EpochStatus",
+...   |
+255 | |         "#
+256 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/epochs.rs:324:17
+    |
+324 |       let epoch = sqlx::query!(
+    |  _________________^
+325 | |         r#"
+326 | |         SELECT 
+327 | |             id, epoch_number, start_time, end_time, status as "status: EpochStatus",
+...   |
+333 | |         epoch_id
+334 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/epochs.rs:354:26
+    |
+354 |       let unique_traders = sqlx::query_scalar!(
+    |  __________________________^
+355 | |         r#"
+356 | |         SELECT COUNT(DISTINCT user_id) as count
+357 | |         FROM trading_orders
+...   |
+360 | |         epoch_id
+361 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_scalar` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/epochs.rs:368:23
+    |
+368 |       let settlements = sqlx::query!(
+    |  _______________________^
+369 | |         r#"
+370 | |         SELECT 
+371 | |             COUNT(*) FILTER (WHERE status = 'pending') as pending,
+...   |
+376 | |         epoch_id
+377 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/epochs.rs:423:17
+    |
+423 |       let epoch = sqlx::query!(
+    |  _________________^
+424 | |         r#"
+425 | |         SELECT id, epoch_number, status as "status: EpochStatus"
+426 | |         FROM market_epochs
+...   |
+429 | |         epoch_id
+430 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/epochs.rs:526:18
+    |
+526 |       let epochs = sqlx::query!(
+    |  __________________^
+527 | |         r#"
+528 | |         SELECT 
+529 | |             id, epoch_number, start_time, end_time, status as "status: EpochStatus",
+...   |
+537 | |         offset
+538 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/epochs.rs:543:17
+    |
+543 |     let total = sqlx::query_scalar!("SELECT COUNT(*) FROM market_epochs")
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_scalar` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/erc.rs:194:25
+    |
+194 |     let issuer_record = sqlx::query!("SELECT wallet_address FROM users WHERE id = $1", user.sub)
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/erc.rs:207:21
+    |
+207 |       let recipient = sqlx::query!(
+    |  _____________________^
+208 | |         "SELECT id FROM users WHERE wallet_address = $1",
+209 | |         request.wallet_address
+210 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/governance.rs:148:19
+    |
+148 |       let db_user = sqlx::query!(
+    |  ___________________^
+149 | |         "SELECT id, role::text as role FROM users WHERE id = $1",
+150 | |         user.0.sub
+151 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/governance.rs:203:19
+    |
+203 |       let db_user = sqlx::query!(
+    |  ___________________^
+204 | |         "SELECT id, role::text as role FROM users WHERE id = $1",
+205 | |         user.0.sub
+206 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/meters.rs:220:27
+    |
+220 |         let user_record = sqlx::query!("SELECT wallet_address FROM users WHERE id = $1", user.sub)
+    |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/meters.rs:245:28
+    |
+245 |           let meter_record = sqlx::query!(
+    |  ____________________________^
+246 | |             "SELECT meter_public_key, user_id, verification_status FROM meter_registry WHERE meter_serial = $1",
+247 | |             meter_serial
+248 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/meters.rs:268:32
+    |
+268 |               let owner_record = sqlx::query!(
+    |  ________________________________^
+269 | |                 "SELECT wallet_address FROM users WHERE id = $1",
+270 | |                 meter_owner_id
+271 | |             )
+    | |_____________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+  --> src/handlers/oracle.rs:92:19
+   |
+92 |       let db_user = sqlx::query!(
+   |  ___________________^
+93 | |         "SELECT id, role::text as role FROM users WHERE id = $1",
+94 | |         user.0.sub
+95 | |     )
+   | |_____^
+   |
+   = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/registry.rs:205:19
+    |
+205 |       let db_user = sqlx::query!(
+    |  ___________________^
+206 | |         "SELECT id, email, role::text as role FROM users WHERE id = $1",
+207 | |         user.0.sub
+208 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/registry.rs:225:23
+    |
+225 |       let target_user = sqlx::query!(
+    |  _______________________^
+226 | |         "SELECT id, email, wallet_address, role::text as role FROM users WHERE id = $1",
+227 | |         user_id
+228 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/token.rs:369:19
+    |
+369 |       let db_user = sqlx::query!(
+    |  ___________________^
+370 | |         "SELECT id, role::text as role FROM users WHERE id = $1",
+371 | |         user.0.sub
+372 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/token.rs:434:19
+    |
+434 |       let reading = sqlx::query!(
+    |  ___________________^
+435 | |         r#"
+436 | |         SELECT 
+437 | |             id, user_id, wallet_address, kwh_amount,
+...   |
+442 | |         request.reading_id
+443 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/token.rs:563:5
+    |
+563 | /     sqlx::query!(
+564 | |         r#"
+565 | |         UPDATE meter_readings 
+566 | |         SET minted = TRUE,
+...   |
+572 | |         request.reading_id
+573 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/trading.rs:202:5
+    |
+202 | /     sqlx::query!(
+203 | |         r#"
+204 | |         INSERT INTO trading_orders (
+205 | |             id, user_id, order_type, side, energy_amount, price_per_kwh,
+...   |
+219 | |         epoch.id
+220 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/trading.rs:685:5
+    |
+685 | /     sqlx::query!(
+686 | |         r#"
+687 | |         INSERT INTO trading_orders (
+688 | |             id, user_id, order_type, side, energy_amount, price_per_kwh,
+...   |
+702 | |         epoch.id
+703 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/trading.rs:752:19
+    |
+752 |       let db_user = sqlx::query!(
+    |  ___________________^
+753 | |         "SELECT id, role::text as role FROM users WHERE id = $1",
+754 | |         user.0.sub
+755 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+  --> src/handlers/transactions/mod.rs:74:21
+   |
+74 |       let p2p_order = sqlx::query!(
+   |  _____________________^
+75 | |         r#"
+76 | |         SELECT id, user_id, order_type, side as "side!: OrderSide", energy_amount, price_per_kwh, 
+77 | |                status as "status!: OrderStatus", created_at, settled_at as filled_at, epoch_id
+...  |
+81 | |         id
+82 | |     )
+   | |_____^
+   |
+   = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/transactions/mod.rs:110:19
+    |
+110 |       let swap_tx = sqlx::query!(
+    |  ___________________^
+111 | |         r#"
+112 | |         SELECT id, user_id, pool_id, input_token, output_token, input_amount, output_amount,
+113 | |                fee_amount, tx_hash, status, created_at
+...   |
+117 | |         id
+118 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/transactions/mod.rs:140:17
+    |
+140 |       let bc_tx = sqlx::query!(
+    |  _________________^
+141 | |         r#"
+142 | |         SELECT id, signature, user_id, program_id, instruction_name, status, submitted_at, created_at
+143 | |         FROM blockchain_transactions
+...   |
+146 | |         id
+147 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/transactions/mod.rs:220:21
+    |
+220 |       let p2p_query = sqlx::query!(
+    |  _____________________^
+221 | |         r#"
+222 | |         SELECT id, user_id, order_type, side as "side!: OrderSide", energy_amount, price_per_kwh, 
+223 | |                status as "status!: OrderStatus", created_at, settled_at as filled_at, epoch_id
+...   |
+230 | |         fetch_limit
+231 | |     );
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/transactions/mod.rs:285:26
+    |
+285 |       let blockchain_txs = sqlx::query!(
+    |  __________________________^
+286 | |         r#"
+287 | |         SELECT signature, user_id, program_id, instruction_name, status, submitted_at, created_at
+288 | |         FROM blockchain_transactions
+...   |
+294 | |         fetch_limit
+295 | |     );
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/transactions/mod.rs:418:21
+    |
+418 |       let p2p_stats = sqlx::query!(
+    |  _____________________^
+419 | |         r#"
+420 | |         SELECT 
+421 | |             COUNT(*) as total,
+...   |
+427 | |         "#
+428 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/transactions/mod.rs:434:22
+    |
+434 |       let swap_stats = sqlx::query!(
+    |  ______________________^
+435 | |         r#"
+436 | |         SELECT 
+437 | |             COUNT(*) as total,
+...   |
+441 | |         "#
+442 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/transactions/mod.rs:448:20
+    |
+448 |       let bc_stats = sqlx::query!(
+    |  ____________________^
+449 | |         r#"
+450 | |         SELECT 
+451 | |             COUNT(*) as total,
+...   |
+456 | |         "#
+457 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/user_management.rs:989:21
+    |
+989 |       let user_info = sqlx::query!(
+    |  _____________________^
+990 | |         "SELECT email_verified, wallet_address FROM users WHERE id = $1",
+991 | |         user.0.sub
+992 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+    --> src/handlers/user_management.rs:1032:20
+     |
+1032 |       let existing = sqlx::query!(
+     |  ____________________^
+1033 | |         "SELECT id FROM meter_registry WHERE meter_serial = $1",
+1034 | |         request.meter_serial
+1035 | |     )
+     | |_____^
+     |
+     = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+    --> src/handlers/user_management.rs:1047:20
+     |
+1047 |       let meter_id = sqlx::query_scalar!(
+     |  ____________________^
+1048 | |         r#"
+1049 | |         INSERT INTO meter_registry (
+1050 | |             user_id,
+...    |
+1067 | |         request.location_address
+1068 | |     )
+     | |_____^
+     |
+     = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_scalar` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/handlers/wallet_auth.rs:254:16
+    |
+254 |       let user = sqlx::query!(
+    |  ________________^
+255 | |         "SELECT id, username, email, password_hash, role::text as role,
+256 | |                 first_name, last_name, wallet_address, is_active
+257 | |          FROM users WHERE username = $1",
+258 | |         request.username
+259 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/audit_logger.rs:175:9
+    |
+175 | /         sqlx::query!(
+176 | |             r#"
+177 | |             INSERT INTO audit_logs (event_type, user_id, ip_address, event_data, created_at)
+178 | |             VALUES ($1, $2, $3, $4, $5)
+...   |
+184 | |             created_at
+185 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/audit_logger.rs:217:23
+    |
+217 |           let records = sqlx::query_as!(
+    |  _______________________^
+218 | |             AuditEventRecord,
+219 | |             r#"
+220 | |             SELECT id, event_type, user_id, ip_address, event_data, created_at
+...   |
+227 | |             limit
+228 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/audit_logger.rs:241:23
+    |
+241 |           let records = sqlx::query_as!(
+    |  _______________________^
+242 | |             AuditEventRecord,
+243 | |             r#"
+244 | |             SELECT id, event_type, user_id, ip_address, event_data, created_at
+...   |
+251 | |             limit
+252 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/audit_logger.rs:264:23
+    |
+264 |           let records = sqlx::query_as!(
+    |  _______________________^
+265 | |             AuditEventRecord,
+266 | |             r#"
+267 | |             SELECT id, event_type, user_id, ip_address, event_data, created_at
+...   |
+273 | |             limit
+274 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/epoch_scheduler.rs:280:34
+    |
+280 |           let epochs_to_activate = sqlx::query!(
+    |  __________________________________^
+281 | |             r#"
+282 | |             SELECT id, epoch_number, start_time, end_time, status as "status: EpochStatus"
+283 | |             FROM market_epochs
+...   |
+290 | |             now
+291 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/epoch_scheduler.rs:302:13
+    |
+302 | /             sqlx::query!(
+303 | |                 "UPDATE market_epochs SET status = $1::epoch_status, updated_at = NOW() WHERE id = $2",
+304 | |                 EpochStatus::Active as EpochStatus,
+305 | |                 epoch_row.id
+306 | |             )
+    | |_____________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/epoch_scheduler.rs:346:31
+    |
+346 |           let epochs_to_clear = sqlx::query!(
+    |  _______________________________^
+347 | |             r#"
+348 | |             SELECT id, epoch_number, start_time, end_time, status as "status: EpochStatus"
+349 | |             FROM market_epochs
+...   |
+355 | |             now
+356 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/epoch_scheduler.rs:367:13
+    |
+367 | /             sqlx::query!(
+368 | |                 "UPDATE market_epochs SET status = $1::epoch_status, updated_at = NOW() WHERE id = $2",
+369 | |                 EpochStatus::Cleared as EpochStatus,
+370 | |                 epoch_row.id
+371 | |             )
+    | |_____________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/epoch_scheduler.rs:431:24
+    |
+431 |           let existing = sqlx::query!(
+    |  ________________________^
+432 | |             "SELECT id FROM market_epochs WHERE epoch_number = $1",
+433 | |             next_epoch_number
+434 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/epoch_scheduler.rs:447:13
+    |
+447 | /             sqlx::query!(
+448 | |                 r#"
+449 | |                 INSERT INTO market_epochs (
+450 | |                     id, epoch_number, start_time, end_time, status
+...   |
+457 | |                 EpochStatus::Pending as EpochStatus
+458 | |             )
+    | |_____________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/epoch_scheduler.rs:487:21
+    |
+487 |           let epoch = sqlx::query_as!(
+    |  _____________________^
+488 | |             MarketEpoch,
+489 | |             r#"
+490 | |             SELECT
+...   |
+496 | |             "#
+497 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/epoch_scheduler.rs:505:21
+    |
+505 |           let epoch = sqlx::query_as!(
+    |  _____________________^
+506 | |             MarketEpoch,
+507 | |             r#"
+508 | |             SELECT
+...   |
+514 | |             epoch_id
+515 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/erc_service.rs:265:27
+    |
+265 |           let certificate = sqlx::query_as!(
+    |  ___________________________^
+266 | |             ErcCertificate,
+267 | |             r#"
+268 | |             UPDATE erc_certificates
+...   |
+286 | |             tx_signature,
+287 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/erc_service.rs:460:27
+    |
+460 |           let certificate = sqlx::query_as!(
+    |  ___________________________^
+461 | |             ErcCertificate,
+462 | |             r#"
+463 | |             INSERT INTO erc_certificates (
+...   |
+492 | |             request.metadata,
+493 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/erc_service.rs:511:21
+    |
+511 |           let count = sqlx::query!(
+    |  _____________________^
+512 | |             r#"
+513 | |             SELECT COUNT(*) as "count!"
+514 | |             FROM erc_certificates
+...   |
+517 | |             format!("ERC-{}-%", year)
+518 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/erc_service.rs:529:27
+    |
+529 |           let certificate = sqlx::query_as!(
+    |  ___________________________^
+530 | |             ErcCertificate,
+531 | |             r#"
+532 | |             SELECT
+...   |
+548 | |             certificate_id
+549 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/erc_service.rs:565:28
+    |
+565 |           let certificates = sqlx::query_as!(
+    |  ____________________________^
+566 | |             ErcCertificate,
+567 | |             r#"
+568 | |             SELECT
+...   |
+588 | |             offset,
+589 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/erc_service.rs:707:27
+    |
+707 |           let certificate = sqlx::query_as!(
+    |  ___________________________^
+708 | |             ErcCertificate,
+709 | |             r#"
+710 | |             UPDATE erc_certificates
+...   |
+728 | |             tx_signature,
+729 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/erc_service.rs:758:27
+    |
+758 |           let certificate = sqlx::query_as!(
+    |  ___________________________^
+759 | |             ErcCertificate,
+760 | |             r#"
+761 | |             UPDATE erc_certificates
+...   |
+779 | |             to_wallet,
+780 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/erc_service.rs:786:24
+    |
+786 |           let transfer = sqlx::query_as!(
+    |  ________________________^
+787 | |             CertificateTransfer,
+788 | |             r#"
+789 | |             INSERT INTO erc_certificate_transfers (
+...   |
+803 | |             tx_signature,
+804 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/erc_service.rs:824:27
+    |
+824 |           let certificate = sqlx::query_as!(
+    |  ___________________________^
+825 | |             ErcCertificate,
+826 | |             r#"
+827 | |             UPDATE erc_certificates
+...   |
+844 | |             certificate_uuid,
+845 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/erc_service.rs:858:21
+    |
+858 |           let stats = sqlx::query_as!(
+    |  _____________________^
+859 | |             CertificateStatsRow,
+860 | |             r#"
+861 | |             SELECT
+...   |
+869 | |             user_id,
+870 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/event_processor_service.rs:213:32
+    |
+213 |           let pending_readings = sqlx::query!(
+    |  ________________________________^
+214 | |             r#"
+215 | |             SELECT id, mint_tx_signature, wallet_address, kwh_amount
+216 | |             FROM meter_readings
+...   |
+224 | |             self.config.batch_size as i64
+225 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/event_processor_service.rs:370:9
+    |
+370 | /         sqlx::query!(
+371 | |             r#"
+372 | |             INSERT INTO blockchain_events 
+373 | |             (event_type, transaction_signature, slot, block_time, program_id, event_data, processed)
+...   |
+382 | |             event_data
+383 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/event_processor_service.rs:416:9
+    |
+416 | /         sqlx::query!(
+417 | |             r#"
+418 | |             UPDATE meter_readings
+419 | |             SET on_chain_confirmed = true,
+...   |
+425 | |             reading_id
+426 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/event_processor_service.rs:566:28
+    |
+566 |         let total_events = sqlx::query_scalar!("SELECT COUNT(*) FROM blockchain_events")
+    |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_scalar` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/event_processor_service.rs:571:34
+    |
+571 |           let confirmed_readings = sqlx::query_scalar!(
+    |  __________________________________^
+572 | |             "SELECT COUNT(*) FROM meter_readings WHERE on_chain_confirmed = true"
+573 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_scalar` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/event_processor_service.rs:578:37
+    |
+578 |           let pending_confirmations = sqlx::query_scalar!(
+    |  _____________________________________^
+579 | |             r#"
+580 | |             SELECT COUNT(*) FROM meter_readings 
+581 | |             WHERE minted = true 
+...   |
+585 | |             "#
+586 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_scalar` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing.rs:926:28
+    |
+926 |               let epoch_id = sqlx::query_scalar!(
+    |  ____________________________^
+927 | |                 "SELECT epoch_id FROM trading_orders WHERE id = $1",
+928 | |                 trade.buy_order_id
+929 | |             )
+    | |_____________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_scalar` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+  --> src/services/market_clearing_service.rs:80:21
+   |
+80 |           let epoch = sqlx::query_as!(
+   |  _____________________^
+81 | |             MarketEpoch,
+82 | |             r#"
+83 | |             SELECT 
+...  |
+93 | |             "#
+94 | |         )
+   | |_________^
+   |
+   = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:190:21
+    |
+190 |           let epoch = sqlx::query_as!(
+    |  _____________________^
+191 | |             MarketEpoch,
+192 | |             r#"
+193 | |             SELECT 
+...   |
+199 | |             epoch_number
+200 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:215:26
+    |
+215 |           let buy_orders = sqlx::query_as!(
+    |  __________________________^
+216 | |             OrderBookEntry,
+217 | |             r#"
+218 | |             SELECT 
+...   |
+225 | |             epoch_id
+226 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:237:27
+    |
+237 |           let sell_orders = sqlx::query_as!(
+    |  ___________________________^
+238 | |             OrderBookEntry,
+239 | |             r#"
+240 | |             SELECT 
+...   |
+247 | |             epoch_id
+248 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:397:13
+    |
+397 | /             sqlx::query!(
+398 | |                 "UPDATE market_epochs SET clearing_price = $1 WHERE id = $2",
+399 | |                 clearing_price,
+400 | |                 epoch_id
+401 | |             )
+    | |_____________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:428:9
+    |
+428 | /         sqlx::query!(
+429 | |             r#"
+430 | |             INSERT INTO order_matches (
+431 | |                 id, epoch_id, buy_order_id, sell_order_id, 
+...   |
+442 | |             order_match.status
+443 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:483:9
+    |
+483 | /         sqlx::query!(
+484 | |             "UPDATE trading_orders SET filled_amount = filled_amount + $1 WHERE id = $2",
+485 | |             amount,
+486 | |             order_id
+487 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:502:28
+    |
+502 |           let total_orders = sqlx::query_scalar!(
+    |  ____________________________^
+503 | |             "SELECT COUNT(*) FROM trading_orders WHERE epoch_id = $1 AND status IN ('pending', 'filled')",
+504 | |             epoch_id
+505 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_scalar` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:531:25
+    |
+531 |           let buy_order = sqlx::query!(
+    |  _________________________^
+532 | |             "SELECT user_id FROM trading_orders WHERE id = $1",
+533 | |             order_match.buy_order_id
+534 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:538:26
+    |
+538 |           let sell_order = sqlx::query!(
+    |  __________________________^
+539 | |             "SELECT user_id FROM trading_orders WHERE id = $1",
+540 | |             order_match.sell_order_id
+541 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:556:32
+    |
+556 |           let buyer_wallet_row = sqlx::query!(
+    |  ________________________________^
+557 | |             "SELECT wallet_address FROM users WHERE id = $1",
+558 | |             buy_order.user_id
+559 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:563:33
+    |
+563 |           let seller_wallet_row = sqlx::query!(
+    |  _________________________________^
+564 | |             "SELECT wallet_address FROM users WHERE id = $1",
+565 | |             sell_order.user_id
+566 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:658:9
+    |
+658 | /         sqlx::query!(
+659 | |             r#"
+660 | |             INSERT INTO settlements (
+661 | |                 id, epoch_id, buyer_id, seller_id, energy_amount, 
+...   |
+674 | |             settlement.status
+675 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:680:9
+    |
+680 | /         sqlx::query!(
+681 | |             "UPDATE order_matches SET settlement_id = $1 WHERE id = $2",
+682 | |             settlement.id,
+683 | |             order_match.id
+684 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:694:21
+    |
+694 |           let order = sqlx::query!(
+    |  _____________________^
+695 | |             "SELECT user_id, status as \"status: OrderStatus\" FROM trading_orders WHERE id = $1",
+696 | |             order_id
+697 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:737:27
+    |
+737 |           let settlements = sqlx::query_as!(
+    |  ___________________________^
+738 | |             Settlement,
+739 | |             r#"
+740 | |             SELECT 
+...   |
+750 | |             offset
+751 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/market_clearing_service.rs:760:21
+    |
+760 |           let stats = sqlx::query_as!(
+    |  _____________________^
+761 | |             MarketEpoch,
+762 | |             r#"
+763 | |             SELECT 
+...   |
+771 | |             epochs
+772 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_service.rs:160:26
+    |
+160 |               let record = sqlx::query!(
+    |  __________________________^
+161 | |                 r#"
+162 | |                 SELECT id FROM meter_readings
+163 | |                 WHERE user_id = $1
+...   |
+171 | |                 window_end,
+172 | |             )
+    | |_____________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_service.rs:180:26
+    |
+180 |               let record = sqlx::query!(
+    |  __________________________^
+181 | |                 r#"
+182 | |                 SELECT id FROM meter_readings
+183 | |                 WHERE user_id = $1
+...   |
+191 | |                 window_end,
+192 | |             )
+    | |_____________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_service.rs:200:26
+    |
+200 |               let record = sqlx::query!(
+    |  __________________________^
+201 | |                 r#"
+202 | |                 SELECT id FROM meter_readings
+203 | |                 WHERE user_id = $1
+...   |
+209 | |                 window_end,
+210 | |             )
+    | |_____________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_service.rs:592:22
+    |
+592 |           let result = sqlx::query!(
+    |  ______________________^
+593 | |             r#"
+594 | |             SELECT COALESCE(SUM(kwh_amount), 0) as "total!"
+595 | |             FROM meter_readings
+...   |
+598 | |             user_id,
+599 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_service.rs:609:22
+    |
+609 |           let result = sqlx::query!(
+    |  ______________________^
+610 | |             r#"
+611 | |             SELECT COALESCE(SUM(kwh_amount), 0) as "total!"
+612 | |             FROM meter_readings
+...   |
+615 | |             user_id,
+616 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_verification_service.rs:153:20
+    |
+153 |           let rows = sqlx::query!(
+    |  ____________________^
+154 | |             r#"
+155 | |             SELECT 
+156 | |                 id, meter_serial, meter_key_hash, verification_method,
+...   |
+164 | |             user_id
+165 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_verification_service.rs:202:21
+    |
+202 |           let meter = sqlx::query!(
+    |  _____________________^
+203 | |             r#"
+204 | |             SELECT user_id, verification_status FROM meter_registry
+205 | |             WHERE id = $1
+206 | |             "#,
+207 | |             meter_id
+208 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_verification_service.rs:244:24
+    |
+244 |           let existing = sqlx::query!(
+    |  ________________________^
+245 | |             r#"
+246 | |             SELECT user_id, verification_status FROM meter_registry
+247 | |             WHERE meter_serial = $1
+248 | |             "#,
+249 | |             meter_serial
+250 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_verification_service.rs:279:24
+    |
+279 |           let meter_id = sqlx::query!(
+    |  ________________________^
+280 | |             r#"
+281 | |             INSERT INTO meter_registry (
+282 | |                 meter_serial, meter_key_hash, verification_method,
+...   |
+296 | |             request.verification_proof,
+297 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_verification_service.rs:316:9
+    |
+316 | /         sqlx::query!(
+317 | |             r#"
+318 | |             INSERT INTO meter_verification_attempts (
+319 | |                 meter_serial, user_id, verification_method,
+...   |
+330 | |             failure_reason,
+331 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_verification_service.rs:345:24
+    |
+345 |           let attempts = sqlx::query_as!(
+    |  ________________________^
+346 | |             MeterVerificationAttempt,
+347 | |             r#"
+348 | |             SELECT 
+...   |
+360 | |             limit
+361 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_verification_service.rs:402:24
+    |
+402 |           let meter_id = sqlx::query!(
+    |  ________________________^
+403 | |             r#"
+404 | |             INSERT INTO meter_registry (
+405 | |                 meter_serial, meter_key_hash, verification_method,
+...   |
+414 | |             location_address,
+415 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_verification_service.rs:441:21
+    |
+441 |           let meter = sqlx::query!(
+    |  _____________________^
+442 | |             r#"
+443 | |             SELECT user_id, verification_status FROM meter_registry
+444 | |             WHERE id = $1
+445 | |             "#,
+446 | |             meter_id
+447 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_verification_service.rs:467:9
+    |
+467 | /         sqlx::query!(
+468 | |             r#"
+469 | |             DELETE FROM meter_registry
+470 | |             WHERE id = $1
+471 | |             "#,
+472 | |             meter_id
+473 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_verification_service.rs:504:19
+    |
+504 |           let row = sqlx::query!(
+    |  ___________________^
+505 | |             r#"
+506 | |             SELECT 
+507 | |                 id, meter_serial, meter_key_hash, verification_method,
+...   |
+514 | |             meter_serial
+515 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_verification_service.rs:541:19
+    |
+541 |           let row = sqlx::query!(
+    |  ___________________^
+542 | |             r#"
+543 | |             SELECT 
+544 | |                 id, meter_serial, meter_key_hash, verification_method,
+...   |
+551 | |             meter_id
+552 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_verification_service.rs:578:21
+    |
+578 |           let stats = sqlx::query!(
+    |  _____________________^
+579 | |             r#"
+580 | |             SELECT 
+581 | |                 COUNT(*) as "total_meters!",
+...   |
+586 | |             "#
+587 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/meter_verification_service.rs:592:28
+    |
+592 |           let attempts_24h = sqlx::query_scalar!(
+    |  ____________________________^
+593 | |             r#"
+594 | |             SELECT COUNT(*) as "count!"
+595 | |             FROM meter_verification_attempts
+596 | |             WHERE attempted_at > NOW() - INTERVAL '24 hours'
+597 | |             "#
+598 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_scalar` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/settlement_service.rs:335:22
+    |
+335 |         let result = sqlx::query!("SELECT wallet_address FROM users WHERE id = $1", user_id)
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error communicating with database: Connection refused (os error 61)
+   --> src/services/settlement_service.rs:494:22
+    |
+494 |           let failed = sqlx::query!(
+    |  ______________________^
+495 | |             r#"
+496 | |             SELECT id FROM settlements
+497 | |             WHERE status = 'failed'
+...   |
+500 | |             max_retries as i32
+501 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `solana_sdk::signature::Signer`
+ --> src/handlers/email_verification.rs:8:5
+  |
+8 | use solana_sdk::signature::Signer;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `OrderSide` and `OrderStatus`
+  --> src/handlers/transactions/mod.rs:20:38
+   |
+20 | use crate::database::schema::types::{OrderSide, OrderStatus};
+   |                                      ^^^^^^^^^  ^^^^^^^^^^^
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+   --> src/services/market_clearing_service.rs:571:17
+    |
+571 |         if let (Some(buyer_wallet_str), Some(seller_wallet_str)) = (
+    |                 ^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+    |
+    = help: the trait `Sized` is not implemented for `str`
+note: required by a bound in `std::prelude::v1::Some`
+   --> /Users/chanthawat/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/option.rs:594:17
+    |
+594 | pub enum Option<T> {
+    |                 ^ required by this bound in `std::prelude::v1::Some`
+...
+602 |     Some(#[stable(feature = "rust1", since = "1.0.0")] T),
+    |     ---- required by a bound in this tuple variant
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+   --> src/services/market_clearing_service.rs:571:41
+    |
+571 |         if let (Some(buyer_wallet_str), Some(seller_wallet_str)) = (
+    |                                         ^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+    |
+    = help: the trait `Sized` is not implemented for `str`
+note: required by a bound in `std::prelude::v1::Some`
+   --> /Users/chanthawat/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/option.rs:594:17
+    |
+594 | pub enum Option<T> {
+    |                 ^ required by this bound in `std::prelude::v1::Some`
+...
+602 |     Some(#[stable(feature = "rust1", since = "1.0.0")] T),
+    |     ---- required by a bound in this tuple variant
+
+warning: variable does not need to be mutable
+  --> src/services/blockchain_instructions.rs:60:13
+   |
+60 |         let mut accounts = if order_type == "sell" {
+   |             ----^^^^^^^^
+   |             |
+   |             help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+For more information about this error, try `rustc --explain E0277`.
+warning: `api-gateway` (lib) generated 3 warnings
+error: could not compile `api-gateway` (lib) due to 113 previous errors; 3 warnings emitted

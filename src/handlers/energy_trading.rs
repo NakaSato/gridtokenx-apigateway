@@ -15,6 +15,7 @@ use crate::database::schema::types::OrderSide;
 use crate::error::{ApiError, Result};
 use crate::utils::{validation::Validator, PaginationMeta, PaginationParams, SortOrder};
 use crate::AppState;
+use solana_sdk::signer::Signer;
 
 // Helper to parse BigDecimal from string
 use std::str::FromStr;
@@ -239,8 +240,14 @@ pub async fn create_order(
 
     // Use a default market address or load from env
     // In a real app, this would be the address of the initialized Market account
-    let market_pubkey = std::env::var("MARKET_PUBKEY")
-        .unwrap_or_else(|_| "9t3s8sCgVUG9kAgVPsozj8mDpJp9cy6SF5HwRK5nvAHb".to_string());
+    // Get the Trading program ID and derive Market PDA
+    let trading_program_id = state
+        .blockchain_service
+        .trading_program_id()
+        .map_err(|e| ApiError::Internal(format!("Failed to get trading program ID: {}", e)))?;
+    let (market_pda, _) =
+        solana_sdk::pubkey::Pubkey::find_program_address(&[b"market"], &trading_program_id);
+    let market_pubkey = market_pda.to_string();
 
     // Convert to appropriate units
     // Energy: kWh -> Wh (x1000)
@@ -256,6 +263,7 @@ pub async fn create_order(
             price_per_kwh_u64,
             &payload.order_type,
             payload.erc_certificate_id.as_deref(),
+            authority_keypair.pubkey(), // Pass the real authority pubkey
         )
         .await
         .map_err(|e| {
