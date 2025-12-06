@@ -11,9 +11,9 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::{
-    AppState,
     auth::middleware::AuthenticatedUser,
     error::{ApiError, Result},
+    AppState,
 };
 
 // ============================================================================
@@ -193,6 +193,34 @@ pub async fn register_meter(
         error!("Failed to insert meter registration: {}", e);
         ApiError::Internal("Failed to register meter".to_string())
     })?;
+
+    // INTEGRATION: Register meter on-chain (as Gateway Authority)
+    // We use the Gateway's authority keypair to register the meter on-chain.
+    // This effectively makes the Gateway the on-chain "owner" (custodian) of the meter record.
+    if let Ok(authority_keypair) = state.blockchain_service.get_authority_keypair().await {
+        let meter_type_u8: u8 = match request.meter_type.to_lowercase().as_str() {
+            "solar" => 0,
+            "wind" => 1,
+            "battery" => 2,
+            _ => 3, // Grid/Other
+        };
+
+        match state
+            .blockchain_service
+            .register_meter_on_chain(&authority_keypair, &request.meter_serial, meter_type_u8)
+            .await
+        {
+            Ok(sig) => {
+                tracing::info!("Meter registered on-chain successfully. Signature: {}", sig);
+            }
+            Err(e) => {
+                tracing::error!("Failed to register meter on-chain: {}", e);
+                // Non-blocking error
+            }
+        }
+    } else {
+        tracing::error!("Failed to load authority keypair for on-chain registration");
+    }
 
     info!(
         "Meter registered successfully: {} (ID: {})",

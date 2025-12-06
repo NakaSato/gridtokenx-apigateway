@@ -87,6 +87,8 @@ impl PasswordService {
         use rand::Rng;
 
         let mut rng = rand::thread_rng();
+        const SPECIAL_CHARS: &[u8] = b"!@#$%^&*";
+        const ALPHANUMERIC: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
         // Generate a password with mixed case, digits, and special characters
         let mut password = String::new();
@@ -95,13 +97,13 @@ impl PasswordService {
         password.push(rng.gen_range('A'..='Z'));
         password.push(rng.gen_range('a'..='z'));
         password.push(rng.gen_range('0'..='9'));
-        password.push("!@#$%^&*".chars().nth(rng.gen_range(0..8)).unwrap());
+        // Use byte slice indexing which is always safe for ASCII
+        password.push(SPECIAL_CHARS[rng.gen_range(0..SPECIAL_CHARS.len())] as char);
 
         // Fill the rest with random alphanumeric characters
         for _ in 0..8 {
-            let alphanumeric = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-            let idx = rng.gen_range(0..alphanumeric.len());
-            password.push(alphanumeric.chars().nth(idx).unwrap());
+            let idx = rng.gen_range(0..ALPHANUMERIC.len());
+            password.push(ALPHANUMERIC[idx] as char);
         }
 
         // Shuffle the password

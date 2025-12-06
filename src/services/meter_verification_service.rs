@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use bcrypt::{hash, DEFAULT_COST};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use sqlx::types::ipnetwork::IpNetwork;
@@ -182,8 +182,8 @@ impl MeterVerificationService {
                 verification_proof: row.verification_proof,
                 verified_at: row.verified_at,
                 verified_by: row.verified_by,
-                created_at: row.created_at.expect("created_at should not be null"),
-                updated_at: row.updated_at.expect("updated_at should not be null"),
+                created_at: row.created_at.unwrap_or_else(Utc::now),
+                updated_at: row.updated_at.unwrap_or_else(Utc::now),
             })
         }).collect();
 
@@ -531,8 +531,8 @@ impl MeterVerificationService {
             verification_proof: r.verification_proof,
             verified_at: r.verified_at,
             verified_by: r.verified_by,
-            created_at: r.created_at.expect("created_at should not be null"),
-            updated_at: r.updated_at.expect("updated_at should not be null"),
+            created_at: r.created_at.unwrap_or_else(Utc::now),
+            updated_at: r.updated_at.unwrap_or_else(Utc::now),
         }))
     }
 
@@ -568,8 +568,8 @@ impl MeterVerificationService {
             verification_proof: r.verification_proof,
             verified_at: r.verified_at,
             verified_by: r.verified_by,
-            created_at: r.created_at.expect("created_at should not be null"),
-            updated_at: r.updated_at.expect("updated_at should not be null"),
+            created_at: r.created_at.unwrap_or_else(Utc::now),
+            updated_at: r.updated_at.unwrap_or_else(Utc::now),
         }))
     }
 

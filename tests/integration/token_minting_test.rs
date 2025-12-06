@@ -3,6 +3,7 @@
 // This test requires a running Solana localnet validator
 
 use anyhow::Result;
+use api_gateway::config::SolanaProgramsConfig;
 use api_gateway::services::blockchain_service::BlockchainService;
 use solana_sdk::{
     pubkey::Pubkey,
@@ -44,8 +45,12 @@ async fn setup_token_test() -> Result<Arc<BlockchainService>> {
 
     // Initialize blockchain service (localnet)
     let blockchain_service = Arc::new(
-        BlockchainService::new("http://127.0.0.1:8899".to_string(), "localnet".to_string())
-            .expect("Failed to create blockchain service"),
+        BlockchainService::new(
+            "http://127.0.0.1:8899".to_string(),
+            "localnet".to_string(),
+            SolanaProgramsConfig::default(),
+        )
+        .expect("Failed to create blockchain service"),
     );
 
     Ok(blockchain_service)
@@ -61,7 +66,7 @@ async fn test_energy_token_program_exists() -> Result<()> {
 
     // Step 1: Get energy token program ID
     println!("📋 Step 1: Get energy token program ID");
-    let energy_token_program_id = BlockchainService::energy_token_program_id()?;
+    let energy_token_program_id = blockchain_service.energy_token_program_id()?;
     println!("✅ Energy Token Program ID: {}", energy_token_program_id);
 
     // Step 2: Verify program exists on-chain
@@ -142,7 +147,7 @@ async fn test_create_token_account() -> Result<()> {
     // Step 1: Setup
     println!("📋 Step 1: Setup test environment");
     let authority = blockchain_service.get_authority_keypair().await?;
-    let energy_token_program_id = BlockchainService::energy_token_program_id()?;
+    let energy_token_program_id = blockchain_service.energy_token_program_id()?;
 
     // Create a new token account owner
     let account_owner = Keypair::new();
@@ -182,7 +187,7 @@ async fn test_mint_tokens_instruction() -> Result<()> {
     // Step 1: Setup
     println!("📋 Step 1: Setup minting parameters");
     let authority = blockchain_service.get_authority_keypair().await?;
-    let energy_token_program_id = BlockchainService::energy_token_program_id()?;
+    let energy_token_program_id = blockchain_service.energy_token_program_id()?;
 
     // Mock mint address (would be the actual energy token mint)
     let mint_address = Pubkey::new_unique();

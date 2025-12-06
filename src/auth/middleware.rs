@@ -44,6 +44,13 @@ pub async fn auth_middleware(
                         info!("Header: {} = {:?}", name, value);
                     }
 
+                    let simulator_uuid = Uuid::parse_str(&state.config.simulator_user_id)
+                        .unwrap_or_else(|_| {
+                            tracing::warn!("Invalid SIMULATOR_USER_ID in config, using default");
+                            // Safe fallback UUID
+                            Uuid::nil()
+                        });
+
                     let user_id = if let Some(impersonate_id) = request
                         .headers()
                         .get("X-Impersonate-User")
@@ -52,15 +59,15 @@ pub async fn auth_middleware(
                         info!("Auth Middleware: Impersonating user {}", impersonate_id);
                         Uuid::parse_str(impersonate_id).unwrap_or_else(|_| {
                             info!(
-                                "Auth Middleware: Failed to parse impersonation ID, falling back"
+                                "Auth Middleware: Failed to parse impersonation ID, falling back to simulator user"
                             );
-                            Uuid::parse_str("63c1d015-6765-4843-9ca3-5ba21ee54d7e").unwrap()
+                            simulator_uuid
                         })
                     } else {
                         info!(
                             "Auth Middleware: No impersonation header found, using default simulator user"
                         );
-                        Uuid::parse_str("63c1d015-6765-4843-9ca3-5ba21ee54d7e").unwrap()
+                        simulator_uuid
                     };
 
                     // Create synthetic claims for simulator/impersonated user
@@ -77,7 +84,9 @@ pub async fn auth_middleware(
             return Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
                 .body(Body::from("Missing or invalid Authorization header"))
-                .expect("Failed to build unauthorized response");
+                .unwrap_or_else(|_| {
+                    Response::new(Body::from("Unauthorized"))
+                });
         }
     };
 
@@ -93,6 +102,13 @@ pub async fn auth_middleware(
         }
 
         // Check for impersonation (also allowed with Engineering Key via Bearer)
+        let simulator_uuid = Uuid::parse_str(&state.config.simulator_user_id)
+            .unwrap_or_else(|_| {
+                tracing::warn!("Invalid SIMULATOR_USER_ID in config, using default");
+                // Safe fallback UUID
+                Uuid::nil()
+            });
+
         let user_id = if let Some(impersonate_id) = request
             .headers()
             .get("X-Impersonate-User")
@@ -103,14 +119,14 @@ pub async fn auth_middleware(
                 impersonate_id
             );
             Uuid::parse_str(impersonate_id).unwrap_or_else(|_| {
-                info!("Auth Middleware (Bearer): Failed to parse impersonation ID, falling back");
-                Uuid::parse_str("63c1d015-6765-4843-9ca3-5ba21ee54d7e").unwrap()
+                info!("Auth Middleware (Bearer): Failed to parse impersonation ID, falling back to simulator user");
+                simulator_uuid
             })
         } else {
             info!(
                 "Auth Middleware (Bearer): No impersonation header found, using default simulator user"
             );
-            Uuid::parse_str("63c1d015-6765-4843-9ca3-5ba21ee54d7e").unwrap()
+            simulator_uuid
         };
 
         // Create synthetic claims for simulator
@@ -137,7 +153,7 @@ pub async fn auth_middleware(
         Err(_) => Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .body(Body::from("Invalid or expired token"))
-            .expect("Failed to build unauthorized response"),
+            .unwrap_or_else(|_| Response::new(Body::from("Unauthorized"))),
     }
 }
 
@@ -153,7 +169,7 @@ pub async fn require_admin_role(
             return Response::builder()
                 .status(StatusCode::FORBIDDEN)
                 .body(Body::from("Invalid user role"))
-                .expect("Failed to build forbidden response");
+                .unwrap_or_else(|_| Response::new(Body::from("Forbidden")));
         }
     };
 
@@ -163,7 +179,7 @@ pub async fn require_admin_role(
         Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body(Body::from("Admin access required"))
-            .expect("Failed to build forbidden response")
+            .unwrap_or_else(|_| Response::new(Body::from("Forbidden")))
     }
 }
 
@@ -192,6 +208,7 @@ where
 }
 
 /// Verify API key against database
+#[allow(dead_code)]
 async fn verify_api_key(state: &AppState, key: &str) -> Result<crate::auth::ApiKey> {
     let query = "
         SELECT id, key_hash, name, permissions, is_active, created_at, last_used_at

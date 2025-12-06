@@ -259,7 +259,7 @@ pub async fn issue_certificate(
 
     // Get governance program ID
     let governance_program_id =
-        crate::services::blockchain_service::BlockchainService::governance_program_id().map_err(
+        state.blockchain_service.governance_program_id().map_err(
             |e| {
                 error!("Failed to get governance program ID: {}", e);
                 ApiError::with_code(

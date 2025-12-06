@@ -1,5 +1,5 @@
 use crate::services::priority_fee_service::{PriorityFeeService, TransactionType};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     // compute_budget::ComputeBudgetInstruction,
@@ -538,8 +538,14 @@ impl TransactionHandler {
     /// Check if an account exists
     pub async fn account_exists(&self, pubkey: &Pubkey) -> Result<bool> {
         match self.rpc_client.get_account(pubkey) {
-            Ok(_) => Ok(true),
-            Err(_) => Ok(false),
+            Ok(_) => {
+                debug!("Account {} exists", pubkey);
+                Ok(true)
+            }
+            Err(e) => {
+                warn!("Account {} check failed/not found: {}", pubkey, e);
+                Ok(false)
+            }
         }
     }
 

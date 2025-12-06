@@ -3,6 +3,7 @@
 // This test requires a running Solana localnet validator
 
 use anyhow::Result;
+use api_gateway::config::SolanaProgramsConfig;
 use api_gateway::services::{blockchain_service::BlockchainService, erc_service::ErcService};
 use chrono::Utc;
 use solana_sdk::signature::{Keypair, Signer};
@@ -28,8 +29,12 @@ async fn setup_erc_test() -> Result<(PgPool, Arc<BlockchainService>, ErcService)
 
     // Initialize blockchain service (localnet)
     let blockchain_service = Arc::new(
-        BlockchainService::new("http://127.0.0.1:8899".to_string(), "localnet".to_string())
-            .expect("Failed to create blockchain service"),
+        BlockchainService::new(
+            "http://127.0.0.1:8899".to_string(),
+            "localnet".to_string(),
+            SolanaProgramsConfig::default(),
+        )
+        .expect("Failed to create blockchain service"),
     );
 
     // Initialize ERC service
@@ -100,7 +105,7 @@ async fn test_erc_issuance_on_chain() -> Result<()> {
 
     // Step 2: Get governance program ID
     println!("\n📋 Step 2: Get governance program ID");
-    let governance_program_id = BlockchainService::governance_program_id()?;
+    let governance_program_id = blockchain_service.governance_program_id()?;
     println!("✅ Governance program: {}", governance_program_id);
 
     // Step 3: Setup user and meter with generation
@@ -165,7 +170,7 @@ async fn test_erc_transfer_on_chain() -> Result<()> {
     // Step 1: Setup
     println!("📋 Step 1: Setup test environment");
     let authority = blockchain_service.get_authority_keypair().await?;
-    let governance_program_id = BlockchainService::governance_program_id()?;
+    let governance_program_id = blockchain_service.governance_program_id()?;
 
     let energy_amount = 50.0;
     let (from_keypair, meter_id) =
@@ -239,7 +244,7 @@ async fn test_erc_retirement_on_chain() -> Result<()> {
     // Step 1: Setup
     println!("📋 Step 1: Setup test environment");
     let authority = blockchain_service.get_authority_keypair().await?;
-    let governance_program_id = BlockchainService::governance_program_id()?;
+    let governance_program_id = blockchain_service.governance_program_id()?;
 
     let energy_amount = 75.0;
     let (user_keypair, meter_id) =
@@ -292,7 +297,7 @@ async fn test_complete_erc_lifecycle() -> Result<()> {
 
     // Setup
     let authority = blockchain_service.get_authority_keypair().await?;
-    let governance_program_id = BlockchainService::governance_program_id()?;
+    let governance_program_id = blockchain_service.governance_program_id()?;
 
     let energy_amount = 200.0;
     let (original_owner_keypair, meter_id) =

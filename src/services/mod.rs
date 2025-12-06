@@ -24,12 +24,16 @@ pub mod priority_fee_service;
 // pub mod redis_lock;
 // pub mod redis_pubsub;
 // pub mod redis_timeseries;
+pub mod key_rotation_service;
 pub mod settlement_service;
 pub mod token_service;
+pub mod traits;
 pub mod transaction_coordinator;
 pub mod transaction_metrics;
 pub mod transaction_service;
 pub mod validation;
+pub mod wallet_audit_logger;
+pub mod wallet_initialization_service;
 pub mod wallet_service;
 pub mod webhook_service;
 pub mod websocket_service;
@@ -45,6 +49,7 @@ pub use epoch_scheduler::{EpochConfig, EpochScheduler};
 pub use erc_service::ErcService;
 pub use event_processor_service::EventProcessorService;
 pub use health_check::HealthChecker;
+pub use key_rotation_service::{KeyRotationService, RotationReport, RotationStatus};
 pub use market_clearing::MarketClearingEngine;
 pub use market_clearing_service::MarketClearingService;
 pub use meter_polling_service::MeterPollingService;
@@ -55,6 +60,11 @@ pub use settlement_service::SettlementService;
 pub use token_service::TokenService;
 pub use transaction_coordinator::TransactionCoordinator;
 pub use transaction_service::TransactionService;
+pub use wallet_audit_logger::WalletAuditLogger;
+pub use wallet_initialization_service::{
+    WalletDiagnosis, WalletFixResult, WalletInitializationReport, WalletInitializationService,
+    WalletStatus,
+};
 pub use wallet_service::WalletService;
 pub use webhook_service::WebhookService;
 pub use websocket_service::WebSocketService;

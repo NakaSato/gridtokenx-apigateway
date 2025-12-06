@@ -138,6 +138,13 @@ pub async fn auth_logger_middleware(request: Request, next: Next) -> Response {
                 "Authentication failed - invalid credentials"
             );
         }
+        StatusCode::FORBIDDEN => {
+            warn!(
+                uri = %uri,
+                status = %status,
+                "Authentication failed - access denied"
+            );
+        }
         StatusCode::TOO_MANY_REQUESTS => {
             warn!(
                 uri = %uri,
@@ -145,11 +152,19 @@ pub async fn auth_logger_middleware(request: Request, next: Next) -> Response {
                 "Authentication rate limited"
             );
         }
+        status if status.is_client_error() => {
+            // 400 Bad Request etc. are often validation errors, not auth errors
+            debug!(
+                uri = %uri,
+                status = %status,
+                "Request rejected (client error)"
+            );
+        }
         _ => {
             error!(
                 uri = %uri,
                 status = %status,
-                "Authentication error"
+                "Authentication system error"
             );
         }
     }

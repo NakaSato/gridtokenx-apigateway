@@ -196,7 +196,7 @@ pub async fn get_oracle_data(
 
     // Get the Oracle program ID
     let oracle_program_id =
-        crate::services::BlockchainService::oracle_program_id().map_err(|e| {
+        state.blockchain_service.oracle_program_id().map_err(|e| {
             error!("Failed to parse oracle program ID: {}", e);
             ApiError::Internal(format!("Invalid program ID: {}", e))
         })?;

@@ -16,8 +16,8 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::services::BlockchainService;
 use crate::services::market_clearing::TradeMatch;
+use crate::services::BlockchainService;
 
 /// Settlement status
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -46,6 +46,9 @@ pub struct Settlement {
     pub trade_id: Uuid,
     pub buyer_id: Uuid,
     pub seller_id: Uuid,
+    // Add missing fields for PDA lookup
+    pub buy_order_id: Uuid,
+    pub sell_order_id: Uuid,
     pub energy_amount: Decimal,
     pub price: Decimal,
     pub total_value: Decimal,
@@ -141,6 +144,8 @@ impl SettlementService {
             trade_id: Uuid::new_v4(), // Would come from trade.id if available
             buyer_id: trade.buyer_id,
             seller_id: trade.seller_id,
+            buy_order_id: trade.buy_order_id,
+            sell_order_id: trade.sell_order_id,
             energy_amount: trade.quantity,
             price: trade.price,
             total_value,
@@ -156,15 +161,17 @@ impl SettlementService {
         sqlx::query(
             r#"
             INSERT INTO settlements (
-                id, buyer_id, seller_id, energy_amount,
+                id, buyer_id, seller_id, buy_order_id, sell_order_id, energy_amount,
                 price_per_kwh, total_amount, fee_amount, net_amount,
                 status, created_at, epoch_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             "#,
         )
         .bind(settlement.id)
         .bind(settlement.buyer_id)
         .bind(settlement.seller_id)
+        .bind(settlement.buy_order_id)
+        .bind(settlement.sell_order_id)
         .bind(settlement.energy_amount)
         .bind(settlement.price)
         .bind(settlement.total_value)
@@ -254,8 +261,10 @@ impl SettlementService {
         let seller_pubkey = BlockchainService::parse_pubkey(&seller_wallet)
             .map_err(|e| ApiError::Internal(format!("Invalid seller wallet: {}", e)))?;
 
-        // 3. Get mint address from config or environment
-        let mint = BlockchainService::parse_pubkey("94G1r674LmRDmLN2UPjDFD8Eh7zT8JaSaxv9v68GyEur")
+        // 3. Get mint address from environment
+        let mint_str = std::env::var("ENERGY_TOKEN_MINT")
+            .map_err(|e| ApiError::Internal(format!("ENERGY_TOKEN_MINT not set: {}", e)))?;
+        let mint = BlockchainService::parse_pubkey(&mint_str)
             .map_err(|e| ApiError::Internal(format!("Invalid mint config: {}", e)))?;
 
         // 4. Get authority keypair from wallet service
@@ -281,40 +290,53 @@ impl SettlementService {
                 ApiError::Internal(format!("Failed to create seller token account: {}", e))
             })?;
 
-        // 6. Calculate amounts (in lamports, 9 decimals)
-        let total_amount_lamports = (settlement.total_value * Decimal::from(1_000_000_000i64))
-            .to_string()
-            .parse::<u64>()
-            .unwrap_or(0);
-        let fee_amount_lamports = (settlement.fee_amount * Decimal::from(1_000_000_000i64))
-            .to_string()
-            .parse::<u64>()
-            .unwrap_or(0);
-        let seller_amount_lamports = total_amount_lamports - fee_amount_lamports;
+        // 6. Calculate match amount (in Wh, same as order creation: kWh * 1000)
+        // Order creation uses: energy_amount_u64 = (payload.energy_amount * 1000.0) as u64
+        // So settlement must use the same conversion factor
+        let match_amount_wh = {
+            let amount_wh = settlement.energy_amount * Decimal::from(1000i64);
+            // Use floor() to get integer part, then convert to u64
+            amount_wh.floor().to_string().parse::<u64>().unwrap_or(0)
+        };
 
         info!(
-            "Settlement transfer: {} tokens from buyer {} to seller {}",
-            settlement.energy_amount, buyer_pubkey, seller_pubkey
+            "🔍 Settlement energy_amount: {}, match_amount_wh: {}",
+            settlement.energy_amount, match_amount_wh
         );
 
-        // 7. Transfer tokens: buyer → seller (net amount after platform fee)
-        // Note: This assumes buyer has sufficient tokens. In production, use escrow.
+        // 7. Get Order PDAs from database
+        let buy_order_pda = self.get_order_pda(settlement.buy_order_id).await?;
+        let sell_order_pda = self.get_order_pda(settlement.sell_order_id).await?;
+
+        // Derive Market PDA
+        let trading_program_id = self
+            .blockchain
+            .trading_program_id()
+            .map_err(|e| ApiError::Internal(format!("Failed to get trading program ID: {}", e)))?;
+        let (market_pda, _) =
+            solana_sdk::pubkey::Pubkey::find_program_address(&[b"market"], &trading_program_id);
+
+        info!(
+            "Executing on-chain MATCH: Market {}, Buy Order {}, Sell Order {}, Amount: {} Wh",
+            market_pda, buy_order_pda, sell_order_pda, match_amount_wh
+        );
+
+        // 8. Execute Match Orders
         let signature = self
             .blockchain
-            .transfer_tokens(
+            .execute_match_orders(
                 &authority,
-                &buyer_token_account,  // From buyer
-                &seller_token_account, // To seller
-                &mint,
-                seller_amount_lamports,
-                9, // Decimals
+                &market_pda.to_string(),
+                &buy_order_pda,
+                &sell_order_pda,
+                match_amount_wh,
             )
             .await
-            .map_err(|e| ApiError::Internal(format!("Blockchain transfer failed: {}", e)))?;
+            .map_err(|e| ApiError::Internal(format!("Blockchain match failed: {}", e)))?;
 
         info!("Settlement completed. Signature: {}", signature);
 
-        // 8. Get current slot for confirmation
+        // 9. Get current slot for confirmation
         let slot = self
             .blockchain
             .get_slot()
@@ -330,6 +352,24 @@ impl SettlementService {
         })
     }
 
+    /// Helper: Get order creation transaction signature
+    async fn get_order_creation_tx(&self, order_id: Uuid) -> Result<String, ApiError> {
+        let result = sqlx::query!(
+            "SELECT blockchain_tx_signature FROM trading_orders WHERE id = $1",
+            order_id
+        )
+        .fetch_one(&self.db)
+        .await
+        .map_err(ApiError::Database)?;
+
+        result
+            .blockchain_tx_signature
+            .ok_or(ApiError::Internal(format!(
+                "Order {} has no creation tx signature",
+                order_id
+            )))
+    }
+
     /// Helper: Get user wallet address from database
     async fn get_user_wallet(&self, user_id: &Uuid) -> Result<String, ApiError> {
         let result = sqlx::query!("SELECT wallet_address FROM users WHERE id = $1", user_id)
@@ -340,6 +380,21 @@ impl SettlementService {
         result
             .wallet_address
             .ok_or_else(|| ApiError::Internal(format!("User {} has no wallet connected", user_id)))
+    }
+
+    /// Helper: Get Order PDA from database
+    async fn get_order_pda(&self, order_id: Uuid) -> Result<String, ApiError> {
+        let result = sqlx::query!(
+            "SELECT order_pda FROM trading_orders WHERE id = $1",
+            order_id
+        )
+        .fetch_one(&self.db)
+        .await
+        .map_err(ApiError::Database)?;
+
+        result
+            .order_pda
+            .ok_or_else(|| ApiError::Internal(format!("Order {} has no PDA stored", order_id)))
     }
 
     /// Process all pending settlements
@@ -380,7 +435,7 @@ impl SettlementService {
         let row = sqlx::query(
             r#"
             SELECT
-                id, buyer_id, seller_id, energy_amount,
+                id, buyer_id, seller_id, buy_order_id, sell_order_id, energy_amount,
                 price_per_kwh, total_amount, fee_amount, net_amount,
                 status, transaction_hash, created_at, processed_at
             FROM settlements
@@ -407,6 +462,8 @@ impl SettlementService {
             trade_id: Uuid::new_v4(), // Not stored in this simplified version
             buyer_id: row.get("buyer_id"),
             seller_id: row.get("seller_id"),
+            buy_order_id: row.get("buy_order_id"),
+            sell_order_id: row.get("sell_order_id"),
             energy_amount: row.get("energy_amount"),
             price: row.get("price_per_kwh"),
             total_value: row.get("total_amount"),
@@ -602,6 +659,8 @@ mod tests {
             trade_id: Uuid::new_v4(),
             buyer_id: Uuid::new_v4(),
             seller_id: Uuid::new_v4(),
+            buy_order_id: Uuid::new_v4(),
+            sell_order_id: Uuid::new_v4(),
             energy_amount: Decimal::from(100),
             price: Decimal::from_str("0.15").unwrap(),
             total_value: Decimal::from_str("15.00").unwrap(),

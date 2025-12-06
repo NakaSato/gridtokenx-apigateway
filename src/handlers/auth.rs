@@ -1,20 +1,20 @@
-use axum::{
-    extract::{Path, Query, State},
-    http::{StatusCode, HeaderMap},
-    response::Json,
-};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use validator::Validate;
-use utoipa::ToSchema;
-
-use crate::auth::{SecureAuthResponse, Claims, UserInfo, SecureUserInfo};
 use crate::auth::middleware::AuthenticatedUser;
 use crate::auth::password::PasswordService;
+use crate::auth::{Claims, SecureAuthResponse, SecureUserInfo, UserInfo};
 use crate::error::{ApiError, Result};
 use crate::services::AuditEvent;
 use crate::utils::{extract_ip_address, extract_user_agent};
 use crate::AppState;
+use axum::{
+    extract::{Path, Query, State},
+    http::{HeaderMap, StatusCode},
+    response::Json,
+};
+use serde::{Deserialize, Serialize};
+use solana_sdk::signature::Signer;
+use utoipa::ToSchema;
+use uuid::Uuid;
+use validator::Validate;
 
 /// Login request
 #[derive(Debug, Deserialize, Serialize, Validate, ToSchema)]
@@ -22,7 +22,7 @@ pub struct LoginRequest {
     #[validate(length(min = 3, max = 50))]
     #[schema(example = "john_doe", min_length = 3, max_length = 50)]
     pub username: String,
-    
+
     #[validate(length(min = 8, max = 128))]
     #[schema(example = "SecurePassword123!", min_length = 8, max_length = 128)]
     pub password: String,
@@ -34,15 +34,15 @@ pub struct UpdateProfileRequest {
     #[validate(email)]
     #[schema(example = "john.doe@example.com")]
     pub email: Option<String>,
-    
+
     #[validate(length(min = 1, max = 100))]
     #[schema(example = "John")]
     pub first_name: Option<String>,
-    
+
     #[validate(length(min = 1, max = 100))]
     #[schema(example = "Doe")]
     pub last_name: Option<String>,
-    
+
     #[validate(length(min = 32, max = 44))]
     #[schema(example = "5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP8")]
     pub wallet_address: Option<String>,
@@ -54,7 +54,7 @@ pub struct ChangePasswordRequest {
     #[validate(length(min = 8, max = 128))]
     #[schema(example = "OldPassword123!")]
     pub current_password: String,
-    
+
     #[validate(length(min = 8, max = 128))]
     #[schema(example = "NewSecurePassword456!")]
     pub new_password: String,
@@ -65,21 +65,21 @@ pub struct ChangePasswordRequest {
 pub struct UserSearchQuery {
     /// Search term for username, email, first name, or last name
     pub search: Option<String>,
-    
+
     /// Filter by role
     pub role: Option<String>,
-    
+
     /// Page number (1-indexed)
     #[serde(default = "default_page")]
     pub page: u32,
-    
+
     /// Number of items per page (max 100)
     #[serde(default = "default_page_size")]
     pub page_size: u32,
-    
+
     /// Sort field: "created_at", "username", "email"
     pub sort_by: Option<String>,
-    
+
     /// Sort direction: "asc" or "desc"
     #[serde(default = "default_sort_order")]
     pub sort_order: crate::utils::SortOrder,
@@ -104,38 +104,40 @@ impl UserSearchQuery {
         if self.page < 1 {
             self.page = 1;
         }
-        
+
         // Limit page size to 100
         if self.page_size < 1 {
             self.page_size = 20;
         } else if self.page_size > 100 {
             self.page_size = 100;
         }
-        
+
         // Validate sort field
         if let Some(sort_by) = &self.sort_by {
             match sort_by.as_str() {
                 "created_at" | "username" | "email" | "role" => {}
-                _ => return Err(ApiError::validation_error(
-                    "Invalid sort_by field. Allowed values: created_at, username, email, role",
-                    Some("sort_by"),
-                )),
+                _ => {
+                    return Err(ApiError::validation_error(
+                        "Invalid sort_by field. Allowed values: created_at, username, email, role",
+                        Some("sort_by"),
+                    ))
+                }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Calculate SQL LIMIT value
     pub fn limit(&self) -> i64 {
         self.page_size as i64
     }
-    
+
     /// Calculate SQL OFFSET value
     pub fn offset(&self) -> i64 {
         ((self.page - 1) * self.page_size) as i64
     }
-    
+
     /// Get sort direction as SQL string
     pub fn sort_direction(&self) -> &str {
         match self.sort_order {
@@ -143,7 +145,7 @@ impl UserSearchQuery {
             crate::utils::SortOrder::Desc => "DESC",
         }
     }
-    
+
     /// Get sort field with default
     pub fn get_sort_field(&self) -> &str {
         self.sort_by.as_deref().unwrap_or("created_at")
@@ -180,7 +182,8 @@ pub async fn login(
     let user_agent = extract_user_agent(&headers);
 
     // Validate request
-    request.validate()
+    request
+        .validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
 
     // Find user by username
@@ -189,7 +192,7 @@ pub async fn login(
                 first_name, last_name, wallet_address, blockchain_registered,
                 is_active, email_verified, created_at, updated_at
          FROM users 
-         WHERE username = $1 AND is_active = true"
+         WHERE username = $1 AND is_active = true",
     )
     .bind(&request.username)
     .fetch_optional(&state.db)
@@ -233,13 +236,74 @@ pub async fn login(
             user_agent: user_agent.clone(),
         });
         return Err(ApiError::Forbidden(
-            "Email not verified. Please check your email for verification link.".to_string()
+            "Email not verified. Please check your email for verification link.".to_string(),
         ));
+    }
+
+    // Check for wallet and create if missing (First Login)
+    let mut wallet_address_resp = user.wallet_address.clone();
+
+    if user.wallet_address.is_none() {
+        // Generate new keypair
+        let keypair = crate::services::WalletService::create_keypair();
+        let pubkey = keypair.pubkey().to_string();
+
+        // Encrypt private key with master secret (consistent with trading handlers)
+        // This allows the system to decrypt keys for blockchain operations without user password
+        let master_secret =
+            std::env::var("WALLET_MASTER_SECRET").unwrap_or_else(|_| "dev-secret-key".to_string());
+        let (encrypted_key_b64, salt_b64, iv_b64) =
+            crate::services::WalletService::encrypt_private_key(
+                &master_secret,
+                &keypair.to_bytes(),
+            )
+            .map_err(|e| ApiError::Internal(format!("Failed to secure wallet: {}", e)))?;
+
+        // Decode base64 to bytes for BYTEA storage
+        use base64::{engine::general_purpose, Engine as _};
+        let encrypted_key = general_purpose::STANDARD
+            .decode(&encrypted_key_b64)
+            .map_err(|e| ApiError::Internal(format!("Failed to decode encrypted key: {}", e)))?;
+        let salt = general_purpose::STANDARD
+            .decode(&salt_b64)
+            .map_err(|e| ApiError::Internal(format!("Failed to decode salt: {}", e)))?;
+        let iv = general_purpose::STANDARD
+            .decode(&iv_b64)
+            .map_err(|e| ApiError::Internal(format!("Failed to decode IV: {}", e)))?;
+
+        // Update user with wallet info
+        sqlx::query!(
+            "UPDATE users 
+             SET wallet_address = $1, 
+                 encrypted_private_key = $2, 
+                 wallet_salt = $3, 
+                 encryption_iv = $4,
+                 updated_at = NOW()
+             WHERE id = $5",
+            pubkey,
+            &encrypted_key[..],
+            &salt[..],
+            &iv[..],
+            user.id
+        )
+        .execute(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(format!("Failed to save wallet: {}", e)))?;
+
+        // Log wallet creation
+        state
+            .audit_logger
+            .log_async(AuditEvent::BlockchainRegistration {
+                user_id: user.id,
+                wallet_address: pubkey.clone(),
+            });
+
+        wallet_address_resp = Some(pubkey);
     }
 
     // Create JWT claims
     let claims = Claims::new(user.id, user.username.clone(), user.role.clone());
-    
+
     // Generate token
     let access_token = state.jwt_service.encode_token(&claims)?;
 
@@ -264,7 +328,7 @@ pub async fn login(
             username: user.username,
             email: user.email,
             role: user.role,
-            blockchain_registered: user.wallet_address.is_some(),
+            blockchain_registered: wallet_address_resp.is_some(),
         },
     };
 
@@ -294,7 +358,7 @@ pub async fn get_profile(
                 first_name, last_name, wallet_address, blockchain_registered,
                 is_active, email_verified, created_at, updated_at
          FROM users 
-         WHERE id = $1 AND is_active = true"
+         WHERE id = $1 AND is_active = true",
     )
     .bind(user.0.sub)
     .fetch_optional(&state.db)
@@ -336,7 +400,8 @@ pub async fn update_profile(
     Json(request): Json<UpdateProfileRequest>,
 ) -> Result<Json<UserInfo>> {
     // Validate request
-    request.validate()
+    request
+        .validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
 
     // Build dynamic update query
@@ -372,7 +437,7 @@ pub async fn update_profile(
     );
 
     let mut query_builder = sqlx::query(&query);
-    
+
     if let Some(email) = &request.email {
         query_builder = query_builder.bind(email);
     }
@@ -385,7 +450,7 @@ pub async fn update_profile(
     if let Some(wallet_address) = &request.wallet_address {
         query_builder = query_builder.bind(wallet_address);
     }
-    
+
     query_builder = query_builder.bind(user.0.sub);
 
     let result = query_builder
@@ -427,24 +492,29 @@ pub async fn change_password(
     let ip_address = extract_ip_address(&headers);
 
     // Validate request
-    request.validate()
+    request
+        .validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
 
     // Get current password hash
     let current_hash = sqlx::query_scalar::<_, String>(
-        "SELECT password_hash FROM users WHERE id = $1 AND is_active = true"
+        "SELECT password_hash FROM users WHERE id = $1 AND is_active = true",
     )
     .bind(user.0.sub)
     .fetch_optional(&state.db)
     .await
     .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
 
-    let current_hash = current_hash.ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+    let current_hash =
+        current_hash.ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
 
     // Verify current password
-    let password_valid = PasswordService::verify_password(&request.current_password, &current_hash)?;
+    let password_valid =
+        PasswordService::verify_password(&request.current_password, &current_hash)?;
     if !password_valid {
-        return Err(ApiError::BadRequest("Current password is incorrect".to_string()));
+        return Err(ApiError::BadRequest(
+            "Current password is incorrect".to_string(),
+        ));
     }
 
     // Hash new password
@@ -500,7 +570,7 @@ pub async fn get_user(
                 first_name, last_name, wallet_address, blockchain_registered,
                 is_active, email_verified, created_at, updated_at
          FROM users
-         WHERE id = $1"
+         WHERE id = $1",
     )
     .bind(user_id)
     .fetch_optional(&state.db)
@@ -543,7 +613,7 @@ pub async fn list_users(
 ) -> Result<Json<UserListResponse>> {
     // Validate and normalize parameters
     params.validate()?;
-    
+
     let limit = params.limit();
     let offset = params.offset();
     let sort_field = params.get_sort_field();
@@ -591,7 +661,11 @@ pub async fn list_users(
          WHERE {} 
          ORDER BY {} {}
          LIMIT ${} OFFSET ${}",
-        where_clause, sort_field, sort_direction, param_count, param_count + 1
+        where_clause,
+        sort_field,
+        sort_direction,
+        param_count,
+        param_count + 1
     );
 
     let users_data = sqlx::query_as::<_, UserRow>(&users_query)

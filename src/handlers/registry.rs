@@ -117,7 +117,7 @@ pub async fn get_blockchain_user(
     // Derive the user account PDA (Program Derived Address)
     // User account PDA seeds: ["user", user_authority.key()]
     let registry_program_id =
-        crate::services::BlockchainService::registry_program_id().map_err(|e| {
+        state.blockchain_service.registry_program_id().map_err(|e| {
             error!("Failed to parse registry program ID: {}", e);
             ApiError::Internal(format!("Invalid program ID: {}", e))
         })?;

@@ -34,8 +34,6 @@ pub struct EnergyReadingDb {
 
 impl From<EnergyReadingDb> for EnergyReading {
     fn from(db_reading: EnergyReadingDb) -> Self {
-        use std::str::FromStr;
-
         EnergyReading {
             id: db_reading.id,
             meter_id: db_reading.meter_id,

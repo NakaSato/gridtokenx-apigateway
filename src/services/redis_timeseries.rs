@@ -38,7 +38,7 @@ impl TimeSeriesPoint {
     pub fn now(value: f64) -> Self {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as i64;
         Self::new(timestamp, value)
     }
@@ -47,7 +47,7 @@ impl TimeSeriesPoint {
     pub fn now_with_labels(value: f64, labels: HashMap<String, String>) -> Self {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as i64;
         Self::with_labels(timestamp, value, labels)
     }
@@ -91,7 +91,7 @@ impl TimeRange {
     pub fn last_milliseconds(ms: i64) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as i64;
         Self {
             start: now - ms,

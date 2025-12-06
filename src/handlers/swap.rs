@@ -5,7 +5,7 @@ use crate::models::amm::SwapQuote;
 use crate::services::amm_service::SwapTransaction;
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::State,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};

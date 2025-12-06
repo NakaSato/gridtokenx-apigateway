@@ -29,6 +29,32 @@ pub struct Config {
     pub email: EmailConfig,
     pub tokenization: TokenizationConfig,
     pub event_processor: EventProcessorConfig,
+    pub solana_programs: SolanaProgramsConfig,
+    /// Default simulator user UUID for engineering/test mode
+    pub simulator_user_id: String,
+    pub encryption_secret: String,
+}
+
+/// Solana program IDs configuration - moved from hardcoded values
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SolanaProgramsConfig {
+    pub registry_program_id: String,
+    pub oracle_program_id: String,
+    pub governance_program_id: String,
+    pub energy_token_program_id: String,
+    pub trading_program_id: String,
+}
+
+impl Default for SolanaProgramsConfig {
+    fn default() -> Self {
+        Self {
+            registry_program_id: "GTX1111111111111111111111111111111111111111".to_string(),
+            oracle_program_id: "GTX2222222222222222222222222222222222222222".to_string(),
+            governance_program_id: "GTX3333333333333333333333333333333333333333".to_string(),
+            energy_token_program_id: "GTX4444444444444444444444444444444444444444".to_string(),
+            trading_program_id: "GTX5555555555555555555555555555555555555555".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,6 +189,23 @@ impl Config {
                 webhook_url: env::var("EVENT_PROCESSOR_WEBHOOK_URL").ok(),
                 webhook_secret: env::var("EVENT_PROCESSOR_WEBHOOK_SECRET").ok(),
             },
+            solana_programs: SolanaProgramsConfig {
+                registry_program_id: env::var("SOLANA_REGISTRY_PROGRAM_ID")
+                    .unwrap_or_else(|_| "2XPQmFYMdXjP7ffoBB3mXeCdboSFg5Yeb6QmTSGbW8a7".to_string()),
+                oracle_program_id: env::var("SOLANA_ORACLE_PROGRAM_ID")
+                    .unwrap_or_else(|_| "DvdtU4quEbuxUY2FckmvcXwTpC9qp4HLJKb1PMLaqAoE".to_string()),
+                governance_program_id: env::var("SOLANA_GOVERNANCE_PROGRAM_ID")
+                    .unwrap_or_else(|_| "4DY97YYBt4bxvG7xaSmWy3MhYhmA6HoMajBHVqhySvXe".to_string()),
+                energy_token_program_id: env::var("SOLANA_ENERGY_TOKEN_PROGRAM_ID")
+                    .unwrap_or_else(|_| "94G1r674LmRDmLN2UPjDFD8Eh7zT8JaSaxv9v68GyEur".to_string()),
+                trading_program_id: env::var("SOLANA_TRADING_PROGRAM_ID")
+                    .unwrap_or_else(|_| "9t3s8sCgVUG9kAgVPsozj8mDpJp9cy6SF5HwRK5nvAHb".to_string()),
+            },
+            simulator_user_id: env::var("SIMULATOR_USER_ID")
+                .unwrap_or_else(|_| "63c1d015-6765-4843-9ca3-5ba21ee54d7e".to_string()),
+            encryption_secret: env::var("ENCRYPTION_SECRET").map_err(|_| {
+                anyhow::anyhow!("ENCRYPTION_SECRET environment variable is required")
+            })?,
         })
     }
 }

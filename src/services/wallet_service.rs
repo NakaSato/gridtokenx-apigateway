@@ -1,15 +1,24 @@
+use aes_gcm::{
+    aead::{Aead, KeyInit},
+    Aes256Gcm, Nonce,
+};
+use anyhow::{anyhow, Context, Result};
+use base64::{engine::general_purpose, Engine as _};
+use hmac::Hmac;
+use pbkdf2::pbkdf2;
+use rand::{rngs::OsRng, RngCore};
+use sha2::Sha256;
+use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature, Signer},
 };
-use solana_client::rpc_client::RpcClient;
-use anyhow::{anyhow, Context, Result};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, error, warn};
+use tracing::{debug, error, info, warn};
 
 /// Service for managing Solana wallets in development environment
 #[derive(Clone)]
@@ -34,7 +43,10 @@ impl WalletService {
 
     /// Create wallet service with a specific wallet file path
     pub fn with_path(rpc_url: &str, wallet_path: String) -> Self {
-        info!("Initializing WalletService with RPC URL: {} and wallet path: {}", rpc_url, wallet_path);
+        info!(
+            "Initializing WalletService with RPC URL: {} and wallet path: {}",
+            rpc_url, wallet_path
+        );
         Self {
             rpc_client: Arc::new(RpcClient::new(rpc_url.to_string())),
             authority_keypair: Arc::new(RwLock::new(None)),
@@ -66,16 +78,19 @@ impl WalletService {
     /// Request airdrop for development (localhost only)
     pub async fn request_airdrop(&self, pubkey: &Pubkey, amount_sol: f64) -> Result<Signature> {
         let lamports = (amount_sol * 1_000_000_000.0) as u64; // Convert SOL to lamports
-        
-        info!("Requesting airdrop of {} SOL ({} lamports) for {}", amount_sol, lamports, pubkey);
-        
+
+        info!(
+            "Requesting airdrop of {} SOL ({} lamports) for {}",
+            amount_sol, lamports, pubkey
+        );
+
         match self.rpc_client.request_airdrop(pubkey, lamports) {
             Ok(signature) => {
                 info!("Airdrop successful. Signature: {}", signature);
-                
+
                 // Wait for confirmation in development
                 let _ = self.confirm_transaction(&signature).await;
-                
+
                 Ok(signature)
             }
             Err(e) => {
@@ -174,12 +189,16 @@ impl WalletService {
 
         // Solana SDK 3.0 uses new_from_array with [u8; 32] (secret key only)
         // The first 32 bytes are the secret key
-        let secret_key: [u8; 32] = keypair_bytes[..32].try_into()
+        let secret_key: [u8; 32] = keypair_bytes[..32]
+            .try_into()
             .map_err(|_| anyhow!("Failed to extract secret key"))?;
-        
+
         let keypair = Keypair::new_from_array(secret_key);
 
-        info!("Successfully loaded authority keypair: {}", keypair.pubkey());
+        info!(
+            "Successfully loaded authority keypair: {}",
+            keypair.pubkey()
+        );
 
         // Cache in memory
         let mut lock = self.authority_keypair.write().await;
@@ -210,12 +229,16 @@ impl WalletService {
 
         // Solana SDK 3.0 uses new_from_array with [u8; 32] (secret key only)
         // The first 32 bytes are the secret key
-        let secret_key: [u8; 32] = keypair_bytes[..32].try_into()
+        let secret_key: [u8; 32] = keypair_bytes[..32]
+            .try_into()
             .map_err(|_| anyhow!("Failed to extract secret key"))?;
-        
+
         let keypair = Keypair::new_from_array(secret_key);
 
-        info!("Successfully loaded authority keypair from env: {}", keypair.pubkey());
+        info!(
+            "Successfully loaded authority keypair from env: {}",
+            keypair.pubkey()
+        );
 
         // Cache in memory
         let mut lock = self.authority_keypair.write().await;
@@ -264,9 +287,78 @@ impl WalletService {
     /// Returns error if not loaded
     pub async fn get_authority_keypair(&self) -> Result<Arc<Keypair>> {
         let lock = self.authority_keypair.read().await;
-        lock.as_ref()
-            .cloned()
-            .ok_or_else(|| anyhow!("Authority keypair not loaded. Call initialize_authority() first."))
+        lock.as_ref().cloned().ok_or_else(|| {
+            anyhow!("Authority keypair not loaded. Call initialize_authority() first.")
+        })
+    }
+    // ====================================================================
+    // Encryption / Decryption Helpers
+    // ====================================================================
+
+    /// Encrypt a private key using a password
+    /// Returns (encrypted_data_base64, salt_base64, iv_base64)
+    pub fn encrypt_private_key(
+        password: &str,
+        private_key: &[u8],
+    ) -> Result<(String, String, String)> {
+        // 1. Generate salt
+        let mut salt = [0u8; 16];
+        OsRng.fill_bytes(&mut salt);
+
+        // 2. Derive key from password using PBKDF2
+        let mut derived_key = [0u8; 32]; // AES-256 needs 32 bytes
+        pbkdf2::<Hmac<Sha256>>(password.as_bytes(), &salt, 100_000, &mut derived_key);
+
+        // 3. Generate IV (Nonce)
+        let mut iv = [0u8; 12]; // AES-GCM standard nonce size
+        OsRng.fill_bytes(&mut iv);
+        let nonce = Nonce::from_slice(&iv);
+
+        // 4. Encrypt
+        let cipher = Aes256Gcm::new(&derived_key.into());
+        let encrypted_data = cipher
+            .encrypt(nonce, private_key)
+            .map_err(|e| anyhow!("Encryption failed: {}", e))?;
+
+        // 5. Encode to Base64
+        let encrypted_b64 = general_purpose::STANDARD.encode(encrypted_data);
+        let salt_b64 = general_purpose::STANDARD.encode(salt);
+        let iv_b64 = general_purpose::STANDARD.encode(iv);
+
+        Ok((encrypted_b64, salt_b64, iv_b64))
+    }
+
+    /// Decrypt a private key using a password
+    pub fn decrypt_private_key(
+        password: &str,
+        encrypted_data_b64: &str,
+        salt_b64: &str,
+        iv_b64: &str,
+    ) -> Result<Vec<u8>> {
+        // 1. Decode Base64 inputs
+        let encrypted_data = general_purpose::STANDARD
+            .decode(encrypted_data_b64)
+            .map_err(|e| anyhow!("Invalid Base64 encrypted data: {}", e))?;
+        let salt = general_purpose::STANDARD
+            .decode(salt_b64)
+            .map_err(|e| anyhow!("Invalid Base64 salt: {}", e))?;
+        let iv = general_purpose::STANDARD
+            .decode(iv_b64)
+            .map_err(|e| anyhow!("Invalid Base64 IV: {}", e))?;
+
+        // 2. Derive key again
+        let mut derived_key = [0u8; 32];
+        pbkdf2::<Hmac<Sha256>>(password.as_bytes(), &salt, 100_000, &mut derived_key);
+
+        // 3. Decrypt
+        let cipher = Aes256Gcm::new(&derived_key.into());
+        let nonce = Nonce::from_slice(&iv);
+
+        let plaintext = cipher
+            .decrypt(nonce, encrypted_data.as_ref())
+            .map_err(|_| anyhow!("Decryption failed - incorrect password or corrupted data"))?;
+
+        Ok(plaintext)
     }
 
     /// Get the authority public key as a string
@@ -384,5 +476,55 @@ mod tests {
         let result = wallet_service.get_authority_keypair().await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not loaded"));
+    }
+
+    #[test]
+    fn test_encryption_decryption() {
+        let password = "strong_password_123";
+        let keypair = Keypair::new();
+        let private_key = keypair.to_bytes();
+
+        // Encrypt
+        let (encrypted, salt, iv) =
+            WalletService::encrypt_private_key(password, &private_key).expect("Encryption failed");
+
+        assert!(!encrypted.is_empty());
+        assert!(!salt.is_empty());
+        assert!(!iv.is_empty());
+
+        // Decrypt with correct password
+        let decrypted = WalletService::decrypt_private_key(password, &encrypted, &salt, &iv)
+            .expect("Decryption failed");
+
+        assert_eq!(decrypted, private_key.to_vec());
+
+        // Decrypt with wrong password (should fail)
+        let wrong_password = "wrong_password";
+        let result = WalletService::decrypt_private_key(wrong_password, &encrypted, &salt, &iv);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encryption_randomness() {
+        let password = "same_password";
+        let data = b"secret_data";
+
+        // Encrypt twice
+        let (enc1, salt1, iv1) = WalletService::encrypt_private_key(password, data).unwrap();
+        let (enc2, salt2, iv2) = WalletService::encrypt_private_key(password, data).unwrap();
+
+        // Should be different due to random salt and IV
+        assert_ne!(enc1, enc2, "Encryption should be non-deterministic");
+        assert_ne!(salt1, salt2, "Salts should be unique");
+        assert_ne!(iv1, iv2, "IVs should be unique");
+    }
+
+    #[test]
+    fn test_decryption_invalid_encoding() {
+        let password = "password";
+        // Invalid Base64
+        let result = WalletService::decrypt_private_key(password, "invalid!base64", "salt", "iv");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Base64"));
     }
 }

@@ -1,5 +1,39 @@
-// Market Clearing Engine for P2P Energy Trading
-// Implements double auction mechanism with price discovery
+//! Market Clearing Engine for P2P Energy Trading
+//!
+//! This module implements a double auction mechanism with price discovery for
+//! peer-to-peer energy trading on the GridTokenX platform.
+//!
+//! # Architecture
+//!
+//! The market clearing engine consists of:
+//! - **Order Book**: In-memory order book with buy/sell price levels
+//! - **Redis Cache**: Persistent order book snapshot for failover
+//! - **Price Discovery**: Double auction mechanism to find clearing price
+//! - **Trade Matching**: FIFO matching at each price level
+//!
+//! # Trading Flow
+//!
+//! 1. Orders are submitted via the trading API
+//! 2. Orders are added to the in-memory order book
+//! 3. At epoch boundaries, market clearing runs:
+//!    - Finds the clearing price where supply meets demand
+//!    - Matches buy and sell orders at that price
+//!    - Generates trade matches for settlement
+//! 4. Matches are settled via the settlement service
+//!
+//! # Example
+//!
+//! ```ignore
+//! let engine = MarketClearingEngine::new(db, redis)
+//!     .with_websocket(ws_service)
+//!     .with_settlement_service(settlement);
+//!
+//! // Load existing orders
+//! engine.load_order_book().await?;
+//!
+//! // Run clearing at epoch boundary
+//! let (price, matches) = engine.run_clearing(epoch_id).await?;
+//! ```
 
 use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
@@ -7,17 +41,19 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::collections::{BTreeMap, HashMap};
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::services::WebSocketService;
 use crate::services::settlement_service::SettlementService;
-use tracing::error;
+use crate::services::WebSocketService;
+
+// ============================================================================
+// Order Types
+// ============================================================================
 
 /// Order side (Buy or Sell)
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

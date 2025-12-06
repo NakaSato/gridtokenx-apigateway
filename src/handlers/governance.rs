@@ -60,7 +60,7 @@ pub async fn get_governance_status(
     info!("Fetching governance status from blockchain");
 
     // Get the Governance program ID
-    let governance_program_id = crate::services::BlockchainService::governance_program_id()
+    let governance_program_id = state.blockchain_service.governance_program_id()
         .map_err(|e| {
             error!("Failed to parse governance program ID: {}", e);
             ApiError::Internal(format!("Invalid program ID: {}", e))

@@ -48,6 +48,7 @@ pub struct EpochScheduler {
     db: PgPool,
     config: EpochConfig,
     market_clearing_service: MarketClearingService,
+    #[allow(dead_code)]
     blockchain_service: BlockchainService,
     current_epoch: Arc<RwLock<Option<MarketEpoch>>>,
     is_running: AtomicBool,
@@ -573,7 +574,15 @@ mod tests {
 
     // Helper function to create a test blockchain service
     fn create_test_blockchain_service() -> BlockchainService {
-        BlockchainService::new("http://localhost:8899".to_string(), "localnet".to_string())
+        use crate::config::SolanaProgramsConfig;
+        let program_config = SolanaProgramsConfig {
+            registry_program_id: "2XPQmFYMdXjP7ffoBB3mXeCdboSFg5Yeb6QmTSGbW8a7".to_string(),
+            oracle_program_id: "DvdtU4quEbuxUY2FckmvcXwTpC9qp4HLJKb1PMLaqAoE".to_string(),
+            governance_program_id: "4DY97YYBt4bxvG7xaSmWy3MhYhmA6HoMajBHVqhySvXe".to_string(),
+            energy_token_program_id: "94G1r674LmRDmLN2UPjDFD8Eh7zT8JaSaxv9v68GyEur".to_string(),
+            trading_program_id: "9t3s8sCgVUG9kAgVPsozj8mDpJp9cy6SF5HwRK5nvAHb".to_string(),
+        };
+        BlockchainService::new("http://localhost:8899".to_string(), "localnet".to_string(), program_config)
             .expect("Failed to create test blockchain service")
     }
 

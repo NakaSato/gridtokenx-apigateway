@@ -1,25 +1,48 @@
-// Transaction Handlers
-// API endpoints for unified blockchain transaction tracking
+//! Transaction Handlers
+//!
+//! API endpoints for unified blockchain transaction tracking.
+//! This module provides endpoints for viewing and managing transactions
+//! across multiple sources: P2P trades, AMM swaps, and blockchain transactions.
+
+pub mod create;
+pub mod status;
 
 use axum::{
-    Json,
     extract::{Path, Query, State},
+    Json,
 };
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
-
 use tracing::info;
-
 use uuid::Uuid;
 
-use crate::AppState;
 use crate::auth::middleware::AuthenticatedUser;
 use crate::database::schema::types::{OrderSide, OrderStatus};
 use crate::error::ApiError;
+use crate::handlers::authorization::require_admin;
 use crate::models::transaction::{
     TransactionFilters, TransactionResponse, TransactionRetryRequest, TransactionRetryResponse,
-    TransactionStats,
+    TransactionStats, TransactionStatus, TransactionType,
 };
+use crate::AppState;
+
+// Re-export create handler
+pub use create::create_transaction;
+
+// Use status mapping utilities
+use status::{map_blockchain_status, map_instruction_to_type, map_order_status};
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/// Pagination defaults for transaction queries
+#[allow(dead_code)]
+mod pagination {
+    pub const DEFAULT_LIMIT: i64 = 20;
+    pub const MAX_LIMIT: i64 = 100;
+    pub const MIN_LIMIT: i64 = 1;
+}
 
 /// Get transaction status by ID
 #[utoipa::path(
@@ -62,17 +85,11 @@ pub async fn get_transaction_status(
     .map_err(ApiError::Database)?;
 
     if let Some(row) = p2p_order {
-        let status = match row.status.as_str() {
-            "pending" => crate::models::transaction::TransactionStatus::Pending,
-            "filled" => crate::models::transaction::TransactionStatus::Settled,
-            "cancelled" => crate::models::transaction::TransactionStatus::Failed,
-            "partially_filled" => crate::models::transaction::TransactionStatus::Processing,
-            _ => crate::models::transaction::TransactionStatus::Pending,
-        };
+        let status = map_order_status(row.status.as_str());
 
         return Ok(Json(TransactionResponse {
             operation_id: row.id,
-            transaction_type: crate::models::transaction::TransactionType::EnergyTrade,
+            transaction_type: TransactionType::EnergyTrade,
             user_id: Some(row.user_id),
             status,
             signature: None,
@@ -106,9 +123,9 @@ pub async fn get_transaction_status(
     if let Some(row) = swap_tx {
         return Ok(Json(TransactionResponse {
             operation_id: row.id,
-            transaction_type: crate::models::transaction::TransactionType::Swap,
+            transaction_type: TransactionType::Swap,
             user_id: Some(row.user_id),
-            status: crate::models::transaction::TransactionStatus::Settled, // Assuming stored swaps are successful
+            status: TransactionStatus::Settled,
             signature: row.tx_hash,
             attempts: 1,
             last_error: None,
@@ -133,20 +150,8 @@ pub async fn get_transaction_status(
     .map_err(ApiError::Database)?;
 
     if let Some(row) = bc_tx {
-        let tx_type = match row.instruction_name.as_deref() {
-            Some("place_order") => crate::models::transaction::TransactionType::EnergyTrade,
-            Some("swap") => crate::models::transaction::TransactionType::Swap,
-            Some("mint") => crate::models::transaction::TransactionType::TokenMint,
-            Some("transfer") => crate::models::transaction::TransactionType::TokenTransfer,
-            Some("vote") => crate::models::transaction::TransactionType::GovernanceVote,
-            _ => crate::models::transaction::TransactionType::RegistryUpdate,
-        };
-
-        let status = match row.status.as_str() {
-            "Confirmed" | "Finalized" => crate::models::transaction::TransactionStatus::Confirmed,
-            "Failed" => crate::models::transaction::TransactionStatus::Failed,
-            _ => crate::models::transaction::TransactionStatus::Pending,
-        };
+        let tx_type = map_instruction_to_type(row.instruction_name.as_deref());
+        let status = map_blockchain_status(&row.status);
 
         return Ok(Json(TransactionResponse {
             operation_id: row.id,
@@ -233,20 +238,14 @@ pub async fn get_user_transactions(
     let mut all_transactions: Vec<TransactionResponse> = p2p_orders
         .into_iter()
         .map(|row| {
-            let status = match row.status.as_str() {
-                "pending" => crate::models::transaction::TransactionStatus::Pending,
-                "filled" => crate::models::transaction::TransactionStatus::Settled,
-                "cancelled" => crate::models::transaction::TransactionStatus::Failed, // Or separate Cancelled status if we had it
-                "partially_filled" => crate::models::transaction::TransactionStatus::Processing,
-                _ => crate::models::transaction::TransactionStatus::Pending,
-            };
+            let status = map_order_status(row.status.as_str());
 
             TransactionResponse {
                 operation_id: row.id,
-                transaction_type: crate::models::transaction::TransactionType::EnergyTrade,
+                transaction_type: TransactionType::EnergyTrade,
                 user_id: Some(row.user_id),
                 status,
-                signature: None, // P2P orders might not have a direct single signature yet
+                signature: None,
                 attempts: 1,
                 last_error: None,
                 created_at: row.created_at.unwrap_or_else(Utc::now),
@@ -269,9 +268,9 @@ pub async fn get_user_transactions(
     for swap in swaps {
         all_transactions.push(TransactionResponse {
             operation_id: swap.id,
-            transaction_type: crate::models::transaction::TransactionType::Swap,
+            transaction_type: TransactionType::Swap,
             user_id: Some(user.sub),
-            status: crate::models::transaction::TransactionStatus::Settled, // Swaps in history are usually successful
+            status: TransactionStatus::Settled,
             signature: swap.tx_hash,
             attempts: 1,
             last_error: None,
@@ -301,35 +300,11 @@ pub async fn get_user_transactions(
         .map_err(ApiError::Database)?;
 
     for row in bc_txs {
-        // Avoid duplicates if we already have them (e.g. if we logged swaps/trades here too)
-        // For now, assume they are distinct or we want to show the low-level tx view as well.
-        // To be cleaner, we might want to filter out those that are already covered by high-level entities.
-        // But for "Unified History", showing the low-level tx is often useful or we treat them as "Other".
+        // Map instruction to transaction type
+        let tx_type = map_instruction_to_type(row.instruction_name.as_deref());
+        let status = map_blockchain_status(&row.status);
 
-        let tx_type = match row.instruction_name.as_deref() {
-            Some("place_order") => crate::models::transaction::TransactionType::EnergyTrade,
-            Some("swap") => crate::models::transaction::TransactionType::Swap,
-            Some("mint") => crate::models::transaction::TransactionType::TokenMint,
-            Some("transfer") => crate::models::transaction::TransactionType::TokenTransfer,
-            Some("vote") => crate::models::transaction::TransactionType::GovernanceVote,
-            _ => crate::models::transaction::TransactionType::RegistryUpdate, // Fallback/Generic
-        };
-
-        // If it's a Swap or Trade, we might have already added it from the high-level tables.
-        // A simple de-duplication strategy is to check if we have a transaction with the same signature.
-        // But P2P orders don't always have a signature in the `trading_orders` table immediately visible here.
-        // Let's just add them for now, maybe filtered by type if the user requested filters.
-
-        let status = match row.status.as_str() {
-            "Confirmed" | "Finalized" => crate::models::transaction::TransactionStatus::Confirmed,
-            "Failed" => crate::models::transaction::TransactionStatus::Failed,
-            _ => crate::models::transaction::TransactionStatus::Pending,
-        };
-
-        // Use signature as ID if we don't have a UUID, or generate a deterministic one?
-        // UUID is required for TransactionResponse.
-        // We can generate a UUID from the signature bytes or just new random one (not ideal for stability).
-        // Let's try to find a stable way or just use a new UUID for the view.
+        // Generate stable UUID for blockchain transactions
         let op_id = Uuid::new_v4();
 
         all_transactions.push(TransactionResponse {
@@ -340,16 +315,16 @@ pub async fn get_user_transactions(
             signature: Some(row.signature),
             attempts: 1,
             last_error: None,
-            created_at: row.created_at.unwrap_or_else(Utc::now), // Fallback
+            created_at: row.created_at.unwrap_or_else(Utc::now),
             submitted_at: row.submitted_at,
             confirmed_at: None,
             settled_at: None,
         });
     }
 
-    // Filter
+    // Filter by operation type if specified
     if let Some(op_type) = &params.operation_type {
-        if let Ok(filter_type) = op_type.parse::<crate::models::transaction::TransactionType>() {
+        if let Ok(filter_type) = op_type.parse::<TransactionType>() {
             all_transactions.retain(|tx| tx.transaction_type == filter_type);
         }
     }
@@ -403,10 +378,8 @@ pub async fn get_transaction_history(
 ) -> Result<Json<Vec<TransactionResponse>>, ApiError> {
     info!("Getting transaction history by user: {:?}", user.sub);
 
-    // Check if user has admin privileges
-    if user.role != "admin" {
-        return Err(ApiError::Forbidden("Admin access required".to_string()));
-    }
+    // Require admin role
+    require_admin(&user)?;
 
     // TODO: Re-enable when transaction_coordinator is available
     let _ = (app_state, params);
@@ -438,10 +411,8 @@ pub async fn get_transaction_stats(
 ) -> Result<Json<TransactionStats>, ApiError> {
     info!("Getting transaction statistics by user: {:?}", user.sub);
 
-    // Check if user has admin privileges
-    if user.role != "admin" {
-        return Err(ApiError::Forbidden("Admin access required".to_string()));
-    }
+    // Require admin role
+    require_admin(&user)?;
 
     // 1. Count P2P Orders
     let p2p_stats = sqlx::query!(

@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use solana_sdk::{
     instruction::Instruction,
     pubkey::Pubkey,
@@ -8,6 +8,7 @@ use std::str::FromStr;
 use tracing::info;
 
 // Token Program IDs
+#[allow(dead_code)]
 const TOKEN_PROGRAM_ID: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const TOKEN_2022_PROGRAM_ID: &str = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
@@ -63,7 +64,7 @@ impl BlockchainUtils {
     pub fn create_mint_instruction(
         authority: &Keypair,
         user_token_account: &Pubkey,
-        user_wallet: &Pubkey,
+        _user_wallet: &Pubkey,
         mint: &Pubkey,
         amount_kwh: f64,
     ) -> Result<Instruction> {
@@ -75,20 +76,26 @@ impl BlockchainUtils {
         // Convert kWh to token amount (with 9 decimals)
         let amount_lamports = (amount_kwh * 1_000_000_000.0) as u64;
 
-        info!("Mint: {}", mint);
-        info!("Amount (lamports): {}", amount_lamports);
-
-        // Use Token-2022 MintTo instruction
-        // Pass Token-2022 program ID to spl_token instruction builder
+        // Manually build MintTo instruction to bypass spl_token library validation
+        // The spl_token library's check_spl_token_program_account() rejects our Token-2022 program ID
         let token_program_id = Self::get_token_program_id()?;
-        let mint_instruction = spl_token::instruction::mint_to(
-            &token_program_id,
-            mint,
-            user_token_account,
-            &authority.pubkey(),
-            &[],
-            amount_lamports,
-        )?;
+
+        // MintTo instruction discriminator is 7
+        let mut instruction_data = Vec::with_capacity(9);
+        instruction_data.push(7); // MintTo discriminator
+        instruction_data.extend_from_slice(&amount_lamports.to_le_bytes());
+
+        use solana_sdk::instruction::{AccountMeta, Instruction};
+
+        let mint_instruction = Instruction {
+            program_id: token_program_id,
+            accounts: vec![
+                AccountMeta::new(*mint, false),                      // Mint account
+                AccountMeta::new(*user_token_account, false),        // Destination token account
+                AccountMeta::new_readonly(authority.pubkey(), true), // Mint authority (signer)
+            ],
+            data: instruction_data,
+        };
 
         Ok(mint_instruction)
     }
@@ -102,13 +109,18 @@ impl BlockchainUtils {
     ) -> Result<Instruction> {
         info!("Creating ATA instruction for user: {}", user_wallet);
 
-        // Use create_associated_token_account_idempotent to be safer and potentially avoid
-        // issues with the standard creation instruction on some validator versions
+        let token_program_id = Self::get_token_program_id()?;
+
+        // Use get_associated_token_address_with_program_id to correctly derive ATA for Token-2022
+        let derived_ata =
+            spl_associated_token_account::get_associated_token_address_with_program_id(
+                user_wallet,
+                mint,
+                &token_program_id,
+            );
+
         // Manual instruction construction to force legacy Create (opcode 0/empty) behavior
         // accounts: [payer, ata, owner, mint, system_program, token_program]
-        let derived_ata =
-            spl_associated_token_account::get_associated_token_address(user_wallet, mint);
-
         let account_metas = vec![
             solana_sdk::instruction::AccountMeta::new(authority.pubkey(), true),
             solana_sdk::instruction::AccountMeta::new(derived_ata, false),
@@ -118,10 +130,7 @@ impl BlockchainUtils {
                 Pubkey::from_str("11111111111111111111111111111111").unwrap(),
                 false,
             ),
-            solana_sdk::instruction::AccountMeta::new_readonly(
-                Self::get_token_program_id()?,
-                false,
-            ),
+            solana_sdk::instruction::AccountMeta::new_readonly(token_program_id, false),
         ];
 
         let instruction = Instruction {
@@ -129,12 +138,6 @@ impl BlockchainUtils {
             accounts: account_metas,
             data: vec![0], // Opcode 0 = Create
         };
-
-        println!(
-            "DEBUG: Created manual ATA instruction with Program ID: {}",
-            instruction.program_id
-        );
-        println!("DEBUG: Instruction Data: {:?}", instruction.data);
 
         Ok(instruction)
     }
@@ -442,7 +445,7 @@ impl BlockchainUtils {
     #[allow(dead_code)]
     fn trading_program_id() -> Result<Pubkey> {
         let program_id = std::env::var("TRADING_PROGRAM_ID")
-            .unwrap_or_else(|_| "GZnqNTJsre6qB4pWCQRE9FiJU2GUeBtBDPp6s7zosctk".to_string());
+            .unwrap_or_else(|_| "9t3s8sCgVUG9kAgVPsozj8mDpJp9cy6SF5HwRK5nvAHb".to_string());
 
         program_id
             .parse()

@@ -178,7 +178,7 @@ conn.close()
         fi
     else
         print_info "No keypair file found, using placeholder public key"
-        PUBLIC_KEY="DummyPublicKey123456789012345678901234567890"
+        PUBLIC_KEY="GHoWp5RcujaeqimAAf9RwyRQCCF23mXxVYX9iGwBYGrH"
     fi
     
     print_success "Scenario 1 Complete: Smart meter verified"

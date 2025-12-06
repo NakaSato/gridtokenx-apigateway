@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use solana_sdk::pubkey::Pubkey;
 use sqlx::PgPool;
 use std::str::FromStr;
@@ -461,13 +461,12 @@ impl MarketClearingService {
 
         info!("Updating order {} status to: {}", order_id, status_str);
 
-        let result = sqlx::query(
-            "UPDATE trading_orders SET status = $1::order_status, filled_at = NOW() WHERE id = $2",
-        )
-        .bind(status_str)
-        .bind(order_id)
-        .execute(&self.db)
-        .await?;
+        let result =
+            sqlx::query("UPDATE trading_orders SET status = $1::order_status WHERE id = $2")
+                .bind(status_str)
+                .bind(order_id)
+                .execute(&self.db)
+                .await?;
 
         info!(
             "Updated order {} status, rows affected: {}",

@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -70,7 +70,6 @@ impl MeterService {
         verification_status: &str,
     ) -> Result<MeterReading> {
         // Validate reading amount
-        use std::str::FromStr;
         // Allow negative amounts for consumption (burn)
         // if request.kwh_amount <= Decimal::ZERO {
         //     return Err(anyhow!("kWh amount must be positive"));
@@ -216,9 +215,14 @@ impl MeterService {
             record.map(|r| r.id)
         };
 
-        if existing.is_some() {
+        if let Some(existing_id) = existing {
+            warn!(
+                "Duplicate reading check failed. Existing reading ID: {}",
+                existing_id
+            );
             return Err(anyhow!(
-                "Duplicate reading detected within 15-minute window"
+                "Duplicate reading detected within 15-minute window (matches reading {})",
+                existing_id
             ));
         }
 
@@ -625,7 +629,6 @@ impl MeterService {
     /// Validate meter reading data
     pub fn validate_reading(request: &SubmitMeterReadingRequest) -> Result<()> {
         // Amount validation
-        use std::str::FromStr;
         // Allow negative amounts for consumption (burn)
         // if request.kwh_amount <= Decimal::ZERO {
         //     return Err(anyhow!("kWh amount must be positive"));
@@ -639,8 +642,11 @@ impl MeterService {
         }
 
         // Timestamp validation
-        if request.reading_timestamp > Utc::now() {
-            return Err(anyhow!("Reading timestamp cannot be in the future"));
+        // Allow 5 minutes of clock skew into the future
+        if request.reading_timestamp > Utc::now() + chrono::Duration::minutes(5) {
+            return Err(anyhow!(
+                "Reading timestamp cannot be in the future (beyond 5m tolerance)"
+            ));
         }
 
         // Not too old (e.g., within last 7 days)
@@ -680,7 +686,21 @@ mod tests {
             meter_serial: None,
         };
 
-        assert!(MeterService::validate_reading(&request).is_err());
+        // Code allows 0 amount (commented out check), so valid
+        assert!(MeterService::validate_reading(&request).is_ok());
+    }
+
+    #[test]
+    fn test_validate_reading_future_timestamp_tolerance() {
+        let request = SubmitMeterReadingRequest {
+            wallet_address: "test".to_string(),
+            kwh_amount: Decimal::from(10),
+            reading_timestamp: Utc::now() + chrono::Duration::minutes(4), // Within 5m tolerance
+            meter_signature: None,
+            meter_serial: None,
+        };
+
+        assert!(MeterService::validate_reading(&request).is_ok());
     }
 
     #[test]

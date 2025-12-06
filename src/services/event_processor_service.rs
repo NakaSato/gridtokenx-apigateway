@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::signature::Signature;
-use solana_transaction_status::{EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding};
+use solana_transaction_status::UiTransactionEncoding;
 use sqlx::PgPool;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -73,6 +73,7 @@ pub struct EventProcessorService {
     rpc_client: Arc<RpcClient>,
     db: Arc<PgPool>,
     config: EventProcessorConfig,
+    #[allow(dead_code)]
     energy_token_mint: String,
     // WebSocket client would go here
     // pubsub_client: Arc<PubsubClient>,
@@ -239,7 +240,10 @@ impl EventProcessorService {
         let mut failed_count = 0;
 
         for reading in pending_readings {
-            let signature_str = reading.mint_tx_signature.unwrap();
+            let signature_str = match &reading.mint_tx_signature {
+                Some(sig) => sig.clone(),
+                None => continue, // Skip readings without signatures
+            };
 
             // Skip mock signatures
             if signature_str == "mock_signature" {
@@ -448,7 +452,13 @@ impl EventProcessorService {
 
         // Initialize status
         {
-            let mut status = self.replay_status.lock().unwrap();
+            let mut status = match self.replay_status.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    warn!("replay_status mutex was poisoned, recovering...");
+                    poisoned.into_inner()
+                }
+            };
             *status = Some(ReplayStatus {
                 start_slot,
                 end_slot,
@@ -542,7 +552,13 @@ impl EventProcessorService {
 
     /// Get replay status
     pub fn get_replay_status(&self) -> Option<ReplayStatus> {
-        self.replay_status.lock().unwrap().clone()
+        match self.replay_status.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => {
+                warn!("replay_status mutex was poisoned, recovering...");
+                poisoned.into_inner().clone()
+            }
+        }
     }
 
     /// Get processing statistics

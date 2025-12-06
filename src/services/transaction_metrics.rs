@@ -30,7 +30,13 @@ impl TransactionMetrics {
         let tx_type_str = tx_type.to_string();
 
         // Increment pending counter
-        let mut pending_counts = PENDING_TX_COUNTS.write().unwrap();
+        let mut pending_counts = match PENDING_TX_COUNTS.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!("PENDING_TX_COUNTS RwLock was poisoned, recovering...");
+                poisoned.into_inner()
+            }
+        };
         let count = pending_counts.entry(tx_type_str.clone()).or_insert(0);
         *count += 1;
 
@@ -42,7 +48,13 @@ impl TransactionMetrics {
         let tx_type_str = tx_type.to_string();
 
         // Decrement pending counter
-        let mut pending_counts = PENDING_TX_COUNTS.write().unwrap();
+        let mut pending_counts = match PENDING_TX_COUNTS.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!("PENDING_TX_COUNTS RwLock was poisoned, recovering...");
+                poisoned.into_inner()
+            }
+        };
         if let Some(count) = pending_counts.get_mut(&tx_type_str) {
             if *count > 0 {
                 *count -= 1;
@@ -61,7 +73,13 @@ impl TransactionMetrics {
         let tx_type_str = tx_type.to_string();
 
         // Decrement pending counter if it was pending
-        let mut pending_counts = PENDING_TX_COUNTS.write().unwrap();
+        let mut pending_counts = match PENDING_TX_COUNTS.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!("PENDING_TX_COUNTS RwLock was poisoned, recovering...");
+                poisoned.into_inner()
+            }
+        };
         if let Some(count) = pending_counts.get_mut(&tx_type_str) {
             if *count > 0 {
                 *count -= 1;
@@ -158,7 +176,13 @@ pub struct MetricsExporter;
 impl MetricsExporter {
     /// Get metrics in Prometheus format
     pub fn get_metrics() -> String {
-        let pending_counts = PENDING_TX_COUNTS.read().unwrap();
+        let pending_counts = match PENDING_TX_COUNTS.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!("PENDING_TX_COUNTS RwLock was poisoned, recovering...");
+                poisoned.into_inner()
+            }
+        };
 
         let mut output = String::new();
         output.push_str(
@@ -178,7 +202,13 @@ impl MetricsExporter {
 
     /// Get structured transaction statistics
     pub fn get_transaction_stats() -> HashMap<String, i64> {
-        let pending_counts = PENDING_TX_COUNTS.read().unwrap();
+        let pending_counts = match PENDING_TX_COUNTS.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!("PENDING_TX_COUNTS RwLock was poisoned, recovering...");
+                poisoned.into_inner()
+            }
+        };
         pending_counts.clone()
     }
 }

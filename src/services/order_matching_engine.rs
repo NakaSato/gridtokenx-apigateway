@@ -1,10 +1,8 @@
 use anyhow::Result;
-use anyhow::anyhow;
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use sqlx::PgPool;
 use sqlx::Row;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -14,6 +12,7 @@ use uuid::Uuid;
 
 use super::WebSocketService;
 use crate::database::schema::types::OrderStatus;
+use crate::services::{market_clearing::TradeMatch, SettlementService};
 
 /// Background service that automatically matches orders with offers
 #[derive(Clone)]
@@ -22,6 +21,7 @@ pub struct OrderMatchingEngine {
     running: Arc<RwLock<bool>>,
     match_interval_secs: u64,
     websocket_service: Option<WebSocketService>,
+    settlement_service: Option<SettlementService>,
 }
 
 impl OrderMatchingEngine {
@@ -31,12 +31,19 @@ impl OrderMatchingEngine {
             running: Arc::new(RwLock::new(false)),
             match_interval_secs: 5, // Check every 5 seconds
             websocket_service: None,
+            settlement_service: None,
         }
     }
 
     /// Set the WebSocket service for broadcasting match events
     pub fn with_websocket(mut self, ws_service: WebSocketService) -> Self {
         self.websocket_service = Some(ws_service);
+        self
+    }
+
+    /// Set the Settlement service for processing matched trades
+    pub fn with_settlement_service(mut self, settlement_service: SettlementService) -> Self {
+        self.settlement_service = Some(settlement_service);
         self
     }
 
@@ -117,14 +124,17 @@ impl OrderMatchingEngine {
                 price_per_kwh,
                 filled_amount,
                 epoch_id
+                epoch_id
             FROM trading_orders
-            WHERE order_type = 'buy' AND status = $1
+            WHERE side = 'buy'::order_side AND status = $1
             ORDER BY created_at ASC
             "#,
         )
         .bind(OrderStatus::Pending)
         .fetch_all(&self.db)
         .await?;
+
+        info!("Fetched {} buy orders", buy_orders.len());
 
         // Get all pending sell orders
         let sell_orders = sqlx::query(
@@ -136,8 +146,9 @@ impl OrderMatchingEngine {
                 price_per_kwh,
                 filled_amount,
                 epoch_id
+                epoch_id
             FROM trading_orders
-            WHERE order_type = 'sell' AND status = $1
+            WHERE side = 'sell'::order_side AND status = $1
             ORDER BY price_per_kwh ASC, created_at ASC
             "#,
         )
@@ -145,11 +156,13 @@ impl OrderMatchingEngine {
         .fetch_all(&self.db)
         .await?;
 
+        info!("Fetched {} sell orders", sell_orders.len());
+
         if buy_orders.is_empty() || sell_orders.is_empty() {
             return Ok(0);
         }
 
-        debug!(
+        info!(
             "Found {} buy orders and {} sell orders to process",
             buy_orders.len(),
             sell_orders.len()
@@ -212,7 +225,7 @@ impl OrderMatchingEngine {
                 let match_price = sell_price_per_kwh; // Use sell price (market maker advantage)
                 let total_price = match_amount * match_price;
 
-                debug!(
+                info!(
                     "Matching buy order {} with sell order {}: {} kWh at ${}/kWh (total: ${})",
                     buy_order_id, sell_order_id, match_amount, match_price, total_price
                 );
@@ -240,6 +253,20 @@ impl OrderMatchingEngine {
                             match_id, match_amount, sell_order_id, buy_order_id, match_price
                         );
                         matches_created += 1;
+
+                        // Trigger settlement creation
+                        self.trigger_settlement(
+                            match_id,
+                            buy_order_id,
+                            sell_order_id,
+                            buyer_id,
+                            seller_id,
+                            match_amount,
+                            match_price,
+                            total_price,
+                            epoch_id,
+                        )
+                        .await;
 
                         // Update buy order filled amount
                         let new_buy_filled = buy_filled_amount + match_amount;
@@ -368,6 +395,60 @@ impl OrderMatchingEngine {
         }
 
         Ok(match_id)
+    }
+
+    /// Create settlement for the matched trade
+    async fn trigger_settlement(
+        &self,
+        match_id: Uuid,
+        buy_order_id: Uuid,
+        sell_order_id: Uuid,
+        buyer_id: Uuid,
+        seller_id: Uuid,
+        matched_amount: Decimal,
+        match_price: Decimal,
+        total_price: Decimal,
+        epoch_id: Uuid,
+    ) {
+        if let Some(settlement_service) = &self.settlement_service {
+            // Create a TradeMatch object to pass to settlement service
+            let trade_match = TradeMatch {
+                buy_order_id,
+                sell_order_id,
+                buyer_id,
+                seller_id,
+                quantity: matched_amount,
+                price: match_price,
+                total_value: total_price,
+                matched_at: chrono::Utc::now(),
+                epoch_id,
+            };
+
+            // We create a temporary vector with one trade to reuse the existing method
+            // Or better, expose create_settlement on settlement_service (it is public)
+            match settlement_service.create_settlement(&trade_match).await {
+                Ok(settlement) => {
+                    info!(
+                        "✅ Created settlement {} from match {}",
+                        settlement.id, match_id
+                    );
+                    // Update order_match with settlement_id?
+                    // The order_matches table currently has settlement_id column but code doesn't update it?
+                    // Let's update it.
+                    let _ =
+                        sqlx::query("UPDATE order_matches SET settlement_id = $1 WHERE id = $2")
+                            .bind(settlement.id)
+                            .bind(match_id)
+                            .execute(&self.db)
+                            .await
+                            .map_err(|e| error!("Failed to link settlement to match: {}", e));
+                }
+                Err(e) => error!(
+                    "❌ Failed to create settlement for match {}: {}",
+                    match_id, e
+                ),
+            }
+        }
     }
 
     /// Manually trigger a matching cycle (for testing or API endpoints)

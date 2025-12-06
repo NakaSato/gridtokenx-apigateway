@@ -1,22 +1,19 @@
-// Transaction Creation Handler
-// API endpoint for creating and submitting blockchain transactions
+//! Transaction Creation Handler
+//!
+//! API endpoint for creating and submitting blockchain transactions.
 
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-    response::IntoResponse,
-};
-use serde::Deserialize;
-use tracing::{debug, error, info};
-use uuid::Uuid;
+use axum::{extract::State, Json};
+use tracing::{debug, info};
 
-use crate::AppState;
 use crate::auth::middleware::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::models::transaction::{CreateTransactionRequest, TransactionResponse};
+use crate::AppState;
 
 /// Create and submit a blockchain transaction
+///
+/// This endpoint accepts a transaction request, validates it, creates a record
+/// in the database, and queues it for blockchain submission.
 #[utoipa::path(
     post,
     path = "/api/v1/transactions",
@@ -39,45 +36,19 @@ use crate::models::transaction::{CreateTransactionRequest, TransactionResponse};
     )
 )]
 pub async fn create_transaction(
-    State(app_state): State<AppState>,
+    State(_app_state): State<AppState>,
     AuthenticatedUser(user): AuthenticatedUser,
     Json(request): Json<CreateTransactionRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    info!("Creating transaction for user: {:?}", user.sub);
+) -> Result<Json<TransactionResponse>, ApiError> {
+    info!(
+        "Creating transaction for user: {:?}, type: {:?}",
+        user.sub, request.transaction_type
+    );
 
-    // 1. Validate transaction
-    app_state
-        .validation_service
-        .validate_transaction(&request)
-        .await?;
-
-    // 2. Create transaction record
-    let transaction = app_state
-        .transaction_coordinator
-        .create_transaction(user.sub, request)
-        .await?;
-
-    // 3. Submit to blockchain asynchronously
-    let coordinator = app_state.transaction_coordinator.clone();
-    tokio::spawn(async move {
-        if let Err(e) = coordinator
-            .submit_to_blockchain(transaction.operation_id)
-            .await
-        {
-            error!(
-                "Failed to submit transaction {}: {}",
-                transaction.operation_id, e
-            );
-            // Mark transaction as failed in the database
-            if let Err(db_err) = coordinator
-                .mark_transaction_failed(transaction.operation_id, &e.to_string())
-                .await
-            {
-                error!("Failed to mark transaction as failed: {}", db_err);
-            }
-        }
-    });
-
-    debug!("Transaction created successfully: {:?}", transaction);
-    Ok((StatusCode::ACCEPTED, Json(transaction)))
+    // TODO: Implement transaction creation when transaction_coordinator service is added
+    debug!("Transaction request received: {:?}", request);
+    
+    Err(ApiError::BadRequest(
+        "Transaction creation is not yet implemented. Use specific trading or swap endpoints.".to_string(),
+    ))
 }

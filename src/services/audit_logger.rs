@@ -166,7 +166,10 @@ impl AuditLogger {
         let ip_address_str = event.ip_address().map(|s| s.to_string());
         let ip_address = ip_address_str.as_deref().and_then(|s| s.parse::<IpNetwork>().ok());
         let event_data = serde_json::to_value(&event)
-            .expect("Failed to serialize audit event");
+            .unwrap_or_else(|e| {
+                tracing::error!("Failed to serialize audit event: {}", e);
+                serde_json::json!({"error": "serialization_failed", "event_type": event_type})
+            });
         let created_at = Utc::now();
 
         sqlx::query!(

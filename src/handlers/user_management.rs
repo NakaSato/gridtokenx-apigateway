@@ -1,3 +1,22 @@
+//! User Management Handlers
+//!
+//! This module provides API endpoints for user account management including:
+//! - User registration with email verification
+//! - Wallet address management  
+//! - Admin user management (update, activate, deactivate)
+//! - User activity logging and retrieval
+//! - Meter registration for users
+//!
+//! # Authentication
+//! All endpoints except registration require JWT authentication.
+//! Admin endpoints require the "admin" role.
+//!
+//! # Email Verification Flow
+//! 1. User registers via POST /api/auth/register
+//! 2. Verification email sent with token
+//! 3. User clicks link to verify email
+//! 4. User can then set wallet address and register meters
+
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -10,13 +29,18 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::AppState;
-use crate::auth::UserInfo;
 use crate::auth::middleware::AuthenticatedUser;
 use crate::auth::password::PasswordService;
+use crate::auth::UserInfo;
 use crate::error::{ApiError, Result};
+use crate::handlers::authorization::{require_admin, require_admin_or_owner};
+use crate::AppState;
 
-/// user registration request with additional validation
+// ============================================================================
+// Request/Response Types
+// ============================================================================
+
+/// User registration request with validation
 #[derive(Debug, Deserialize, Serialize, Validate, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RegisterRequest {
@@ -151,7 +175,7 @@ pub async fn register(
         "INSERT INTO users (id, username, email, password_hash, role,
                            first_name, last_name, is_active,
                            email_verified, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true, false, NOW(), NOW())",
+         VALUES ($1, $2, $3, $4, $5::user_role, $6, $7, true, false, NOW(), NOW())",
     )
     .bind(user_id)
     .bind(&request.username)
@@ -217,7 +241,7 @@ pub async fn register(
             }
             Err(e) => {
                 // Log failed email send but don't fail registration
-                use tracing::{error, info};
+                use tracing::error;
                 error!("Failed to send verification email: {}", e);
                 let _ = log_user_activity(
                     &state.db,
@@ -432,9 +456,7 @@ pub async fn admin_update_user(
     Json(request): Json<AdminUpdateUserRequest>,
 ) -> Result<Json<UserInfo>> {
     // Check admin permissions
-    if !user.0.has_any_role(&["admin"]) {
-        return Err(ApiError::Authorization("Admin access required".to_string()));
-    }
+    require_admin(&user.0)?;
 
     // Validate request
     request
@@ -569,9 +591,7 @@ pub async fn admin_deactivate_user(
     user: AuthenticatedUser,
 ) -> Result<StatusCode> {
     // Check admin permissions
-    if !user.0.has_any_role(&["admin"]) {
-        return Err(ApiError::Authorization("Admin access required".to_string()));
-    }
+    require_admin(&user.0)?;
 
     // Cannot deactivate self
     if user_id == user.0.sub {
@@ -632,9 +652,7 @@ pub async fn admin_reactivate_user(
     user: AuthenticatedUser,
 ) -> Result<StatusCode> {
     // Check admin permissions
-    if !user.0.has_any_role(&["admin"]) {
-        return Err(ApiError::Authorization("Admin access required".to_string()));
-    }
+    require_admin(&user.0)?;
 
     // Reactivate user
     let result = sqlx::query("UPDATE users SET is_active = true, updated_at = NOW() WHERE id = $1")
@@ -768,11 +786,7 @@ pub async fn get_user_activity(
     user: AuthenticatedUser,
 ) -> Result<Json<ActivityListResponse>> {
     // Check admin permissions or self-access
-    if !user.0.has_any_role(&["admin"]) && user_id != user.0.sub {
-        return Err(ApiError::Authorization(
-            "Admin access required or can only view own activity".to_string(),
-        ));
-    }
+    require_admin_or_owner(&user.0, user_id)?;
 
     let page = params.page.unwrap_or(1).max(1);
     let per_page = params.per_page.unwrap_or(20).min(100).max(1);
@@ -894,8 +908,6 @@ struct ActivityRow {
     created_at: chrono::DateTime<chrono::Utc>,
 }
 // Meter Registration Handlers - Added for simplified meter registration
-
-use crate::services::meter_verification_service::MeterRegistry;
 
 /// Request to register a meter
 #[derive(Debug, Deserialize, Validate, ToSchema)]
@@ -1057,6 +1069,85 @@ pub async fn register_meter_handler(
     .fetch_one(&state.db)
     .await
     .map_err(|e| ApiError::Internal(format!("Failed to register meter: {}", e)))?;
+
+    // INTEGRATION: Register meter on-chain using User's Custodial Wallet
+    // 1. Fetch encrypted key from DB
+    let user_wallet = sqlx::query!(
+        "SELECT encrypted_private_key, wallet_salt, encryption_iv FROM users WHERE id = $1",
+        user.0.sub
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::Internal(format!("Database error: {}", e)))?;
+
+    if let Some(wallet) = user_wallet {
+        if let (Some(enc_key), Some(salt), Some(iv)) = (
+            wallet.encrypted_private_key,
+            wallet.wallet_salt,
+            wallet.encryption_iv,
+        ) {
+            // 2. Decrypt private key
+            let decrypted_bytes = crate::utils::crypto::decrypt_bytes(
+                &enc_key,
+                &salt,
+                &iv,
+                &state.config.encryption_secret,
+            )
+            .map_err(|e| {
+                tracing::error!("Failed to decrypt user wallet: {}", e);
+                ApiError::Internal("Wallet decryption failed".to_string())
+            })?;
+
+            // For solana-sdk 3.0, use new_from_array with 32-byte secret key
+            let mut secret_key_bytes = [0u8; 32];
+            secret_key_bytes.copy_from_slice(&decrypted_bytes[0..32]);
+            let user_keypair = solana_sdk::signature::Keypair::new_from_array(secret_key_bytes);
+
+            // Log wallet decryption for security monitoring
+            state
+                .wallet_audit_logger
+                .log_decryption(user.0.sub, "meter_registration", true, None, None, None)
+                .await
+                .ok(); // Don't fail meter registration if audit logging fails
+
+            // 3. Register on-chain with USER keypair
+            let meter_type_str = request
+                .meter_type
+                .clone()
+                .unwrap_or_else(|| "grid".to_string());
+
+            let meter_type_u8: u8 = match meter_type_str.to_lowercase().as_str() {
+                "solar" => 0,
+                "wind" => 1,
+                "battery" => 2,
+                _ => 3, // Grid/Other
+            };
+
+            match state
+                .blockchain_service
+                .register_meter_on_chain(&user_keypair, &request.meter_serial, meter_type_u8)
+                .await
+            {
+                Ok(sig) => {
+                    tracing::info!(
+                        "Meter registered on-chain successfully with User Key. Signature: {}",
+                        sig
+                    );
+                }
+                Err(e) => {
+                    tracing::error!("Failed to register meter on-chain: {}", e);
+                    // Non-blocking error
+                }
+            }
+        } else {
+            tracing::warn!(
+                "User {} has no encrypted wallet, skipping on-chain registration",
+                user.0.sub
+            );
+        }
+    } else {
+        tracing::error!("User {} not found for wallet fetch", user.0.sub);
+    }
 
     // Log activity
     let _ = log_user_activity(

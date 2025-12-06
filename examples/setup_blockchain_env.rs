@@ -1,4 +1,5 @@
 use anyhow::Result;
+use api_gateway::config::SolanaProgramsConfig;
 use api_gateway::services::BlockchainService;
 use solana_sdk::{pubkey::Pubkey, signature::Signer};
 use std::process::Command;
@@ -23,9 +24,12 @@ async fn main() -> Result<()> {
     println!("------------------------------------------");
 
     print!("Connecting to localnet RPC... ");
-    let blockchain_service =
-        match BlockchainService::new("http://127.0.0.1:8899".to_string(), "localnet".to_string()) {
-            Ok(service) => {
+    let blockchain_service = match BlockchainService::new(
+        "http://127.0.0.1:8899".to_string(),
+        "localnet".to_string(),
+        SolanaProgramsConfig::default(),
+    ) {
+        Ok(service) => {
                 println!("✅");
                 service
             }

@@ -128,7 +128,7 @@ impl ErcService {
 
         // 3. Derive Meter Account PDA
         let registry_program_id =
-            crate::services::blockchain_service::BlockchainService::registry_program_id()?;
+            self.blockchain_service.registry_program_id()?;
         let (meter_account_pda, _) =
             Pubkey::find_program_address(&[b"meter", meter_id.as_bytes()], &registry_program_id);
 
@@ -442,7 +442,6 @@ impl ErcService {
         request: IssueErcRequest,
     ) -> Result<ErcCertificate> {
         // Validate amount
-        use std::str::FromStr;
         if request.kwh_amount <= Decimal::ZERO {
             return Err(anyhow!("kWh amount must be positive"));
         }
