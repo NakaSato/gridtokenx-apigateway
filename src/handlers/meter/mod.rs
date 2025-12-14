@@ -4,22 +4,12 @@
 //! - Submitting meter readings
 //! - Retrieving reading history
 //! - Token minting from readings
-//! - Meter statistics
 //! - Meter registration and verification
 
-// pub mod minting;
-// pub mod queries;
-pub mod readings;
-// pub mod registration;
-// pub mod statistics;
-pub mod types;
-// pub mod verification;
+pub mod stub;
 
-// Re-export all public items
-// pub use minting::*;
-// pub use queries::*;
-pub use readings::*;
-// pub use registration::*;
-// pub use statistics::*;
-pub use types::*;
-// pub use verification::*;
+// Re-export from stub module
+pub use stub::{
+    meter_routes, submit_reading, meter_health,
+    SubmitReadingRequest, MeterReadingResponse,
+};

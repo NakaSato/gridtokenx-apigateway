@@ -1,34 +1,60 @@
-//! Router configuration module - Minimal build
+//! Router configuration module - RESTful v1 API
 //!
-//! Only includes health check and meter stub routes for testing.
+//! Supports both v1 RESTful API and legacy routes for backward compatibility.
 
 use axum::{routing::get, Router, extract::{State, WebSocketUpgrade}, response::IntoResponse};
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, timeout::TimeoutLayer, trace::TraceLayer};
 
 use crate::app_state::AppState;
-use crate::handlers::meter_stub;
+use crate::handlers::{
+    // V1 RESTful routes
+    v1_auth_routes, v1_users_routes, v1_meters_routes, v1_wallets_routes, v1_status_routes,
+    // Legacy routes
+    auth_routes, token_routes, user_meter_routes, meter_info_routes, meter_routes,
+};
 use crate::services::WebSocketService;
 
-/// Build the minimal application router for testing.
+/// Build the application router with both v1 and legacy routes.
 pub fn build_router(app_state: AppState) -> Router {
-    // Health check routes
+    // Health check routes (always at root)
     let health = Router::new()
         .route("/health", get(health_check))
         .route("/api/health", get(health_check));
 
-    // WebSocket endpoint for real-time updates
+    // WebSocket endpoint
     let ws = Router::new()
         .route("/ws", get(websocket_handler));
 
-    // Meter stub routes (publicly accessible for simulator testing)
-    let meters = meter_stub::meter_routes();
-    let auth = crate::handlers::auth_stub::auth_routes();
+    // =========================================================================
+    // V1 RESTful API Routes (New)
+    // =========================================================================
+    let v1_api = Router::new()
+        .nest("/auth", v1_auth_routes())       // POST /api/v1/auth/token, GET /api/v1/auth/verify
+        .nest("/users", v1_users_routes())     // POST /api/v1/users, GET /api/v1/users/me
+        .nest("/meters", v1_meters_routes())   // POST /api/v1/meters, PATCH /api/v1/meters/{serial}
+        .nest("/wallets", v1_wallets_routes()) // GET /api/v1/wallets/{address}/balance
+        .nest("/status", v1_status_routes());  // GET /api/v1/status
+
+    // =========================================================================
+    // Legacy Routes (Backward Compatibility - Deprecated)
+    // =========================================================================
+    let legacy_meters = meter_routes();
+    let legacy_auth = auth_routes();
+    let legacy_tokens = token_routes();
+    let legacy_user = user_meter_routes();
+    let legacy_meter_info = meter_info_routes();
 
     health
         .merge(ws)
-        .nest("/api/meters", meters)
-        .nest("/api/auth", auth)
+        // V1 API
+        .nest("/api/v1", v1_api)
+        // Legacy routes (deprecated)
+        .nest("/api/meters", legacy_meters)
+        .nest("/api/meters", legacy_meter_info)
+        .nest("/api/auth", legacy_auth)
+        .nest("/api/tokens", legacy_tokens)
+        .nest("/api/user", legacy_user)
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
@@ -43,10 +69,10 @@ pub fn build_router(app_state: AppState) -> Router {
 
 /// Simple health check endpoint
 async fn health_check() -> &'static str {
-    "OK - Minimal Gateway Running"
+    "OK - Gateway Running (Real Data Mode)"
 }
 
-/// WebSocket handler for real-time market and minting updates
+/// WebSocket handler for real-time updates
 async fn websocket_handler(
     ws: WebSocketUpgrade,
     State(websocket_service): State<WebSocketService>,
