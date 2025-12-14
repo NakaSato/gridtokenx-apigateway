@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use solana_sdk::{
-    instruction::Instruction,
+    instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::{Keypair, Signer},
 };
@@ -120,6 +120,37 @@ impl BlockchainUtils {
         Ok(mint_instruction)
     }
 
+    /// Mint SPL tokens directly using standard Token Program (for minimal build)
+    /// This bypasses the Anchor program and uses raw SPL token minting
+    pub fn create_spl_mint_instruction(
+        authority: &Keypair,
+        user_token_account: &Pubkey,
+        mint: &Pubkey,
+        amount_kwh: f64,
+    ) -> Result<Instruction> {
+        info!(
+            "Creating SPL mint instruction for {} kWh to {}",
+            amount_kwh, user_token_account
+        );
+
+        // Convert kWh to token amount (with 9 decimals)
+        let amount_lamports = (amount_kwh * 1_000_000_000.0) as u64;
+
+        let token_program_id = Self::get_token_program_id()?;
+
+        // Use the proper spl_token instruction builder
+        let instruction = spl_token::instruction::mint_to(
+            &token_program_id,
+            mint,
+            user_token_account,
+            &authority.pubkey(),
+            &[],  // No multisig signers
+            amount_lamports,
+        )?;
+
+        Ok(instruction)
+    }
+
     /// Ensures user has an Associated Token Account for the token mint
     /// Creates ATA if it doesn't exist, returns ATA address
     pub fn create_ata_instruction(
@@ -131,33 +162,13 @@ impl BlockchainUtils {
 
         let token_program_id = Self::get_token_program_id()?;
 
-        // Use get_associated_token_address_with_program_id to correctly derive ATA for Token-2022
-        let derived_ata =
-            spl_associated_token_account::get_associated_token_address_with_program_id(
-                user_wallet,
-                mint,
-                &token_program_id,
-            );
-
-        // Manual instruction construction to force legacy Create (opcode 0/empty) behavior
-        // accounts: [payer, ata, owner, mint, system_program, token_program]
-        let account_metas = vec![
-            solana_sdk::instruction::AccountMeta::new(authority.pubkey(), true),
-            solana_sdk::instruction::AccountMeta::new(derived_ata, false),
-            solana_sdk::instruction::AccountMeta::new_readonly(*user_wallet, false),
-            solana_sdk::instruction::AccountMeta::new_readonly(*mint, false),
-            solana_sdk::instruction::AccountMeta::new_readonly(
-                Pubkey::from_str("11111111111111111111111111111111").unwrap(),
-                false,
-            ),
-            solana_sdk::instruction::AccountMeta::new_readonly(token_program_id, false),
-        ];
-
-        let instruction = Instruction {
-            program_id: spl_associated_token_account::id(),
-            accounts: account_metas,
-            data: vec![0], // Opcode 0 = Create
-        };
+        // Use the proper spl_associated_token_account instruction
+        let instruction = spl_associated_token_account::instruction::create_associated_token_account(
+            &authority.pubkey(),  // Payer
+            user_wallet,          // Owner of the ATA
+            mint,                 // Token mint
+            &token_program_id,    // Token program
+        );
 
         Ok(instruction)
     }

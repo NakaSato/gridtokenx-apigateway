@@ -7,8 +7,9 @@ pub mod extractors;
 pub mod response;
 pub mod websocket;
 
-// Minimal meter handler
+// Minimal handlers
 pub mod meter_stub;
+pub mod auth_stub; // Added auth stub
 
 // Re-export commonly used types
 pub use extractors::{DateRangeParams, PaginationParams, SearchParams, SortOrder, ValidatedUuid};

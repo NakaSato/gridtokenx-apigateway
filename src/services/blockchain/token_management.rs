@@ -130,10 +130,9 @@ impl TokenManager {
             instructions.push(create_ata_ix);
         }
 
-        let mint_instruction = BlockchainUtils::create_mint_instruction(
+        let mint_instruction = BlockchainUtils::create_spl_mint_instruction(
             authority,
             user_token_account,
-            user_wallet,
             mint,
             amount_kwh,
         )?;

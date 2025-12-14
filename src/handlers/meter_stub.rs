@@ -126,7 +126,7 @@ pub async fn submit_reading(
                                         mint_tx_signature = Some(sig_str.clone());
                                         message = format!("Reading received and {} kWh minted. TX: {}", kwh_f64, sig_str);
                                         
-                                        // Broadcast via WebSocket
+                                        // Broadcast meter reading received via WebSocket
                                         let _ = state
                                             .websocket_service
                                             .broadcast_meter_reading_received(
@@ -134,6 +134,20 @@ pub async fn submit_reading(
                                                 &wallet_address,
                                                 request.meter_serial.as_deref().unwrap_or("unknown"),
                                                 kwh_f64,
+                                            )
+                                            .await;
+                                        
+                                        // Broadcast tokens minted via WebSocket
+                                        let tokens_minted = (kwh_f64 * 1_000_000_000.0) as u64;
+                                        let _ = state
+                                            .websocket_service
+                                            .broadcast_tokens_minted(
+                                                &Uuid::nil(),
+                                                &wallet_address,
+                                                request.meter_serial.as_deref().unwrap_or("unknown"),
+                                                kwh_f64,
+                                                tokens_minted,
+                                                &sig_str,
                                             )
                                             .await;
                                     }

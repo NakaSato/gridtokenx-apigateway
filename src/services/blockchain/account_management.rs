@@ -60,9 +60,8 @@ impl AccountManager {
 
     /// Calculate the Associated Token Account address
     pub fn calculate_ata_address(&self, user_wallet: &Pubkey, mint: &Pubkey) -> Result<Pubkey> {
-        // Use Token-2022 program ID for ATA derivation as per original service
-        let token_program_id = Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
-            .map_err(|e| anyhow!("Failed to parse Token-2022 program ID: {}", e))?;
+        // Use the same token program ID as used for minting
+        let token_program_id = BlockchainUtils::get_token_program_id()?;
 
         let ata_address =
             spl_associated_token_account::get_associated_token_address_with_program_id(
