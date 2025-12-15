@@ -338,7 +338,66 @@ impl InstructionBuilder {
 
         Ok(participant_pubkey)
     }
+
+    /// Build instruction for registering a user in the registry program
+    /// This creates an on-chain PDA account at ["user", user_authority]
+    pub fn build_register_user_instruction(
+        &self,
+        user_authority: &Pubkey,
+        registry: &Pubkey,
+        user_type: u8,        // 0=Consumer, 1=Producer, 2=Prosumer
+        location: &str,
+    ) -> Result<Instruction> {
+        let program_id = Pubkey::from_str(REGISTRY_PROGRAM_ID)?;
+        let system_program = Pubkey::from_str(SYSTEM_PROGRAM_ID)?;
+
+        // Find user account PDA: seeds = ["user", user_authority]
+        let (user_account_pda, _bump) = Pubkey::find_program_address(
+            &[b"user", user_authority.as_ref()],
+            &program_id,
+        );
+
+        // Build accounts array matching RegisterUser struct
+        let accounts = vec![
+            AccountMeta::new(*registry, false),              // registry (mut)
+            AccountMeta::new(user_account_pda, false),       // user_account (init, mut)
+            AccountMeta::new(*user_authority, true),         // user_authority (signer, mut)
+            AccountMeta::new_readonly(system_program, false), // system_program
+        ];
+
+        // Build instruction data
+        let mut data = Vec::new();
+        
+        // register_user discriminator: sha256("global:register_user")[0..8]
+        // Computed: [153, 150, 36, 97, 226, 70, 52, 72]
+        data.extend_from_slice(&[153, 150, 36, 97, 226, 70, 52, 72]);
+        
+        // UserType enum (1 byte)
+        data.push(user_type);
+        
+        // Location string (length prefix + bytes)
+        let location_bytes = location.as_bytes();
+        data.extend_from_slice(&(location_bytes.len() as u32).to_le_bytes());
+        data.extend_from_slice(location_bytes);
+
+        Ok(Instruction {
+            program_id,
+            accounts,
+            data,
+        })
+    }
+
+    /// Get user account PDA from user authority
+    pub fn get_user_account_pda(&self, user_authority: &Pubkey) -> Result<Pubkey> {
+        let program_id = Pubkey::from_str(REGISTRY_PROGRAM_ID)?;
+        let (user_account_pda, _) = Pubkey::find_program_address(
+            &[b"user", user_authority.as_ref()],
+            &program_id,
+        );
+        Ok(user_account_pda)
+    }
 }
+
 
 /// Program ID utilities
 pub mod program_ids {
