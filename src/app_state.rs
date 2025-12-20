@@ -43,6 +43,8 @@ pub struct AppState {
     pub market_clearing_engine: services::OrderMatchingEngine,
     pub futures_service: services::FuturesService,
     
+    /// Prometheus metrics handle
+    pub metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
 }
 
 // Implement FromRef for services that need to be extracted from AppState

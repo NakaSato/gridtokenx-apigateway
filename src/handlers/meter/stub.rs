@@ -334,6 +334,7 @@ pub async fn meter_health() -> &'static str {
 }
 
 /// Build the meter stub routes
+#[deprecated(since = "0.1.0", note = "Use v1_meters_routes instead")]
 pub fn meter_routes() -> Router<AppState> {
     Router::new()
         .route("/submit-reading", post(submit_reading))

@@ -32,11 +32,7 @@ async fn main() -> Result<()> {
         warn!("⚠️ Secret validation warning: {}", e);
     }
 
-    // Initialize Prometheus metrics exporter
-    let prometheus_builder = metrics_exporter_prometheus::PrometheusBuilder::new();
-    if let Err(e) = prometheus_builder.install() {
-        warn!("Failed to install Prometheus exporter: {}", e);
-    }
+
 
     // Load configuration
     let config = Config::from_env()?;

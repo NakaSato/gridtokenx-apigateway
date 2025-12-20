@@ -74,6 +74,7 @@ pub fn v1_status_routes() -> Router<AppState> {
 // ============================================================================
 
 /// Build legacy auth routes (deprecated)
+#[deprecated(since = "0.1.0", note = "Use v1_auth_routes instead")]
 pub fn auth_routes() -> Router<AppState> {
     Router::new()
         .route("/login", post(login))
@@ -84,12 +85,14 @@ pub fn auth_routes() -> Router<AppState> {
 }
 
 /// Build legacy token routes (deprecated)
+#[deprecated(since = "0.1.0", note = "Use v1_wallets_routes instead")]
 pub fn token_routes() -> Router<AppState> {
     Router::new()
         .route("/balance/{wallet_address}", get(token_balance))
 }
 
 /// Build legacy user meter routes (deprecated)
+#[deprecated(since = "0.1.0", note = "Use v1_meters_routes instead")]
 pub fn user_meter_routes() -> Router<AppState> {
     Router::new()
         .route("/profile", get(profile))
@@ -98,6 +101,7 @@ pub fn user_meter_routes() -> Router<AppState> {
 }
 
 /// Build legacy meter info routes (deprecated)
+#[deprecated(since = "0.1.0", note = "Use v1_meters_routes instead")]
 pub fn meter_info_routes() -> Router<AppState> {
     Router::new()
         .route("/registered", get(get_registered_meters))

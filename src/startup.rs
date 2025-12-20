@@ -15,6 +15,12 @@ use crate::services;
 pub async fn initialize_app(config: &Config) -> Result<AppState> {
     info!("🚀 Starting minimal Gateway for Simulator → Anchor testing");
 
+    // Initialize Prometheus metrics exporter
+    let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .install_recorder()
+        .map_err(|e| anyhow::anyhow!("Failed to install Prometheus recorder: {}", e))?;
+    info!("✅ Prometheus metrics initialized");
+
     // Setup database connections
     let db_pool = database::setup_database(&config.database_url).await?;
     info!("✅ PostgreSQL connection established");
@@ -126,6 +132,7 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
         settlement,
         market_clearing_engine,
         futures_service,
+        metrics_handle,
     };
 
     info!("✅ AppState created successfully with P2P services");

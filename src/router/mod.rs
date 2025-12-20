@@ -46,7 +46,8 @@ pub fn build_router(app_state: AppState) -> Router {
     // Health check routes (always at root)
     let health = Router::new()
         .route("/health", get(health_check))
-        .route("/api/health", get(health_check));
+        .route("/api/health", get(health_check))
+        .route("/metrics", get(crate::handlers::dev::metrics::get_metrics));
 
     // WebSocket endpoint
     let ws = Router::new()

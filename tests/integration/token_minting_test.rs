@@ -53,7 +53,7 @@ async fn setup_token_test() -> Result<Arc<BlockchainService>> {
     Ok(blockchain_service)
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_energy_token_program_exists() -> Result<()> {
     let blockchain_service = setup_token_test().await?;
 
@@ -95,7 +95,7 @@ async fn test_energy_token_program_exists() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_token_mint_authority() -> Result<()> {
     let blockchain_service = setup_token_test().await?;
 
@@ -139,7 +139,7 @@ async fn test_token_mint_authority() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_create_token_account() -> Result<()> {
     let blockchain_service = setup_token_test().await?;
 
@@ -179,7 +179,7 @@ async fn test_create_token_account() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_mint_tokens_instruction() -> Result<()> {
     let blockchain_service = setup_token_test().await?;
 
@@ -237,7 +237,7 @@ async fn test_mint_tokens_instruction() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_token_transfer_instruction() -> Result<()> {
     let blockchain_service = setup_token_test().await?;
 
@@ -285,7 +285,7 @@ async fn test_token_transfer_instruction() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_token_burn_instruction() -> Result<()> {
     let blockchain_service = setup_token_test().await?;
 
@@ -331,7 +331,7 @@ async fn test_token_burn_instruction() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_complete_token_lifecycle() -> Result<()> {
     let blockchain_service = setup_token_test().await?;
 
@@ -411,7 +411,7 @@ async fn test_complete_token_lifecycle() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_blockchain_transaction_building() -> Result<()> {
     let blockchain_service = setup_token_test().await?;
 
