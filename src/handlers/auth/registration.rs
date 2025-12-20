@@ -22,6 +22,17 @@ use super::types::{
 };
 
 /// Register Handler - inserts user into database and sends verification email
+#[utoipa::path(
+    post,
+    path = "/api/v1/users",
+    request_body = RegistrationRequest,
+    responses(
+        (status = 200, description = "Registration successful", body = RegistrationResponse),
+        (status = 400, description = "Bad request"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "users"
+)]
 pub async fn register(
     State(state): State<AppState>,
     Json(request): Json<RegistrationRequest>,
@@ -173,6 +184,16 @@ pub async fn register(
 }
 
 /// Resend verification email
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/resend-verification",
+    request_body = ResendVerificationRequest,
+    responses(
+        (status = 200, description = "Verification email sent", body = VerifyEmailResponse),
+        (status = 404, description = "User not found")
+    ),
+    tag = "auth"
+)]
 pub async fn resend_verification(
     State(state): State<AppState>,
     Json(request): Json<ResendVerificationRequest>,

@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 // ============================================================================
@@ -27,14 +28,14 @@ pub struct UserRow {
 // ============================================================================
 
 /// Login Request
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
 }
 
 /// Auth Response (Token)
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, ToSchema)]
 pub struct AuthResponse {
     pub access_token: String,
     pub expires_in: i64,
@@ -46,7 +47,7 @@ pub struct AuthResponse {
 // ============================================================================
 
 /// Registration Request
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct RegistrationRequest {
     pub username: String,
     pub email: String,
@@ -56,7 +57,7 @@ pub struct RegistrationRequest {
 }
 
 /// Registration Response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct RegistrationResponse {
     pub message: String,
     pub email_verification_sent: bool,
@@ -64,7 +65,7 @@ pub struct RegistrationResponse {
 }
 
 /// User Response
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, ToSchema)]
 pub struct UserResponse {
     pub id: Uuid,
     pub username: String,
@@ -77,39 +78,39 @@ pub struct UserResponse {
 }
 
 /// Email Verification Request
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
 pub struct VerifyEmailRequest {
     pub token: String,
 }
 
 /// Email Verification Response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct VerifyEmailResponse {
     pub success: bool,
     pub message: String,
 }
 
 /// Resend Email Verification
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ResendVerificationRequest {
     pub email: String,
 }
 
 /// Forgot Password Request
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ForgotPasswordRequest {
     pub email: String,
 }
 
 /// Reset Password Request
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ResetPasswordRequest {
     pub token: String,
     pub new_password: String,
 }
 
 /// Change Password Request (for authenticated users)
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ChangePasswordRequest {
     pub current_password: String,
     pub new_password: String,
@@ -120,7 +121,7 @@ pub struct ChangePasswordRequest {
 // ============================================================================
 
 /// Meter Response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct MeterResponse {
     pub id: Uuid,
     pub serial_number: String,
@@ -131,7 +132,7 @@ pub struct MeterResponse {
 }
 
 /// Meter Registration Request
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct RegisterMeterRequest {
     pub serial_number: String,
     pub meter_type: Option<String>,
@@ -139,7 +140,7 @@ pub struct RegisterMeterRequest {
 }
 
 /// Meter Registration Response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct RegisterMeterResponse {
     pub success: bool,
     pub message: String,
@@ -147,25 +148,25 @@ pub struct RegisterMeterResponse {
 }
 
 /// Verify Meter Request (Admin/System)
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct VerifyMeterRequest {
     pub serial_number: String,
 }
 
 /// Query params for filtering meters
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct MeterFilterParams {
     pub status: Option<String>,
 }
 
 /// Update meter status request
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateMeterStatusRequest {
     pub status: String,  // "verified", "pending", "inactive"
 }
 
 /// Create reading request for v1 API
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateReadingRequest {
     pub kwh: f64,
     pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
@@ -173,7 +174,7 @@ pub struct CreateReadingRequest {
 }
 
 /// Create reading response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct CreateReadingResponse {
     pub id: Uuid,
     pub serial_number: String,
@@ -185,7 +186,7 @@ pub struct CreateReadingResponse {
 }
 
 /// Reading Response Object
-#[derive(Debug, Serialize, FromRow)]
+#[derive(Debug, Serialize, FromRow, ToSchema)]
 pub struct MeterReadingResponse {
     pub id: Uuid,
     pub meter_serial: String,
@@ -199,7 +200,7 @@ pub struct MeterReadingResponse {
 }
 
 /// Query Params for Readings
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct ReadingFilterParams {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
@@ -211,7 +212,7 @@ pub struct ReadingFilterParams {
 // ============================================================================
 
 /// Token Balance Response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct TokenBalanceResponse {
     pub wallet_address: String,
     pub token_balance: String,
@@ -227,7 +228,7 @@ pub struct TokenBalanceResponse {
 // ============================================================================
 
 /// System status response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct StatusResponse {
     pub status: String,
     pub version: String,

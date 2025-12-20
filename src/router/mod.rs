@@ -37,6 +37,24 @@ use crate::middleware::{metrics_middleware, active_requests_middleware};
         (name = "trading", description = "P2P Energy Trading"),
         (name = "meters", description = "Smart Meter management"),
         (name = "dev", description = "Developer tools")
+    ),
+    paths(
+        crate::handlers::auth::login::login,
+        crate::handlers::auth::login::verify_email,
+        crate::handlers::auth::registration::register,
+        crate::handlers::auth::registration::resend_verification,
+    ),
+    components(
+        schemas(
+            crate::handlers::auth::types::LoginRequest,
+            crate::handlers::auth::types::AuthResponse,
+            crate::handlers::auth::types::UserResponse,
+            crate::handlers::auth::types::RegistrationRequest,
+            crate::handlers::auth::types::RegistrationResponse,
+            crate::handlers::auth::types::VerifyEmailRequest,
+            crate::handlers::auth::types::VerifyEmailResponse,
+            crate::handlers::auth::types::ResendVerificationRequest,
+        )
     )
 )]
 struct ApiDoc;

@@ -16,7 +16,7 @@ use crate::auth::password::PasswordService;
 use crate::middleware::metrics::{track_auth_attempt, track_auth_failure};
 use super::types::{
     LoginRequest, AuthResponse, UserResponse, UserRow,
-    VerifyEmailResponse,
+    VerifyEmailResponse, VerifyEmailRequest,
 };
 
 /// Row type for login query that includes password_hash
@@ -33,6 +33,17 @@ struct LoginUserRow {
 }
 
 /// Login Handler - queries database for user and verifies password
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/token",
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Login successful", body = AuthResponse),
+        (status = 401, description = "Unauthorized - Invalid credentials"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "auth"
+)]
 pub async fn login(
     State(state): State<AppState>,
     Json(request): Json<LoginRequest>,
@@ -175,11 +186,21 @@ pub async fn login(
 /// Verify email (Step 2: Account verify email)
 /// On successful verification, auto-generates a Solana wallet address for the user
 /// and registers them on-chain via the Anchor registry program
+#[utoipa::path(
+    get,
+    path = "/api/v1/auth/verify",
+    params(VerifyEmailRequest),
+    responses(
+        (status = 200, description = "Email verified successfully", body = VerifyEmailResponse),
+        (status = 400, description = "Invalid or missing token")
+    ),
+    tag = "auth"
+)]
 pub async fn verify_email(
     State(state): State<AppState>,
-    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    axum::extract::Query(params): axum::extract::Query<VerifyEmailRequest>,
 ) -> Json<VerifyEmailResponse> {
-    let token = params.get("token").cloned().unwrap_or_default();
+    let token = params.token;
     info!("📧 Email verification request");
 
     if token.is_empty() {
