@@ -10,6 +10,6 @@ pub mod stub;
 
 // Re-export from stub module
 pub use stub::{
-    meter_routes, submit_reading, meter_health,
+    submit_reading, meter_health,
     SubmitReadingRequest, MeterReadingResponse,
 };

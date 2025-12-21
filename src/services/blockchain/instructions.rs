@@ -288,6 +288,213 @@ impl InstructionBuilder {
         })
     }
 
+    /// Build instruction for initializing the registry
+    pub fn build_initialize_registry_instruction(&self) -> Result<Instruction> {
+        let program_id = Pubkey::from_str(REGISTRY_PROGRAM_ID)?;
+        let system_program = Pubkey::from_str(SYSTEM_PROGRAM_ID)?;
+
+        // Find registry PDA: seeds = ["registry"]
+        let (registry_pda, _bump) = Pubkey::find_program_address(&[b"registry"], &program_id);
+
+        let accounts = vec![
+            AccountMeta::new(registry_pda, false),
+            AccountMeta::new(self.payer, true),
+            AccountMeta::new_readonly(system_program, false),
+        ];
+
+        // initialize discriminator: [175, 175, 109, 31, 13, 152, 155, 237]
+        let mut data = Vec::new();
+        data.extend_from_slice(&[175, 175, 109, 31, 13, 152, 155, 237]);
+
+        Ok(Instruction {
+            program_id,
+            accounts,
+            data,
+        })
+    }
+
+    /// Build instruction for initializing the oracle
+    pub fn build_initialize_oracle_instruction(
+        &self,
+        api_gateway: &Pubkey,
+    ) -> Result<Instruction> {
+        let program_id = Pubkey::from_str(ORACLE_PROGRAM_ID)?;
+        let system_program = Pubkey::from_str(SYSTEM_PROGRAM_ID)?;
+
+        // Find oracle_data PDA: seeds = ["oracle_data"]
+        let (oracle_data_pda, _bump) = Pubkey::find_program_address(&[b"oracle_data"], &program_id);
+
+        let accounts = vec![
+            AccountMeta::new(oracle_data_pda, false),
+            AccountMeta::new(self.payer, true),
+            AccountMeta::new_readonly(system_program, false),
+        ];
+
+        // initialize discriminator: [175, 175, 109, 31, 13, 152, 155, 237]
+        let mut data = Vec::new();
+        data.extend_from_slice(&[175, 175, 109, 31, 13, 152, 155, 237]);
+        data.extend_from_slice(api_gateway.as_ref());
+
+        Ok(Instruction {
+            program_id,
+            accounts,
+            data,
+        })
+    }
+
+    /// Build instruction for initializing the governance (PoA)
+    pub fn build_initialize_governance_instruction(&self) -> Result<Instruction> {
+        let program_id = Pubkey::from_str(GOVERNANCE_PROGRAM_ID)?;
+        let system_program = Pubkey::from_str(SYSTEM_PROGRAM_ID)?;
+
+        // Find poa_config PDA: seeds = ["poa_config"]
+        let (poa_config_pda, _bump) = Pubkey::find_program_address(&[b"poa_config"], &program_id);
+
+        let accounts = vec![
+            AccountMeta::new(poa_config_pda, false),
+            AccountMeta::new(self.payer, true),
+            AccountMeta::new_readonly(system_program, false),
+        ];
+
+        // initialize_poa discriminator: [98, 199, 82, 10, 244, 161, 157, 46]
+        let mut data = Vec::new();
+        data.extend_from_slice(&[98, 199, 82, 10, 244, 161, 157, 46]);
+
+        Ok(Instruction {
+            program_id,
+            accounts,
+            data,
+        })
+    }
+
+    /// Build instruction for issuing an ERC certificate
+    pub fn build_issue_erc_instruction(
+        &self,
+        certificate_id: &str,
+        _user_wallet: &Pubkey,
+        meter_account: &Pubkey,
+        energy_amount: u64,
+        renewable_source: &str,
+        validation_data: &str,
+    ) -> Result<Instruction> {
+        let program_id = Pubkey::from_str(GOVERNANCE_PROGRAM_ID)?;
+        let system_program = Pubkey::from_str(SYSTEM_PROGRAM_ID)?;
+
+        // Find poa_config PDA: seeds = ["poa_config"]
+        let (poa_config_pda, _) = Pubkey::find_program_address(&[b"poa_config"], &program_id);
+
+        // Find erc_certificate PDA: seeds = ["erc_certificate", certificate_id]
+        let (erc_certificate_pda, _) = Pubkey::find_program_address(
+            &[b"erc_certificate", certificate_id.as_bytes()],
+            &program_id,
+        );
+
+        let accounts = vec![
+            AccountMeta::new(poa_config_pda, false),
+            AccountMeta::new(erc_certificate_pda, false),
+            AccountMeta::new(*meter_account, false),
+            AccountMeta::new(self.payer, true),
+            AccountMeta::new_readonly(system_program, false),
+        ];
+
+        // issue_erc discriminator: [174, 248, 149, 107, 155, 4, 196, 8]
+        let mut data = Vec::new();
+        data.extend_from_slice(&[174, 248, 149, 107, 155, 4, 196, 8]);
+
+        // Args: certificate_id (String), energy_amount (u64), renewable_source (String), validation_data (String)
+        let write_string = |d: &mut Vec<u8>, s: &str| {
+            let bytes = s.as_bytes();
+            d.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+            d.extend_from_slice(bytes);
+        };
+
+        write_string(&mut data, certificate_id);
+        data.extend_from_slice(&energy_amount.to_le_bytes());
+        write_string(&mut data, renewable_source);
+        write_string(&mut data, validation_data);
+
+        Ok(Instruction {
+            program_id,
+            accounts,
+            data,
+        })
+    }
+
+    /// Build instruction for transferring an ERC certificate
+    pub fn build_transfer_erc_instruction(
+        &self,
+        certificate_id: &str,
+        owner: &Pubkey,
+        new_owner: &Pubkey,
+    ) -> Result<Instruction> {
+        let program_id = Pubkey::from_str(GOVERNANCE_PROGRAM_ID)?;
+
+        // Find poa_config PDA
+        let (poa_config_pda, _) = Pubkey::find_program_address(&[b"poa_config"], &program_id);
+
+        // Find erc_certificate PDA
+        let (erc_certificate_pda, _) = Pubkey::find_program_address(
+            &[b"erc_certificate", certificate_id.as_bytes()],
+            &program_id,
+        );
+
+        let accounts = vec![
+            AccountMeta::new(poa_config_pda, false),
+            AccountMeta::new(erc_certificate_pda, false),
+            AccountMeta::new(*owner, true),
+            AccountMeta::new_readonly(*new_owner, false),
+        ];
+
+        // transfer_erc discriminator: [200, 15, 16, 13, 13, 143, 11, 11]
+        let mut data = Vec::new();
+        data.extend_from_slice(&[200, 15, 16, 13, 13, 143, 11, 11]);
+
+        Ok(Instruction {
+            program_id,
+            accounts,
+            data,
+        })
+    }
+
+    /// Build instruction for revoking (retiring) an ERC certificate
+    pub fn build_revoke_erc_instruction(
+        &self,
+        certificate_id: &str,
+        reason: &str,
+    ) -> Result<Instruction> {
+        let program_id = Pubkey::from_str(GOVERNANCE_PROGRAM_ID)?;
+
+        // Find poa_config PDA
+        let (poa_config_pda, _) = Pubkey::find_program_address(&[b"poa_config"], &program_id);
+
+        // Find erc_certificate PDA
+        let (erc_certificate_pda, _) = Pubkey::find_program_address(
+            &[b"erc_certificate", certificate_id.as_bytes()],
+            &program_id,
+        );
+
+        let accounts = vec![
+            AccountMeta::new(poa_config_pda, false),
+            AccountMeta::new(erc_certificate_pda, false),
+            AccountMeta::new(self.payer, true),
+        ];
+
+        // revoke_erc discriminator: [16, 48, 113, 85, 118, 70, 185, 150]
+        let mut data = Vec::new();
+        data.extend_from_slice(&[16, 48, 113, 85, 118, 70, 185, 150]);
+
+        // Arg: reason (String)
+        let bytes = reason.as_bytes();
+        data.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        data.extend_from_slice(bytes);
+
+        Ok(Instruction {
+            program_id,
+            accounts,
+            data,
+        })
+    }
+
     // Helper methods
 
     /// Get ERC certificate pubkey from certificate ID
@@ -395,6 +602,36 @@ impl InstructionBuilder {
             &program_id,
         );
         Ok(user_account_pda)
+    }
+
+    /// Build instruction for initializing the Energy Token program
+    pub fn build_initialize_energy_token_instruction(&self, authority: Pubkey) -> Result<Instruction> {
+        let program_id = Pubkey::from_str(ENERGY_TOKEN_PROGRAM_ID)?;
+        let system_program = Pubkey::from_str(SYSTEM_PROGRAM_ID)?;
+        let token_program = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")?; // Standard Token
+        let rent = solana_sdk::sysvar::rent::ID;
+
+        // PDAs
+        let (token_info_pda, _) = Pubkey::find_program_address(&[b"token_info"], &program_id);
+        let (mint_pda, _) = Pubkey::find_program_address(&[b"mint"], &program_id);
+
+        let accounts = vec![
+            AccountMeta::new(token_info_pda, false),
+            AccountMeta::new(mint_pda, false),
+            AccountMeta::new(authority, true), // authority used as payer
+            AccountMeta::new_readonly(system_program, false),
+            AccountMeta::new_readonly(token_program, false),
+            AccountMeta::new_readonly(rent, false),
+        ];
+
+        // Discriminator for "initialize_token" (from IDL: [38, 209, 150, 50, 190, 117, 16, 54])
+        let data = vec![38, 209, 150, 50, 190, 117, 16, 54];
+
+        Ok(Instruction {
+            program_id,
+            accounts,
+            data,
+        })
     }
 }
 

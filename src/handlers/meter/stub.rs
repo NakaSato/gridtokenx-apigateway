@@ -6,8 +6,6 @@
 use axum::{
     extract::State,
     Json,
-    routing::post,
-    Router,
 };
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -333,10 +331,3 @@ pub async fn meter_health() -> &'static str {
     "Meter stub service is running"
 }
 
-/// Build the meter stub routes
-#[deprecated(since = "0.1.0", note = "Use v1_meters_routes instead")]
-pub fn meter_routes() -> Router<AppState> {
-    Router::new()
-        .route("/submit-reading", post(submit_reading))
-        .route("/health", axum::routing::get(meter_health))
-}

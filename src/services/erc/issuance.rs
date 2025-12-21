@@ -5,9 +5,8 @@ use crate::services::BlockchainService;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
-    signature::{Keypair, Signer},
+    signature::Keypair,
 };
 use tracing::info;
 use uuid::Uuid;
@@ -71,83 +70,38 @@ impl AggregatedIssuance {
         &self,
         certificate_id: &str,
         user_wallet: &Pubkey,
-        _meter_id: &str,
+        meter_id: &str,
         energy_amount: f64,
-        _renewable_source: &str,
-        _validation_data: &str,
+        renewable_source: &str,
+        validation_data: &str,
         authority: &Keypair,
-        governance_program_id: &Pubkey,
+        _governance_program_id: &Pubkey,
     ) -> Result<solana_sdk::signature::Signature> {
         info!(
             "Issuing certificate {} on-chain for {} kWh",
             certificate_id, energy_amount
         );
 
-        // Calculate PDA for certificate
-        let (certificate_pda, _bump) = Pubkey::find_program_address(
-            &[b"certificate", certificate_id.as_bytes()],
-            governance_program_id,
+        // Map energy amount to u64 (lamports-like precision)
+        let amount_u64 = (energy_amount * 1000.0) as u64;
+
+        // Get meter PDA from registry
+        let registry_program_id = self.blockchain_service.registry_program_id()?;
+        let (meter_pda, _) = Pubkey::find_program_address(
+            &[b"meter", meter_id.as_bytes()],
+            &registry_program_id,
         );
 
-        // Create instruction data -> this depends on the program's instruction layout!
-        // We'll mock the instruction data construction for now directly as bytes
-        // In a real implementation, we'd use Borsh serialization of a specific Instruction enum
-        let mut data = Vec::with_capacity(128);
-        data.push(1); // Instruction: IssueCertificate
-                      // ... serialization of arguments ...
-        data.extend_from_slice(certificate_id.as_bytes()); // naive
-        data.extend_from_slice(&energy_amount.to_le_bytes());
-
-        // We can use the generic blockchain service execution if exposed,
-        // or build a custom instruction here.
-        // Since BlockchainService handles generic transaction execution, we might use that if we can.
-        // But `issue_certificate` usually requires specific accounts.
-
-        // Let's assume we construct a raw Instruction here:
-        let _instruction = Instruction {
-            program_id: *governance_program_id,
-            accounts: vec![
-                AccountMeta::new(certificate_pda, false),
-                AccountMeta::new(*user_wallet, false), // Owner
-                AccountMeta::new(authority.pubkey(), true), // Authority/Issuer
-                AccountMeta::new(
-                    solana_sdk::pubkey!("11111111111111111111111111111111"),
-                    false,
-                ),
-            ],
-            data,
-        };
-
-        // Submit transaction via blockchain service
-        // Since `blockchain_service` doesn't expose a raw `execute_instruction` method that takes `Instruction`
-        // we might need to rely on `execute_transaction` which might be too high level or not right.
-        // Actually, looking at `BlockchainService` structure from `service.rs`:
-        // It likely has `execute_transaction` taking instructions?
-        // Let's assume for now we use `interact_with_program` style logic or expose a helper.
-        // But `BlockchainService` in `service.rs` (before refactor) had transaction methods.
-        // Let's assume here we use a placeholder or generic execution.
-
-        // For now, let's assume we just log it and return a mock signature as we are running in simulation mostly
-        // OR we use the `on_chain` module from `blockchain`.
-        // But we only have `blockchain_service` instance.
-
-        // Let's try to use `blockchain_service.execute_transaction` if available, or just mocking for this refactor
-        // if the original code was also somewhat generic or we can't see `BlockchainService` exact methods easily now.
-        // The original code used `self.blockchain_service.get_latest_blockhash()` etc.
-        // Let's verify what `BlockchainService` exposes.
-        // Checking `erc_service.rs` original:
-        // uses `self.blockchain_service.rpc_client.send_and_confirm_transaction`?
-        // The original `erc_service.rs` uses `solana_sdk` imports directly but `blockchain_service` is passed in `new`.
-        // Ah, `blockchain_service` in `erc_service.rs` is `crate::services::BlockchainService`.
-
-        // Replicating original logic:
-        // It seems `erc_service.rs` constructed the transaction manually?
-        // Let's look at lines 102-179 in `erc_service.rs` to see how it did it.
-        // Wait, line 102 says `issue_certificate_on_chain` uses `solana_sdk`.
-        // It likely constructs the transaction.
-
-        // Mock implementation for refactoring safety until we verify:
-        Ok(solana_sdk::signature::Signature::default())
+        // Submit real transaction via blockchain service
+        self.blockchain_service.issue_erc(
+            certificate_id,
+            user_wallet,
+            &meter_pda,
+            amount_u64,
+            renewable_source,
+            validation_data,
+            authority,
+        ).await
     }
 
     /// Create ERC metadata for on-chain storage

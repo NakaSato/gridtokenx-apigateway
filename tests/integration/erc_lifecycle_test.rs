@@ -18,6 +18,9 @@ async fn setup_erc_test() -> Result<(PgPool, Arc<BlockchainService>, ErcService)
         .with_max_level(tracing::Level::INFO)
         .try_init();
 
+    // Set authority wallet path for consistency
+    std::env::set_var("AUTHORITY_WALLET_PATH", "dev-wallet.json");
+
     // Connect to test database
     let database_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
         "postgresql://gridtokenx_user:gridtokenx_password@localhost:5432/gridtokenx".to_string()
@@ -39,6 +42,50 @@ async fn setup_erc_test() -> Result<(PgPool, Arc<BlockchainService>, ErcService)
 
     // Initialize ERC service
     let erc_service = ErcService::new(db_pool.clone(), (*blockchain_service).clone());
+
+    // Bootstrap localnet programs (Initialize Registry and Oracle)
+    println!("📋 Bootstrapping localnet programs...");
+    let authority = blockchain_service.get_authority_keypair().await?;
+    
+    // Ensure authority has enough SOL
+    let balance = blockchain_service.get_balance_sol(&authority.pubkey()).await.unwrap_or(0.0);
+    if balance < 1.0 {
+        println!("   Authority {} has low balance ({} SOL). Airdropping...", authority.pubkey(), balance);
+        let sig = blockchain_service.request_airdrop(&authority.pubkey(), 5_000_000_000).await?;
+        blockchain_service.wait_for_confirmation(&sig, 30).await?;
+    }
+    
+    // Check if registry needs initialization (seeds = "registry")
+    let registry_program_id = blockchain_service.registry_program_id()?;
+    let (registry_pda, _) = solana_sdk::pubkey::Pubkey::find_program_address(&[b"registry"], &registry_program_id);
+    
+    if !blockchain_service.account_exists(&registry_pda).await? {
+        let balance = blockchain_service.get_balance_sol(&authority.pubkey()).await?;
+        println!("   Authority {} balance: {} SOL", authority.pubkey(), balance);
+        println!("   Initializing Registry...");
+        let sig = blockchain_service.initialize_registry(&authority).await?;
+        blockchain_service.wait_for_confirmation(&sig, 30).await?;
+    }
+
+    // Check if oracle needs initialization (seeds = "oracle_data")
+    let oracle_program_id = blockchain_service.oracle_program_id()?;
+    let (oracle_data_pda, _) = solana_sdk::pubkey::Pubkey::find_program_address(&[b"oracle_data"], &oracle_program_id);
+
+    if !blockchain_service.account_exists(&oracle_data_pda).await? {
+        println!("   Initializing Oracle...");
+        let sig = blockchain_service.initialize_oracle(&authority, &authority.pubkey()).await?;
+        blockchain_service.wait_for_confirmation(&sig, 30).await?;
+    }
+
+    // Check if governance needs initialization (seeds = "poa_config")
+    let governance_program_id = blockchain_service.governance_program_id()?;
+    let (poa_config_pda, _) = solana_sdk::pubkey::Pubkey::find_program_address(&[b"poa_config"], &governance_program_id);
+
+    if !blockchain_service.account_exists(&poa_config_pda).await? {
+        println!("   Initializing Governance (PoA)...");
+        let sig = blockchain_service.initialize_governance(&authority).await?;
+        blockchain_service.wait_for_confirmation(&sig, 30).await?;
+    }
 
     Ok((db_pool, blockchain_service, erc_service))
 }
@@ -80,19 +127,20 @@ async fn setup_meter_with_generation(
     let consumed = 0;
     let timestamp = Utc::now().timestamp();
 
-    blockchain_service
+    let sig = blockchain_service
         .submit_meter_reading_on_chain(
             authority, // Oracle program expects the authority, not user
             &meter_id, produced, consumed, timestamp,
         )
         .await?;
+    blockchain_service.wait_for_confirmation(&sig, 30).await?;
 
     Ok((user_keypair, meter_id))
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_erc_issuance_on_chain() -> Result<()> {
-    let (_db_pool, blockchain_service, erc_service) = setup_erc_test().await?;
+    let (_db_pool, blockchain_service, erc_service): (PgPool, Arc<BlockchainService>, ErcService) = setup_erc_test().await?;
 
     println!("\n🏷️ ============================================");
     println!("   Test: ERC Certificate Issuance On-Chain");
@@ -159,9 +207,9 @@ async fn test_erc_issuance_on_chain() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_erc_transfer_on_chain() -> Result<()> {
-    let (_db_pool, blockchain_service, erc_service) = setup_erc_test().await?;
+    let (_db_pool, blockchain_service, erc_service): (PgPool, Arc<BlockchainService>, ErcService) = setup_erc_test().await?;
 
     println!("\n🔄 ============================================");
     println!("   Test: ERC Certificate Transfer On-Chain");
@@ -232,9 +280,9 @@ async fn test_erc_transfer_on_chain() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_erc_retirement_on_chain() -> Result<()> {
-    let (_db_pool, blockchain_service, erc_service) = setup_erc_test().await?;
+    let (_db_pool, blockchain_service, erc_service): (PgPool, Arc<BlockchainService>, ErcService) = setup_erc_test().await?;
 
     println!("\n🗑️ ============================================");
     println!("   Test: ERC Certificate Retirement On-Chain");
@@ -285,9 +333,9 @@ async fn test_erc_retirement_on_chain() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_complete_erc_lifecycle() -> Result<()> {
-    let (_db_pool, blockchain_service, erc_service) = setup_erc_test().await?;
+    let (_db_pool, blockchain_service, erc_service): (PgPool, Arc<BlockchainService>, ErcService) = setup_erc_test().await?;
 
     println!("\n♻️ ============================================");
     println!("   Test: Complete ERC Lifecycle");
@@ -379,9 +427,9 @@ async fn test_complete_erc_lifecycle() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_erc_metadata_creation() -> Result<()> {
-    let (_db_pool, _blockchain_service, erc_service) = setup_erc_test().await?;
+    let (_db_pool, _blockchain_service, erc_service): (PgPool, Arc<BlockchainService>, ErcService) = setup_erc_test().await?;
 
     println!("\n📝 ============================================");
     println!("   Test: ERC Metadata Creation");

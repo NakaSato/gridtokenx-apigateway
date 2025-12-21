@@ -84,6 +84,7 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 # Validation
 validator = { version = "0.20", features = ["derive"] }
 regex = "1.10"
+sysinfo = "0.33"
 
 # OpenAPI Documentation
 utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }

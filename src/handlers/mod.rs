@@ -32,8 +32,3 @@ pub use auth::{v1_auth_routes, v1_users_routes, v1_meters_routes, v1_wallets_rou
 pub use trading::v1_trading_routes;
 pub use dashboard::v1_dashboard_routes;
 
-// Re-export legacy route builders (backward compatibility)
-pub use auth::{auth_routes, token_routes, user_meter_routes, meter_info_routes};
-
-// Re-export meter routes
-pub use meter::meter_routes;

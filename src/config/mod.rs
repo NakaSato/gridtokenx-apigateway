@@ -33,6 +33,7 @@ pub struct Config {
     /// Default simulator user UUID for engineering/test mode
     pub simulator_user_id: String,
     pub encryption_secret: String,
+    pub cors_allowed_origins: Vec<String>,
 }
 
 /// Solana program IDs configuration - moved from hardcoded values
@@ -48,11 +49,11 @@ pub struct SolanaProgramsConfig {
 impl Default for SolanaProgramsConfig {
     fn default() -> Self {
         Self {
-            registry_program_id: "GRX1111111111111111111111111111111111111111".to_string(),
-            oracle_program_id: "GRX2222222222222222222222222222222222222222".to_string(),
-            governance_program_id: "GRX3333333333333333333333333333333333333333".to_string(),
-            energy_token_program_id: "GRX4444444444444444444444444444444444444444".to_string(),
-            trading_program_id: "GRX5555555555555555555555555555555555555555".to_string(),
+            registry_program_id: "9wvMT6f2Y7A37LB8y5LEQRSJxbnwLYqw1Bqq1RBtD3oM".to_string(),
+            oracle_program_id: "69e8LaTfPnFycbD1kAhStfkyJxe1LnN323k3NQAMYBHr".to_string(),
+            governance_program_id: "2GprryNp7j7yxGuPNNjpJLHELfCdXH8UPfKSxXCvisjL".to_string(),
+            energy_token_program_id: "AZBstnPmUeRJnwv55128awdfi2tmCFzcK4W6NPXbTkWA".to_string(),
+            trading_program_id: "e7rS5sykWMXtciUEgUZ6xByqo6VqwNRNeAmQQn3Sbj2".to_string(),
         }
     }
 }
@@ -214,6 +215,12 @@ impl Config {
             encryption_secret: env::var("ENCRYPTION_SECRET").map_err(|_| {
                 anyhow::anyhow!("ENCRYPTION_SECRET environment variable is required")
             })?,
+            cors_allowed_origins: env::var("CORS_ALLOWED_ORIGINS")
+                .unwrap_or_else(|_| "http://localhost:3000,http://localhost:4000,https://gridtokenx.com".to_string())
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
         })
     }
 }

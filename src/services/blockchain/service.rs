@@ -56,7 +56,7 @@ impl BlockchainService {
 
         // Load authority keypair to get the payer pubkey
         let authority_path = std::env::var("AUTHORITY_WALLET_PATH")
-            .unwrap_or_else(|_| "../keypairs/dev-wallet.json".to_string());
+            .unwrap_or_else(|_| "dev-wallet.json".to_string());
 
         let payer = match BlockchainUtils::load_keypair_from_file(&authority_path) {
             Ok(keypair) => {
@@ -197,6 +197,93 @@ impl BlockchainService {
     /// Get account data
     pub async fn get_account_data(&self, pubkey: &Pubkey) -> Result<Vec<u8>> {
         self.account_manager.get_account_data(pubkey).await
+    }
+
+    /// Initialize the registry on-chain (localnet bootstrapping)
+    pub async fn initialize_registry(&self, authority: &Keypair) -> Result<Signature> {
+        info!("Initializing Registry on-chain...");
+        let instruction = self.instruction_builder.build_initialize_registry_instruction()?;
+        self.build_and_send_transaction(vec![instruction], &[authority]).await
+    }
+
+    /// Initialize the oracle on-chain (localnet bootstrapping)
+    pub async fn initialize_oracle(&self, authority: &Keypair, api_gateway: &Pubkey) -> Result<Signature> {
+        info!("Initializing Oracle on-chain with API Gateway: {}...", api_gateway);
+        let instruction = self.instruction_builder.build_initialize_oracle_instruction(api_gateway)?;
+        self.build_and_send_transaction(vec![instruction], &[authority]).await
+    }
+
+    /// Initialize the governance (PoA) on-chain (localnet bootstrapping)
+    pub async fn initialize_governance(&self, authority: &Keypair) -> Result<Signature> {
+        info!("Initializing Governance (PoA) on-chain...");
+        let instruction = self.instruction_builder.build_initialize_governance_instruction()?;
+        self.build_and_send_transaction(vec![instruction], &[authority]).await
+    }
+
+    /// Initialize the Energy Token program mint on-chain (localnet bootstrapping)
+    pub async fn initialize_energy_token(&self, authority: &Keypair) -> Result<Signature> {
+        info!("Initializing Energy Token on-chain with Authority: {}", authority.pubkey());
+        let instruction = self.instruction_builder.build_initialize_energy_token_instruction(authority.pubkey())?;
+        
+        for (i, acc) in instruction.accounts.iter().enumerate() {
+            info!("  Account {}: {} (signer: {}, writable: {})", i, acc.pubkey, acc.is_signer, acc.is_writable);
+        }
+
+        self.build_and_send_transaction(vec![instruction], &[authority]).await
+    }
+
+    /// Issue an ERC certificate on-chain
+    pub async fn issue_erc(
+        &self,
+        certificate_id: &str,
+        user_wallet: &Pubkey,
+        meter_account: &Pubkey,
+        energy_amount: u64,
+        renewable_source: &str,
+        validation_data: &str,
+        authority: &Keypair,
+    ) -> Result<Signature> {
+        info!("Issuing ERC {} on-chain for {} kWh", certificate_id, energy_amount);
+        let instruction = self.instruction_builder.build_issue_erc_instruction(
+            certificate_id,
+            user_wallet,
+            meter_account,
+            energy_amount,
+            renewable_source,
+            validation_data,
+        )?;
+        self.build_and_send_transaction(vec![instruction], &[authority]).await
+    }
+
+    /// Transfer an ERC certificate on-chain
+    pub async fn transfer_erc(
+        &self,
+        certificate_id: &str,
+        owner: &Keypair,
+        new_owner: &Pubkey,
+    ) -> Result<Signature> {
+        info!("Transferring ERC {} on-chain to {}", certificate_id, new_owner);
+        let instruction = self.instruction_builder.build_transfer_erc_instruction(
+            certificate_id,
+            &owner.pubkey(),
+            new_owner,
+        )?;
+        self.build_and_send_transaction(vec![instruction], &[owner]).await
+    }
+
+    /// Revoke (retire) an ERC certificate on-chain
+    pub async fn revoke_erc(
+        &self,
+        certificate_id: &str,
+        reason: &str,
+        authority: &Keypair,
+    ) -> Result<Signature> {
+        info!("Revoking ERC {} on-chain (Reason: {})", certificate_id, reason);
+        let instruction = self.instruction_builder.build_revoke_erc_instruction(
+            certificate_id,
+            reason,
+        )?;
+        self.build_and_send_transaction(vec![instruction], &[authority]).await
     }
 
     /// Check if an account exists

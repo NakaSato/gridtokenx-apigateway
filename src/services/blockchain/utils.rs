@@ -490,7 +490,7 @@ impl BlockchainUtils {
     /// Get Registry program ID
     fn registry_program_id() -> Result<Pubkey> {
         let program_id = std::env::var("REGISTRY_PROGRAM_ID")
-            .unwrap_or_else(|_| "ExXGeZ2bZpWQrtHpc1CRoBNHsozEJSSj7UioVZSf4U8F".to_string());
+            .unwrap_or_else(|_| "9wvMT6f2Y7A37LB8y5LEQRSJxbnwLYqw1Bqq1RBtD3oM".to_string());
 
         program_id
             .parse()
@@ -500,7 +500,7 @@ impl BlockchainUtils {
     /// Get Oracle program ID
     fn oracle_program_id() -> Result<Pubkey> {
         let program_id = std::env::var("ORACLE_PROGRAM_ID")
-            .unwrap_or_else(|_| "4vXCNesjspqZUsKWU1Zaa3pucDAdZNeFnbbwem7DefbT".to_string());
+            .unwrap_or_else(|_| "69e8LaTfPnFycbD1kAhStfkyJxe1LnN323k3NQAMYBHr".to_string());
 
         program_id
             .parse()
@@ -511,7 +511,7 @@ impl BlockchainUtils {
     #[allow(dead_code)]
     fn governance_program_id() -> Result<Pubkey> {
         let program_id = std::env::var("GOVERNANCE_PROGRAM_ID")
-            .unwrap_or_else(|_| "55ix8BxEAErEyK7jHjerCr6z8aTei4vaXqwVfoGiz6C3".to_string());
+            .unwrap_or_else(|_| "2GprryNp7j7yxGuPNNjpJLHELfCdXH8UPfKSxXCvisjL".to_string());
 
         program_id
             .parse()
@@ -532,7 +532,7 @@ impl BlockchainUtils {
     #[allow(dead_code)]
     fn trading_program_id() -> Result<Pubkey> {
         let program_id = std::env::var("TRADING_PROGRAM_ID")
-            .unwrap_or_else(|_| "Fo9hGqQu2beFAVGS5BVKhHwU5fingYwAMoALhKdgToXq".to_string());
+            .unwrap_or_else(|_| "e7rS5sykWMXtciUEgUZ6xByqo6VqwNRNeAmQQn3Sbj2".to_string());
 
         program_id
             .parse()
@@ -543,7 +543,7 @@ impl BlockchainUtils {
     /// For now, we use Token-2022 since our mint is deployed with Token-2022
     /// In a production system, you would query the mint account to detect its owner
     pub fn get_token_program_id() -> Result<Pubkey> {
-        // Use Standard Token program ID since our energy token mint uses Standard Token
+        // Use Standard Token program ID since Energy Token program seems to rely on it
         Pubkey::from_str(TOKEN_PROGRAM_ID)
             .map_err(|e| anyhow!("Failed to parse token program ID: {}", e))
     }

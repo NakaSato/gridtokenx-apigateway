@@ -16,8 +16,6 @@ use crate::handlers::{
     // V1 RESTful routes
     v1_auth_routes, v1_users_routes, v1_meters_routes, v1_wallets_routes, v1_status_routes,
     v1_trading_routes, v1_dashboard_routes,
-    // Legacy routes
-    auth_routes, token_routes, user_meter_routes, meter_info_routes, meter_routes,
 };
 use crate::services::WebSocketService;
 use crate::auth::middleware::auth_middleware;
@@ -212,31 +210,11 @@ pub fn build_router(app_state: AppState) -> Router {
         .nest("/dashboard", v1_dashboard_routes()) // /api/v1/dashboard/metrics
         .nest("/dev", dev::dev_routes());      // POST /api/v1/dev/faucet
 
-    // =========================================================================
-    // Legacy Routes (Backward Compatibility - Deprecated)
-    // =========================================================================
-    let legacy_meters = meter_routes();
-    let legacy_auth = auth_routes();
-    let legacy_tokens = token_routes();
-    let legacy_user = user_meter_routes();
-    let legacy_meter_info = meter_info_routes();
-
-    // Link legacy routes with deprecation warning
-    let legacy_api = Router::new()
-        .nest("/api/meters", legacy_meters)
-        .nest("/api/meters", legacy_meter_info)
-        .nest("/api/auth", legacy_auth)
-        .nest("/api/tokens", legacy_tokens)
-        .nest("/api/user", legacy_user)
-        .layer(middleware::from_fn(legacy_warning_middleware));
-
     health
         .merge(ws)
         .merge(swagger)  // Swagger UI at /api/docs
         // V1 API
         .nest("/api/v1", v1_api)
-        // Legacy API
-        .merge(legacy_api)
         .layer(
             ServiceBuilder::new()
                 .layer(middleware::from_fn(metrics_middleware))
@@ -246,20 +224,32 @@ pub fn build_router(app_state: AppState) -> Router {
                     axum::http::StatusCode::REQUEST_TIMEOUT,
                     std::time::Duration::from_secs(900),
                 ))
-                .layer(
+                .layer({
+                    let allowed_origins = app_state.config.cors_allowed_origins.clone();
                     CorsLayer::new()
                         .allow_origin(tower_http::cors::AllowOrigin::predicate(
-                            |origin: &axum::http::HeaderValue, _request_parts: &axum::http::request::Parts| {
+                            move |origin: &axum::http::HeaderValue, _request_parts: &axum::http::request::Parts| {
                                 let origin_str = origin.to_str().unwrap_or("");
-                                // Allow localhost development and production domain
-                                origin_str.starts_with("http://localhost")
-                                    || origin_str.starts_with("https://gridtokenx.com")
+                                allowed_origins.iter().any(|allowed| {
+                                    origin_str == allowed || origin_str.starts_with(allowed)
+                                })
                             },
                         ))
-                        .allow_methods(tower_http::cors::Any)
-                        .allow_headers(tower_http::cors::Any)
-                        .allow_credentials(true),
-                ),
+                        .allow_methods([
+                            axum::http::Method::GET,
+                            axum::http::Method::POST,
+                            axum::http::Method::PUT,
+                            axum::http::Method::PATCH,
+                            axum::http::Method::DELETE,
+                            axum::http::Method::OPTIONS,
+                        ])
+                        .allow_headers([
+                            axum::http::header::AUTHORIZATION,
+                            axum::http::header::CONTENT_TYPE,
+                            axum::http::header::ACCEPT,
+                        ])
+                        .allow_credentials(true)
+                }),
         )
         .with_state(app_state)
 }
@@ -282,11 +272,3 @@ async fn websocket_handler(
     })
 }
 
-/// Middleware to log warnings for deprecated legacy routes
-async fn legacy_warning_middleware(
-    request: axum::extract::Request,
-    next: axum::middleware::Next,
-) -> axum::response::Response {
-    tracing::warn!("⚠️  Accessing DEPRECATED legacy endpoint: {}", request.uri());
-    next.run(request).await
-}

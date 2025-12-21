@@ -22,6 +22,7 @@ pub mod event_processor;
 pub mod transaction;
 pub mod validation;
 pub mod webhook;
+pub mod erc;
 
 // Re-exports
 pub use auth::AuthService;
@@ -40,3 +41,4 @@ pub use futures::FuturesService;
 pub use dashboard::DashboardService;
 pub use event_processor::EventProcessorService;
 pub use webhook::WebhookService;
+pub use erc::ErcService;

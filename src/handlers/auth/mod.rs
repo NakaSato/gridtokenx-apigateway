@@ -28,14 +28,8 @@ pub mod status;
 // Route builders
 pub mod routes;
 
-// Re-export V1 route builders (new RESTful API)
 pub use routes::{
     v1_auth_routes, v1_users_routes, v1_meters_routes, v1_wallets_routes, v1_status_routes,
-};
-
-// Re-export legacy route builders (backward compatibility)
-pub use routes::{
-    auth_routes, token_routes, user_meter_routes, meter_info_routes,
 };
 
 // Re-export handler functions

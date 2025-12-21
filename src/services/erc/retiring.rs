@@ -6,10 +6,8 @@ use uuid::Uuid;
 use crate::services::erc::types::ErcCertificate;
 
 use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    transaction::Transaction,
+    signature::Keypair,
 };
 
 use crate::services::BlockchainService;
@@ -34,53 +32,11 @@ impl CertificateRetiring {
         &self,
         certificate_id: &str,
         authority: &Keypair,
-        governance_program_id: &Pubkey,
+        _governance_program_id: &Pubkey,
     ) -> Result<String> {
-        let (poa_config, _) = Pubkey::find_program_address(&[b"poa_config"], governance_program_id);
-
-        let (erc_certificate, _) = Pubkey::find_program_address(
-            &[b"erc_certificate", certificate_id.as_bytes()],
-            governance_program_id,
-        );
-
-        // Discriminator for "global:revoke_erc"
-        let discriminator: [u8; 8] = [0x10, 0x30, 0x71, 0x55, 0x76, 0x46, 0xb9, 0x96];
-
-        // Let's implement the structure first.
-        let instruction_data = {
-            let mut data = Vec::new();
-            data.extend_from_slice(&discriminator);
-            // reason: String
-            let reason = "Retired via API Gateway";
-            data.extend_from_slice(&(reason.len() as u32).to_le_bytes());
-            data.extend_from_slice(reason.as_bytes());
-            data
-        };
-
-        // Accounts: poa_config, erc_certificate, authority
-        let accounts = vec![
-            AccountMeta::new(poa_config, false),
-            AccountMeta::new(erc_certificate, false),
-            AccountMeta::new(authority.pubkey(), true),
-        ];
-
-        let instruction = Instruction {
-            program_id: *governance_program_id,
-            accounts,
-            data: instruction_data,
-        };
-
-        let recent_blockhash = self.blockchain_service.get_latest_blockhash().await?;
-        let transaction = Transaction::new_signed_with_payer(
-            &[instruction],
-            Some(&authority.pubkey()),
-            &[authority],
-            recent_blockhash,
-        );
-
         let signature = self
             .blockchain_service
-            .send_and_confirm_transaction(&transaction)
+            .revoke_erc(certificate_id, "Retired via API Gateway", authority)
             .await?;
 
         Ok(signature.to_string())

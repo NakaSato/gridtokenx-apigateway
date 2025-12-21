@@ -184,12 +184,17 @@ impl HealthChecker {
         }
     }
 
-    /// Get system metrics (basic implementation)
+    /// Get system metrics
     fn get_system_metrics(&self) -> SystemMetrics {
+        use sysinfo::System;
+        let mut sys = System::new_all();
+        sys.refresh_cpu_all();
+        sys.refresh_memory();
+
         SystemMetrics {
-            cpu_usage: None, // Would need sysinfo crate
-            memory_used_mb: None,
-            memory_total_mb: None,
+            cpu_usage: Some(sys.global_cpu_usage() as f64),
+            memory_used_mb: Some(sys.used_memory() / 1024 / 1024),
+            memory_total_mb: Some(sys.total_memory() / 1024 / 1024),
             disk_used_gb: None,
             disk_total_gb: None,
             active_connections: 0, // Would track in middleware
