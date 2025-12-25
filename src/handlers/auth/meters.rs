@@ -441,12 +441,16 @@ pub async fn update_meter_status(
 }
 
 /// Create a new reading for a meter
+/// Query params:
+/// - auto_mint: If false, skip blockchain minting. Default: true
+/// - timeout_secs: Blockchain operation timeout. Default: 30
 #[utoipa::path(
     post,
     path = "/api/v1/meters/{serial}/readings",
     request_body = CreateReadingRequest,
     params(
-        ("serial" = String, Path, description = "Meter Serial Number")
+        ("serial" = String, Path, description = "Meter Serial Number"),
+        CreateReadingParams
     ),
     responses(
         (status = 200, description = "Reading created", body = CreateReadingResponse),
@@ -457,12 +461,18 @@ pub async fn update_meter_status(
 pub async fn create_reading(
     State(state): State<AppState>,
     axum::extract::Path(serial): axum::extract::Path<String>,
+    axum::extract::Query(params): axum::extract::Query<CreateReadingParams>,
     _headers: HeaderMap,
     Json(request): Json<CreateReadingRequest>,
 ) -> Json<CreateReadingResponse> {
-    info!("📊 Create reading for meter {}: {} kWh", serial, request.kwh);
+    let auto_mint = params.auto_mint.unwrap_or(true);
+    let timeout_secs = params.timeout_secs.unwrap_or(30);
+    
+    info!(
+        "📊 Create reading for meter {}: {} kWh (auto_mint={}, timeout={}s)",
+        serial, request.kwh, auto_mint, timeout_secs
+    );
 
-    // Get wallet address from meter or request
     // Get wallet address, meter_id, user_id from meter or request
     let (meter_id, user_id, wallet_address) = {
         let meter_info = sqlx::query_as::<_, (Uuid, Uuid, Option<String>)>(
@@ -506,42 +516,69 @@ pub async fn create_reading(
     let reading_id = Uuid::new_v4();
     let timestamp = request.timestamp.unwrap_or_else(chrono::Utc::now);
 
-    // Try to mint tokens
+    // Track minting result
     let mut minted = false;
     let mut tx_signature: Option<String> = None;
     let mut message = "Reading recorded".to_string();
 
-    if request.kwh != 0.0 {
-        if let Ok(authority) = state.wallet_service.get_authority_keypair().await {
-            if let (Ok(mint), Ok(wallet)) = (
-                crate::services::BlockchainService::parse_pubkey(&state.config.energy_token_mint),
-                crate::services::BlockchainService::parse_pubkey(&wallet_address),
-            ) {
-                if let Ok(token_account) = state.blockchain_service.ensure_token_account_exists(&authority, &wallet, &mint).await {
-                    match state.blockchain_service.mint_energy_tokens(&authority, &token_account, &wallet, &mint, request.kwh).await {
-                        Ok(sig) => {
-                            minted = true;
-                            tx_signature = Some(sig.to_string());
-                            
-                            if request.kwh > 0.0 {
-                                message = format!("{} kWh minted successfully", request.kwh);
-                                info!("🎉 Minted {} kWh for meter {}", request.kwh, serial);
-                            } else {
-                                message = format!("{} kWh burned successfully", request.kwh.abs());
-                                info!("🔥 Burned {} kWh for meter {}", request.kwh.abs(), serial);
-                            }
-                        }
-                        Err(e) => {
-                            error!("❌ Failed to mint tokens for meter {}: {}", serial, e);
-                            message = format!("Tokenization failed: {}", e);
-                        }
-                    }
+    // Only attempt minting if auto_mint is enabled and kwh is non-zero
+    if auto_mint && request.kwh != 0.0 {
+        info!("🔗 Attempting blockchain mint with {}s timeout", timeout_secs);
+        
+        // Wrap blockchain operations in a timeout
+        let mint_result = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            async {
+                // Get authority keypair
+                let authority = state.wallet_service.get_authority_keypair().await
+                    .map_err(|e| format!("Authority keypair error: {}", e))?;
+                
+                // Parse addresses
+                let mint_pubkey = crate::services::BlockchainService::parse_pubkey(&state.config.energy_token_mint)
+                    .map_err(|e| format!("Invalid token mint: {}", e))?;
+                let wallet_pubkey = crate::services::BlockchainService::parse_pubkey(&wallet_address)
+                    .map_err(|e| format!("Invalid wallet address: {}", e))?;
+                
+                // Ensure token account exists
+                let token_account = state.blockchain_service
+                    .ensure_token_account_exists(&authority, &wallet_pubkey, &mint_pubkey)
+                    .await
+                    .map_err(|e| format!("Token account error: {}", e))?;
+                
+                // Mint tokens
+                let sig = state.blockchain_service
+                    .mint_energy_tokens(&authority, &token_account, &wallet_pubkey, &mint_pubkey, request.kwh)
+                    .await
+                    .map_err(|e| format!("Mint error: {}", e))?;
+                
+                Ok::<_, String>(sig.to_string())
+            }
+        ).await;
+        
+        match mint_result {
+            Ok(Ok(sig)) => {
+                minted = true;
+                tx_signature = Some(sig.clone());
+                if request.kwh > 0.0 {
+                    message = format!("{} kWh minted successfully", request.kwh);
+                    info!("🎉 Minted {} kWh for meter {} - TX: {}", request.kwh, serial, sig);
                 } else {
-                    error!("❌ Failed to ensure token account for wallet: {}", wallet_address);
-                    message = "Failed to ensure token account".to_string();
+                    message = format!("{} kWh burned successfully", request.kwh.abs());
+                    info!("🔥 Burned {} kWh for meter {} - TX: {}", request.kwh.abs(), serial, sig);
                 }
             }
+            Ok(Err(e)) => {
+                error!("❌ Blockchain operation failed: {}", e);
+                message = format!("Reading recorded but minting failed: {}", e);
+            }
+            Err(_) => {
+                error!("⏱️ Blockchain operation timed out after {}s", timeout_secs);
+                message = format!("Reading recorded but minting timed out after {}s", timeout_secs);
+            }
         }
+    } else if !auto_mint {
+        message = "Reading recorded (auto_mint disabled)".to_string();
+        info!("📝 Reading saved without minting (auto_mint=false)");
     }
 
     // Persist reading to database
