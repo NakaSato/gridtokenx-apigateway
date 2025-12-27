@@ -29,16 +29,16 @@ pub async fn setup_database(database_url: &str) -> Result<DatabasePool> {
     let pool = PgPoolOptions::new()
         .max_connections(100)         // Priority 4: Increased from 50 to 100 for higher concurrency
         .min_connections(10)          // Priority 4: Increased from 5 to maintain larger baseline
-        .acquire_timeout(Duration::from_secs(3))   // Priority 4: Reduced from 5s to 3s for faster failover
+        .acquire_timeout(Duration::from_secs(30))   // Priority 4: Increased to 30s for stability
         .idle_timeout(Duration::from_secs(180))     // Priority 4: Reduced from 5min to 3min for faster cleanup
         .max_lifetime(Duration::from_secs(900))      // Priority 4: Reduced from 30min to 15min for fresher connections
         .test_before_acquire(true)      // Test connections before use
         .after_connect(|conn, _meta| Box::pin(async move {
             // Priority 4: Enhanced connection configuration for optimal performance
             sqlx::query("SET timezone = 'UTC'").execute(&mut *conn).await?;
-            sqlx::query("SET statement_timeout = '15s'").execute(&mut *conn).await?;  // Reduced from 30s
+            sqlx::query("SET statement_timeout = '60s'").execute(&mut *conn).await?;  // Increased to 60s
             sqlx::query("SET lock_timeout = '10s'").execute(&mut *conn).await?;     // Priority 4: Add lock timeout
-            sqlx::query("SET idle_in_transaction_session_timeout = '10s'").execute(&mut *conn).await?;  // Priority 4: Prevent long idle transactions
+            sqlx::query("SET idle_in_transaction_session_timeout = '60s'").execute(&mut *conn).await?;  // Priority 4: Prevent long idle transactions
             // Priority 4: Performance tuning settings
             sqlx::query("SET shared_preload_libraries = 'pg_stat_statements'").execute(&mut *conn).await.ok(); // Enable query statistics
             sqlx::query("SET track_activity_query_size = 'on'").execute(&mut *conn).await.ok(); // Track query activity
@@ -56,10 +56,10 @@ pub async fn setup_database(database_url: &str) -> Result<DatabasePool> {
     info!("Priority 4 Performance Tuning Applied:");
     info!("  - Max connections: 100 (was 50)");
     info!("  - Min connections: 10 (was 5)");
-    info!("  - Acquire timeout: 3s (was 5s)");
+    info!("  - Acquire timeout: 30s (was 3s)");
     info!("  - Idle timeout: 3min (was 5min)");
     info!("  - Max lifetime: 15min (was 30min)");
-    info!("  - Statement timeout: 15s (was 30s)");
+    info!("  - Statement timeout: 60s (was 15s)");
     
     Ok(pool)
 }
