@@ -201,6 +201,10 @@ pub fn build_router(app_state: AppState) -> Router {
     let meters_routes = v1_meters_routes()
         .layer(middleware::from_fn_with_state(app_state.clone(), auth_middleware));
 
+    // Public routes (no auth required)
+    let public_routes = Router::new()
+        .route("/meters", get(crate::handlers::auth::meters::public_get_meters));
+
     let v1_api = Router::new()
         .nest("/auth", v1_auth_routes())       // POST /api/v1/auth/token, GET /api/v1/auth/verify
         .nest("/users", v1_users_routes())     // POST /api/v1/users, GET /api/v1/users/me
@@ -212,6 +216,7 @@ pub fn build_router(app_state: AppState) -> Router {
         .nest("/analytics", analytics_routes)  // /api/v1/analytics
         .nest("/dashboard", v1_dashboard_routes()) // /api/v1/dashboard/metrics
         .nest("/dev", dev::dev_routes())       // POST /api/v1/dev/faucet
+        .nest("/public", public_routes)        // GET /api/v1/public/meters (no auth)
         .route("/rpc", axum::routing::post(crate::handlers::rpc::rpc_handler)); // /api/v1/rpc
 
     health

@@ -49,11 +49,11 @@ pub struct SolanaProgramsConfig {
 impl Default for SolanaProgramsConfig {
     fn default() -> Self {
         Self {
-            registry_program_id: "DiJi39HDJQwEYGxSwL6qtLUtWzbAP5irv1S4Tube9ouH".to_string(),
-            oracle_program_id: "TjYDEtQoFP9LRuVhmcGPZ52zBnQmtM5ixvE1T1SoCya".to_string(),
-            governance_program_id: "HZdnWsQc5vsMXScEn8u3GezFtqPmcKM6Ex3XEUXCgSBT".to_string(),
-            energy_token_program_id: "5FVExLSAC94gSWH6TJa1TmBDWXuqFe5obZaC5DkqJihU".to_string(),
-            trading_program_id: "CdxzGUNHPcgkhnaH6V4jAcvMGRsUhPKFK6R71UCQhJ8H".to_string(),
+            registry_program_id: "CVS6pz2qdEmjusHCmiwe2R21KVrSoGubdEy5d766KooN".to_string(),
+            oracle_program_id: "3hSEt5vVzbiMCegFnhdMpFGkXEDY8BinrPb8egJoS7C7".to_string(),
+            governance_program_id: "GAZQm4bHUyNhSYrAq5noBohXcTaf6dKZNDKju8499e6w".to_string(),
+            energy_token_program_id: "HaT3koMseafcCB9aUQUCrSLMDfN1km7Xik9UhZSG9UV6".to_string(),
+            trading_program_id: "8gHn9oeYcUQgNrMi8fNYGyMCKJTMwM6K413f41AANFt4".to_string(),
         }
     }
 }
@@ -200,15 +200,15 @@ impl Config {
             },
             solana_programs: SolanaProgramsConfig {
                 registry_program_id: env::var("SOLANA_REGISTRY_PROGRAM_ID")
-                    .unwrap_or_else(|_| "DiJi39HDJQwEYGxSwL6qtLUtWzbAP5irv1S4Tube9ouH".to_string()),
+                    .unwrap_or_else(|_| "CVS6pz2qdEmjusHCmiwe2R21KVrSoGubdEy5d766KooN".to_string()),
                 oracle_program_id: env::var("SOLANA_ORACLE_PROGRAM_ID")
-                    .unwrap_or_else(|_| "TjYDEtQoFP9LRuVhmcGPZ52zBnQmtM5ixvE1T1SoCya".to_string()),
+                    .unwrap_or_else(|_| "3hSEt5vVzbiMCegFnhdMpFGkXEDY8BinrPb8egJoS7C7".to_string()),
                 governance_program_id: env::var("SOLANA_GOVERNANCE_PROGRAM_ID")
-                    .unwrap_or_else(|_| "HZdnWsQc5vsMXScEn8u3GezFtqPmcKM6Ex3XEUXCgSBT".to_string()),
+                    .unwrap_or_else(|_| "GAZQm4bHUyNhSYrAq5noBohXcTaf6dKZNDKju8499e6w".to_string()),
                 energy_token_program_id: env::var("SOLANA_ENERGY_TOKEN_PROGRAM_ID")
-                    .unwrap_or_else(|_| "5FVExLSAC94gSWH6TJa1TmBDWXuqFe5obZaC5DkqJihU".to_string()),
+                    .unwrap_or_else(|_| "HaT3koMseafcCB9aUQUCrSLMDfN1km7Xik9UhZSG9UV6".to_string()),
                 trading_program_id: env::var("SOLANA_TRADING_PROGRAM_ID")
-                    .unwrap_or_else(|_| "CdxzGUNHPcgkhnaH6V4jAcvMGRsUhPKFK6R71UCQhJ8H".to_string()),
+                    .unwrap_or_else(|_| "8gHn9oeYcUQgNrMi8fNYGyMCKJTMwM6K413f41AANFt4".to_string()),
             },
             simulator_user_id: env::var("SIMULATOR_USER_ID")
                 .unwrap_or_else(|_| "63c1d015-6765-4843-9ca3-5ba21ee54d7e".to_string()),

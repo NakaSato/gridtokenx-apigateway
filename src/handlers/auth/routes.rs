@@ -14,9 +14,9 @@ use super::{
     password_reset::{forgot_password, reset_password, change_password},
     profile::profile,
     meters::{
-        get_my_meters, register_meter, 
+        get_my_meters, register_meter,
         get_registered_meters_filtered, update_meter_status, create_reading,
-        get_my_readings,
+        get_my_readings, get_meter_stats,
     },
     wallets::token_balance,
     status::{system_status, meter_status, readiness_probe, liveness_probe},
@@ -49,6 +49,7 @@ pub fn v1_meters_routes() -> Router<AppState> {
     Router::new()
         .route("/", post(register_meter))  // POST /api/v1/meters
         .route("/", get(get_registered_meters_filtered))  // GET /api/v1/meters?status=verified
+        .route("/stats", get(get_meter_stats)) // GET /api/v1/meters/stats
         .route("/{serial}", axum::routing::patch(update_meter_status))  // PATCH /api/v1/meters/{serial}
         .route("/readings", get(get_my_readings))  // GET /api/v1/meters/readings
         .route("/{serial}/readings", post(create_reading))  // POST /api/v1/meters/{serial}/readings

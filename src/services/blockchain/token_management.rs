@@ -97,13 +97,13 @@ impl TokenManager {
             .output()
             .map_err(|e| anyhow!("Failed to execute spl-token CLI: {}", e))?;
 
-        let stdout_str = String::from_utf8_lossy(&output.stdout);
-        let stderr_str = String::from_utf8_lossy(&output.stderr);
+        let _stdout_str = String::from_utf8_lossy(&output.stdout);
+        let _stderr_str = String::from_utf8_lossy(&output.stderr);
 
 
         if !output.status.success() {
-            if !stderr_str.contains("already exists") && !stdout_str.contains("already exists") {
-                return Err(anyhow!("spl-token CLI failed: {}", stderr_str));
+            if !_stderr_str.contains("already exists") && !_stdout_str.contains("already exists") {
+                return Err(anyhow!("spl-token CLI failed: {}", _stderr_str));
             }
         }
 
@@ -129,7 +129,7 @@ impl TokenManager {
 
         // Get energy token program ID from environment (with fallback to deployed program ID)
         let energy_token_program_id = std::env::var("SOLANA_ENERGY_TOKEN_PROGRAM_ID")
-            .unwrap_or_else(|_| "5FVExLSAC94gSWH6TJa1TmBDWXuqFe5obZaC5DkqJihU".to_string());
+            .unwrap_or_else(|_| "HaT3koMseafcCB9aUQUCrSLMDfN1km7Xik9UhZSG9UV6".to_string());
         let energy_token_program_id = Pubkey::from_str(&energy_token_program_id)
             .map_err(|e| anyhow!("Invalid SOLANA_ENERGY_TOKEN_PROGRAM_ID: {}", e))?;
 
@@ -210,7 +210,7 @@ impl TokenManager {
         mint: &Pubkey,
         amount_kwh: f64,
     ) -> Result<Signature> {
-        use solana_sdk::signature::Signer;
+
 
         let wallet_path = std::env::var("AUTHORITY_WALLET_PATH")
             .unwrap_or_else(|_| "dev-wallet.json".to_string());
@@ -275,13 +275,11 @@ impl TokenManager {
                 .map_err(|e| anyhow!("Failed to execute spl-token burn: {}", e))?;
 
             let stdout_str = String::from_utf8_lossy(&output.stdout);
-            let stderr_str = String::from_utf8_lossy(&output.stderr);
-            let stdout_str = String::from_utf8_lossy(&output.stdout);
-            let stderr_str = String::from_utf8_lossy(&output.stderr);
+            let _stderr_str = String::from_utf8_lossy(&output.stderr);
 
 
             if !output.status.success() {
-                return Err(anyhow!("spl-token burn failed: {}", stderr_str));
+                return Err(anyhow!("spl-token burn failed: {}", _stderr_str));
             }
 
             // Extract signature from output
@@ -318,22 +316,20 @@ impl TokenManager {
                 .output()
                 .map_err(|e| anyhow!("Failed to execute spl-token mint: {}", e))?;
 
-            let stdout_str = String::from_utf8_lossy(&output.stdout);
-            let stderr_str = String::from_utf8_lossy(&output.stderr);
-            let stdout_str = String::from_utf8_lossy(&output.stdout);
-            let stderr_str = String::from_utf8_lossy(&output.stderr);
+            let _stdout_str = String::from_utf8_lossy(&output.stdout);
+            let _stderr_str = String::from_utf8_lossy(&output.stderr);
 
 
             if !output.status.success() {
-                return Err(anyhow!("spl-token mint failed: {}", stderr_str));
+                return Err(anyhow!("spl-token mint failed: {}", _stderr_str));
             }
 
             // Extract signature from output (format: "Minting X tokens\n  Token: ...\n\nSignature: <sig>")
-            let signature_str = stdout_str
+            let signature_str = _stdout_str
                 .lines()
                 .find(|line| line.contains("Signature:"))
                 .and_then(|line| line.split_whitespace().last())
-                .ok_or_else(|| anyhow!("Failed to parse signature from mint output: {}", stdout_str))?;
+                .ok_or_else(|| anyhow!("Failed to parse signature from mint output: {}", _stdout_str))?;
 
             let signature = Signature::from_str(signature_str)
                 .map_err(|e| anyhow!("Failed to parse signature '{}': {}", signature_str, e))?;

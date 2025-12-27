@@ -9,13 +9,9 @@ use axum::{
 use chrono::{Duration, Utc};
 use tracing::info;
 use uuid::Uuid;
-use base64::{engine::general_purpose, Engine as _};
-
 use crate::AppState;
 use crate::error::ApiError;
 use crate::auth::password::PasswordService;
-use solana_sdk::signature::Signer;
-use std::str::FromStr;
 use super::types::{
     RegistrationRequest, RegistrationResponse, AuthResponse, UserResponse,
     ResendVerificationRequest, VerifyEmailResponse,

@@ -12,10 +12,10 @@ use uuid::Uuid;
 
 use crate::AppState;
 use super::types::{
-    MeterResponse, RegisterMeterRequest, RegisterMeterResponse,
+    MeterResponse, PublicMeterResponse, RegisterMeterRequest, RegisterMeterResponse,
     VerifyMeterRequest, MeterFilterParams, UpdateMeterStatusRequest,
     CreateReadingRequest, CreateReadingResponse, MeterReadingResponse, ReadingFilterParams,
-    CreateReadingParams,
+    CreateReadingParams, MeterStats,
 };
 
 /// Get user's registered meters from database
@@ -45,9 +45,9 @@ pub async fn get_my_meters(
     info!("📊 Get meters request");
 
     if let Ok(claims) = state.jwt_service.decode_token(token) {
-        // Query meters from database
-        let meters_result = sqlx::query_as::<_, (Uuid, String, String, String, bool, Option<String>)>(
-            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address
+        // Query meters from database including coordinates
+        let meters_result = sqlx::query_as::<_, (Uuid, String, String, String, bool, Option<String>, Option<f64>, Option<f64>)>(
+            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude
              FROM meters m
              JOIN users u ON m.user_id = u.id
              WHERE m.user_id = $1"
@@ -57,7 +57,7 @@ pub async fn get_my_meters(
         .await;
 
         if let Ok(meters) = meters_result {
-            let responses: Vec<MeterResponse> = meters.iter().map(|(id, serial, mtype, loc, verified, wallet)| {
+            let responses: Vec<MeterResponse> = meters.iter().map(|(id, serial, mtype, loc, verified, wallet, lat, lng)| {
                 MeterResponse {
                     id: *id,
                     serial_number: serial.clone(),
@@ -65,6 +65,8 @@ pub async fn get_my_meters(
                     location: loc.clone(),
                     is_verified: *verified,
                     wallet_address: wallet.clone().unwrap_or_default(),
+                    latitude: *lat,
+                    longitude: *lng,
                 }
             }).collect();
             
@@ -90,8 +92,8 @@ pub async fn get_registered_meters(
 ) -> Json<Vec<MeterResponse>> {
     info!("📊 Get all registered meters");
     
-    let meters_result = sqlx::query_as::<_, (Uuid, String, String, String, bool, Option<String>)>(
-        "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address
+    let meters_result = sqlx::query_as::<_, (Uuid, String, String, String, bool, Option<String>, Option<f64>, Option<f64>)>(
+        "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude
          FROM meters m
          JOIN users u ON m.user_id = u.id
          WHERE m.is_verified = true"
@@ -101,7 +103,7 @@ pub async fn get_registered_meters(
 
     match meters_result {
         Ok(meters) => {
-            let responses: Vec<MeterResponse> = meters.iter().map(|(id, serial, mtype, loc, verified, wallet)| {
+            let responses: Vec<MeterResponse> = meters.iter().map(|(id, serial, mtype, loc, verified, wallet, lat, lng)| {
                 MeterResponse {
                     id: *id,
                     serial_number: serial.clone(),
@@ -109,6 +111,8 @@ pub async fn get_registered_meters(
                     location: loc.clone(),
                     is_verified: *verified,
                     wallet_address: wallet.clone().unwrap_or_default(),
+                    latitude: *lat,
+                    longitude: *lng,
                 }
             }).collect();
             
@@ -117,6 +121,74 @@ pub async fn get_registered_meters(
         }
         Err(e) => {
             info!("⚠️ Database error: {}", e);
+            Json(vec![])
+        }
+    }
+}
+
+/// Get all verified meters - PUBLIC endpoint (no auth required)
+/// 
+/// Returns only publicly-safe information for map display.
+/// Excludes sensitive data like wallet addresses, serial numbers, and internal IDs.
+#[utoipa::path(
+    get,
+    path = "/api/v1/public/meters",
+    responses(
+        (status = 200, description = "List of verified meters (public info only)", body = Vec<PublicMeterResponse>)
+    ),
+    tag = "meters"
+)]
+pub async fn public_get_meters(
+    State(state): State<AppState>,
+) -> Json<Vec<PublicMeterResponse>> {
+    info!("Public meters request for map display");
+    
+    // Query public-safe fields with latest reading data
+    let meters_result = sqlx::query_as::<_, (String, String, bool, Option<f64>, Option<f64>, Option<f64>, Option<f64>)>(
+        r#"
+        SELECT 
+            m.meter_type, 
+            m.location, 
+            m.is_verified, 
+            m.latitude, 
+            m.longitude,
+            lr.current_generation,
+            lr.current_consumption
+        FROM meters m
+        LEFT JOIN LATERAL (
+            SELECT 
+                energy_generated::FLOAT8 as current_generation, 
+                energy_consumed::FLOAT8 as current_consumption
+            FROM meter_readings
+            WHERE meter_serial = m.serial_number
+            ORDER BY reading_timestamp DESC
+            LIMIT 1
+        ) lr ON true
+        WHERE m.is_verified = true
+        "#
+    )
+    .fetch_all(&state.db)
+    .await;
+
+    match meters_result {
+        Ok(meters) => {
+            let responses: Vec<PublicMeterResponse> = meters.iter().map(|(mtype, loc, verified, lat, lng, gen, cons)| {
+                PublicMeterResponse {
+                    meter_type: mtype.clone(),
+                    location: loc.clone(),
+                    is_verified: *verified,
+                    latitude: *lat,
+                    longitude: *lng,
+                    current_generation: *gen,
+                    current_consumption: *cons,
+                }
+            }).collect();
+            
+            info!("✅ Public API: Returning {} meters for map (with latest readings)", responses.len());
+            Json(responses)
+        }
+        Err(e) => {
+            error!("❌ Public meters error: {}", e);
             Json(vec![])
         }
     }
@@ -184,16 +256,18 @@ pub async fn register_meter(
         });
     }
 
-    // Insert meter into database
+    // Insert meter into database with coordinates
     let insert_result = sqlx::query(
-        "INSERT INTO meters (id, user_id, serial_number, meter_type, location, is_verified, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, true, NOW(), NOW())"
+        "INSERT INTO meters (id, user_id, serial_number, meter_type, location, latitude, longitude, is_verified, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true, NOW(), NOW())"
     )
     .bind(meter_id)
     .bind(user_id)
     .bind(&request.serial_number)
     .bind(&meter_type)
     .bind(&location)
+    .bind(request.latitude)
+    .bind(request.longitude)
     .execute(&state.db)
     .await;
 
@@ -238,6 +312,8 @@ pub async fn register_meter(
                     location,
                     is_verified: true,
                     wallet_address: wallet,
+                    latitude: request.latitude,
+                    longitude: request.longitude,
                 }),
             })
         }
@@ -353,26 +429,26 @@ pub async fn get_registered_meters_filtered(
     
     let query = match params.status.as_deref() {
         Some("verified") | Some("active") => {
-            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address
+            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude
              FROM meters m JOIN users u ON m.user_id = u.id WHERE m.is_verified = true"
         }
         Some("pending") => {
-            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address
+            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude
              FROM meters m JOIN users u ON m.user_id = u.id WHERE m.is_verified = false"
         }
         _ => {
-            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address
+            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude
              FROM meters m JOIN users u ON m.user_id = u.id"
         }
     };
 
-    let meters_result = sqlx::query_as::<_, (Uuid, String, String, String, bool, Option<String>)>(query)
+    let meters_result = sqlx::query_as::<_, (Uuid, String, String, String, bool, Option<String>, Option<f64>, Option<f64>)>(query)
         .fetch_all(&state.db)
         .await;
 
     match meters_result {
         Ok(meters) => {
-            let responses: Vec<MeterResponse> = meters.iter().map(|(id, serial, mtype, loc, verified, wallet)| {
+            let responses: Vec<MeterResponse> = meters.iter().map(|(id, serial, mtype, loc, verified, wallet, lat, lng)| {
                 MeterResponse {
                     id: *id,
                     serial_number: serial.clone(),
@@ -380,6 +456,8 @@ pub async fn get_registered_meters_filtered(
                     location: loc.clone(),
                     is_verified: *verified,
                     wallet_address: wallet.clone().unwrap_or_default(),
+                    latitude: *lat,
+                    longitude: *lng,
                 }
             }).collect();
             Json(responses)
@@ -521,8 +599,8 @@ pub async fn create_reading(
     let mut tx_signature: Option<String> = None;
     let mut message = "Reading recorded".to_string();
 
-    // Only attempt minting if auto_mint is enabled and kwh is non-zero
-    if auto_mint && request.kwh != 0.0 {
+    // Only attempt minting if auto_mint is enabled and kwh is positive
+    if auto_mint && request.kwh > 0.0 {
         info!("🔗 Attempting blockchain mint with {}s timeout", timeout_secs);
         
         // Wrap blockchain operations in a timeout
@@ -588,17 +666,28 @@ pub async fn create_reading(
         info!("📝 Reading saved without minting (auto_mint=false)");
     }
 
-    // Persist reading to database
+    // Persist reading to database with full telemetry
     let (gen, cons) = if request.kwh > 0.0 { (request.kwh, 0.0) } else { (0.0, request.kwh.abs()) };
     
+    // Use request values for energy if provided, otherwise calculate from kwh
+    let energy_gen = request.energy_generated.unwrap_or(gen);
+    let energy_cons = request.energy_consumed.unwrap_or(cons);
+    let surplus = request.surplus_energy.unwrap_or(if request.kwh > 0.0 { request.kwh } else { 0.0 });
+    let deficit = request.deficit_energy.unwrap_or(if request.kwh < 0.0 { request.kwh.abs() } else { 0.0 });
 
     let insert_result = sqlx::query(
         "INSERT INTO meter_readings (
             id, meter_serial, meter_id, user_id, wallet_address, 
             timestamp, reading_timestamp, kwh_amount,
             energy_generated, energy_consumed, surplus_energy, deficit_energy,
+            voltage, current_amps, power_factor, frequency, temperature,
+            latitude, longitude, battery_level, weather_condition,
+            rec_eligible, carbon_offset, max_sell_price, max_buy_price,
+            meter_signature, meter_type,
             minted, mint_tx_signature, created_at
-         ) VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9, $8, $9, $10, $11, NOW())"
+         ) VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9, $10, $11, 
+                   $12, $13, $14, $15, $16, $17, $18, $19, $20,
+                   $21, $22, $23, $24, $25, $26, $27, $28, NOW())"
     )
     .bind(reading_id)
     .bind(&serial)
@@ -607,8 +696,31 @@ pub async fn create_reading(
     .bind(&wallet_address)
     .bind(timestamp)
     .bind(request.kwh)
-    .bind(gen)
-    .bind(cons)
+    .bind(energy_gen)
+    .bind(energy_cons)
+    .bind(surplus)
+    .bind(deficit)
+    // Electrical parameters
+    .bind(request.voltage)
+    .bind(request.current)
+    .bind(request.power_factor)
+    .bind(request.frequency)
+    .bind(request.temperature)
+    // GPS
+    .bind(request.latitude)
+    .bind(request.longitude)
+    // Battery & Environmental
+    .bind(request.battery_level)
+    .bind(&request.weather_condition)
+    // Trading
+    .bind(request.rec_eligible.unwrap_or(false))
+    .bind(request.carbon_offset)
+    .bind(request.max_sell_price)
+    .bind(request.max_buy_price)
+    // Security
+    .bind(&request.meter_signature)
+    .bind(&request.meter_type)
+    // Minting status
     .bind(minted)
     .bind(tx_signature.clone())
     .execute(&state.db)
@@ -664,7 +776,7 @@ pub async fn get_my_readings(
     info!("📊 Get readings request");
 
     if let Ok(claims) = state.jwt_service.decode_token(token) {
-        let limit = params.limit.unwrap_or(50).min(100);
+        let limit = params.limit.unwrap_or(50).min(1000);
         let offset = params.offset.unwrap_or(0);
         
         // We query meter_readings. Note: Partition key is reading_timestamp.
@@ -702,4 +814,68 @@ pub async fn get_my_readings(
     }
     
     Json(vec![])
+}
+
+/// Get aggregated meter stats for the user
+#[utoipa::path(
+    get,
+    path = "/api/v1/meters/stats",
+    responses(
+        (status = 200, description = "Meter stats", body = MeterStats),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(
+        ("jwt_token" = [])
+    ),
+    tag = "meters"
+)]
+pub async fn get_meter_stats(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Json<MeterStats> {
+    let auth_header = headers
+        .get("Authorization")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    
+    let token = auth_header.strip_prefix("Bearer ").unwrap_or(auth_header);
+    
+    if let Ok(claims) = state.jwt_service.decode_token(token) {
+        // Query aggregated stats
+        let stats_result = sqlx::query_as::<_, (Option<f64>, Option<f64>, Option<chrono::DateTime<chrono::Utc>>, Option<f64>, Option<i64>, Option<f64>, Option<i64>)>(
+            "SELECT 
+                SUM(energy_generated)::FLOAT8 as total_produced,
+                SUM(energy_consumed)::FLOAT8 as total_consumed,
+                MAX(reading_timestamp) as last_reading_time,
+                SUM(CASE WHEN minted = true THEN kwh_amount ELSE 0 END)::FLOAT8 as total_minted,
+                COUNT(CASE WHEN minted = true THEN 1 END) as minted_count,
+                SUM(CASE WHEN minted = false AND kwh_amount > 0 THEN kwh_amount ELSE 0 END)::FLOAT8 as pending_mint,
+                COUNT(CASE WHEN minted = false AND kwh_amount > 0 THEN 1 END) as pending_mint_count
+             FROM meter_readings
+             WHERE user_id = $1"
+        )
+        .bind(claims.sub)
+        .fetch_one(&state.db)
+        .await;
+
+        match stats_result {
+            Ok((produced, consumed, last_time, minted, m_count, pending, p_count)) => {
+                let stats = MeterStats {
+                    total_produced: produced.unwrap_or(0.0),
+                    total_consumed: consumed.unwrap_or(0.0),
+                    last_reading_time: last_time,
+                    total_minted: minted.unwrap_or(0.0),
+                    total_minted_count: m_count.unwrap_or(0),
+                    pending_mint: pending.unwrap_or(0.0),
+                    pending_mint_count: p_count.unwrap_or(0),
+                };
+                return Json(stats);
+            }
+            Err(e) => {
+                error!("⚠️ Error fetching meter stats: {}", e);
+            }
+        }
+    }
+    
+    Json(MeterStats::default())
 }

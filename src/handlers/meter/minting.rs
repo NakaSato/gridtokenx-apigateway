@@ -67,6 +67,7 @@ async fn mark_as_minted(db: &sqlx::PgPool, reading_id: Uuid, tx_signature: &str)
 
 /// Internal reading record for database queries
 #[derive(Debug)]
+#[allow(dead_code)]
 struct MeterReadingRecord {
     pub id: Uuid,
     pub user_id: Option<Uuid>,
@@ -142,7 +143,7 @@ pub async fn mint_from_reading(
         .map_err(|e| ApiError::BadRequest(format!("Invalid wallet address: {}", e)))?;
 
     // Ensure user token account exists
-    let user_token_account = state
+    let _user_token_account = state
         .blockchain_service
         .ensure_token_account_exists(&authority_keypair, &wallet_pubkey, &token_mint)
         .await
@@ -263,7 +264,7 @@ pub async fn mint_user_reading(
         .map_err(|e| ApiError::BadRequest(format!("Invalid wallet address: {}", e)))?;
 
     // Ensure user token account exists
-    let user_token_account = state
+    let _user_token_account = state
         .blockchain_service
         .ensure_token_account_exists(&authority_keypair, &wallet_pubkey, &token_mint)
         .await

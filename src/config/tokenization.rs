@@ -65,7 +65,7 @@ impl Default for TokenizationConfig {
             max_retry_delay_secs: 3600, // 1 hour
             transaction_timeout_secs: 60,
             max_transactions_per_batch: 20,
-            enable_real_blockchain: false, // Default to mock for safety
+            enable_real_blockchain: true, // Default to true for integration
         }
     }
 }

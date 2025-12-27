@@ -147,7 +147,7 @@ pub struct ChangePasswordRequest {
 // Meter Types
 // ============================================================================
 
-/// Meter Response
+/// Meter Response (for authenticated endpoints)
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MeterResponse {
     pub id: Uuid,
@@ -156,6 +156,38 @@ pub struct MeterResponse {
     pub location: String,
     pub is_verified: bool,
     pub wallet_address: String,
+    /// Latitude coordinate for map display
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latitude: Option<f64>,
+    /// Longitude coordinate for map display
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub longitude: Option<f64>,
+}
+
+/// Public Meter Response (for unauthenticated public API)
+/// 
+/// Contains only safe-to-expose information for map display.
+/// Excludes sensitive data like wallet addresses, serial numbers, and internal IDs.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PublicMeterResponse {
+    /// Display name/location of the meter
+    pub location: String,
+    /// Type of meter (e.g., "Solar_Prosumer", "Consumer_Only")
+    pub meter_type: String,
+    /// Whether the meter is verified
+    pub is_verified: bool,
+    /// Latitude coordinate for map display
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latitude: Option<f64>,
+    /// Longitude coordinate for map display
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub longitude: Option<f64>,
+    /// Latest energy generation reading (kW)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_generation: Option<f64>,
+    /// Latest energy consumption reading (kW)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_consumption: Option<f64>,
 }
 
 /// Meter Registration Request
@@ -164,6 +196,10 @@ pub struct RegisterMeterRequest {
     pub serial_number: String,
     pub meter_type: Option<String>,
     pub location: Option<String>,
+    /// Latitude coordinate for map display
+    pub latitude: Option<f64>,
+    /// Longitude coordinate for map display
+    pub longitude: Option<f64>,
 }
 
 /// Meter Registration Response
@@ -192,12 +228,47 @@ pub struct UpdateMeterStatusRequest {
     pub status: String,  // "verified", "pending", "inactive"
 }
 
-/// Create reading request for v1 API
+/// Create reading request for v1 API with full telemetry support
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateReadingRequest {
+    // Required fields
     pub kwh: f64,
     pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
     pub wallet_address: Option<String>,
+    
+    // Core Meter Identity
+    pub meter_id: Option<String>,
+    pub meter_type: Option<String>,
+    
+    // Energy Data (kWh)
+    pub energy_generated: Option<f64>,
+    pub energy_consumed: Option<f64>,
+    pub surplus_energy: Option<f64>,
+    pub deficit_energy: Option<f64>,
+    
+    // Electrical Parameters
+    pub voltage: Option<f64>,
+    pub current: Option<f64>,
+    pub power_factor: Option<f64>,
+    pub frequency: Option<f64>,
+    pub temperature: Option<f64>,
+    
+    // Location (GPS)
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    
+    // Battery & Environmental
+    pub battery_level: Option<f64>,
+    pub weather_condition: Option<String>,
+    
+    // Trading & Certification
+    pub rec_eligible: Option<bool>,
+    pub carbon_offset: Option<f64>,
+    pub max_sell_price: Option<f64>,
+    pub max_buy_price: Option<f64>,
+    
+    // Security
+    pub meter_signature: Option<String>,
 }
 
 /// Create reading response
@@ -232,6 +303,18 @@ pub struct ReadingFilterParams {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
     pub serial_number: Option<String>,
+}
+
+/// Meter Stats Response
+#[derive(Debug, Serialize, Default, ToSchema)]
+pub struct MeterStats {
+    pub total_produced: f64,
+    pub total_consumed: f64,
+    pub last_reading_time: Option<chrono::DateTime<chrono::Utc>>,
+    pub total_minted: f64,
+    pub total_minted_count: i64,
+    pub pending_mint: f64,
+    pub pending_mint_count: i64,
 }
 
 /// Query Params for Create Reading endpoint

@@ -40,6 +40,7 @@ pub use profile::profile;
 pub use meters::{
     get_my_meters, register_meter, get_registered_meters, 
     get_registered_meters_filtered, update_meter_status, verify_meter, create_reading,
+    get_meter_stats,
 };
 pub use wallets::token_balance;
 pub use status::{system_status, meter_status, readiness_probe, liveness_probe};
@@ -49,9 +50,10 @@ pub use types::{
     LoginRequest, AuthResponse, UserResponse,
     RegistrationRequest, RegistrationResponse, 
     ForgotPasswordRequest, ResetPasswordRequest,
-    MeterResponse, RegisterMeterRequest, RegisterMeterResponse,
+    MeterResponse, PublicMeterResponse, RegisterMeterRequest, RegisterMeterResponse,
     TokenBalanceResponse, VerifyEmailResponse, VerifyMeterRequest,
     MeterFilterParams, UpdateMeterStatusRequest, CreateReadingRequest, CreateReadingResponse,
+    MeterStats,
 };
 pub use status::{
     HealthResponse, ServiceStatus, ServiceHealth,

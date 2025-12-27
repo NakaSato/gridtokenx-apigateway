@@ -490,7 +490,7 @@ impl BlockchainUtils {
     /// Get Registry program ID
     fn registry_program_id() -> Result<Pubkey> {
         let program_id = std::env::var("SOLANA_REGISTRY_PROGRAM_ID")
-            .unwrap_or_else(|_| "DiJi39HDJQwEYGxSwL6qtLUtWzbAP5irv1S4Tube9ouH".to_string());
+            .unwrap_or_else(|_| "CVS6pz2qdEmjusHCmiwe2R21KVrSoGubdEy5d766KooN".to_string());
 
         program_id
             .parse()
@@ -500,7 +500,7 @@ impl BlockchainUtils {
     /// Get Oracle program ID
     fn oracle_program_id() -> Result<Pubkey> {
         let program_id = std::env::var("SOLANA_ORACLE_PROGRAM_ID")
-            .unwrap_or_else(|_| "TjYDEtQoFP9LRuVhmcGPZ52zBnQmtM5ixvE1T1SoCya".to_string());
+            .unwrap_or_else(|_| "3hSEt5vVzbiMCegFnhdMpFGkXEDY8BinrPb8egJoS7C7".to_string());
 
         program_id
             .parse()
@@ -511,7 +511,7 @@ impl BlockchainUtils {
     #[allow(dead_code)]
     fn governance_program_id() -> Result<Pubkey> {
         let program_id = std::env::var("SOLANA_GOVERNANCE_PROGRAM_ID")
-            .unwrap_or_else(|_| "HZdnWsQc5vsMXScEn8u3GezFtqPmcKM6Ex3XEUXCgSBT".to_string());
+            .unwrap_or_else(|_| "GAZQm4bHUyNhSYrAq5noBohXcTaf6dKZNDKju8499e6w".to_string());
 
         program_id
             .parse()
@@ -521,7 +521,7 @@ impl BlockchainUtils {
     /// Get Energy Token program ID
     fn energy_token_program_id() -> Result<Pubkey> {
         let program_id = std::env::var("SOLANA_ENERGY_TOKEN_PROGRAM_ID")
-            .unwrap_or_else(|_| "5FVExLSAC94gSWH6TJa1TmBDWXuqFe5obZaC5DkqJihU".to_string());
+            .unwrap_or_else(|_| "HaT3koMseafcCB9aUQUCrSLMDfN1km7Xik9UhZSG9UV6".to_string());
 
         program_id
             .parse()
@@ -532,7 +532,7 @@ impl BlockchainUtils {
     #[allow(dead_code)]
     fn trading_program_id() -> Result<Pubkey> {
         let program_id = std::env::var("SOLANA_TRADING_PROGRAM_ID")
-            .unwrap_or_else(|_| "CdxzGUNHPcgkhnaH6V4jAcvMGRsUhPKFK6R71UCQhJ8H".to_string());
+            .unwrap_or_else(|_| "8gHn9oeYcUQgNrMi8fNYGyMCKJTMwM6K413f41AANFt4".to_string());
 
         program_id
             .parse()
@@ -542,8 +542,8 @@ impl BlockchainUtils {
     /// Get the correct Token Program ID
     /// We use Token-2022 since our mint is deployed with Token-2022 (--program-2022)
     pub fn get_token_program_id() -> Result<Pubkey> {
-        // Use Token-2022 program ID since Energy Token mint was created with --program-2022
-        Pubkey::from_str(TOKEN_2022_PROGRAM_ID)
+        // Use Standard Token Program ID since Energy Token mint was created with Standard Token Program
+        Pubkey::from_str(TOKEN_PROGRAM_ID)
             .map_err(|e| anyhow!("Failed to parse token program ID: {}", e))
     }
 }
