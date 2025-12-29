@@ -189,8 +189,8 @@ pub fn build_router(app_state: AppState) -> Router {
     // =========================================================================
     // V1 RESTful API Routes (New)
     // =========================================================================
-    let trading_routes = v1_trading_routes()
-        .layer(middleware::from_fn_with_state(app_state.clone(), auth_middleware));
+    let trading_routes = v1_trading_routes();
+        // .layer(middleware::from_fn_with_state(app_state.clone(), auth_middleware));
 
     let futures_routes = crate::handlers::futures::routes()
         .layer(middleware::from_fn_with_state(app_state.clone(), auth_middleware));

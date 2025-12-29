@@ -182,3 +182,112 @@ pub struct OrderBookResponse {
     pub sell_orders: Vec<OrderBookEntry>,
     pub timestamp: DateTime<Utc>,
 }
+
+// =============================================================================
+// P2P Transaction Types
+// =============================================================================
+
+/// Request for calculating P2P transaction cost
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct P2PCalculateCostRequest {
+    /// Buyer's zone ID
+    pub buyer_zone_id: i32,
+
+    /// Seller's zone ID
+    pub seller_zone_id: i32,
+
+    /// Amount of energy to trade in kWh
+    #[validate(range(min = 0.001, message = "Energy amount must be positive"))]
+    pub energy_amount: f64,
+
+    /// Negotiated price per kWh in THB (optional, defaults to market base price)
+    pub agreed_price: Option<f64>,
+}
+
+/// Complete breakdown of a P2P energy transaction cost
+#[derive(Debug, Serialize, ToSchema)]
+pub struct P2PTransactionCost {
+    /// Base energy price × amount (THB)
+    pub energy_cost: f64,
+
+    /// Zone-based transmission fee (THB)
+    pub wheeling_charge: f64,
+
+    /// Monetized energy loss (THB)
+    pub loss_cost: f64,
+
+    /// Sum of all costs (THB)
+    pub total_cost: f64,
+
+    /// Energy received after losses (kWh)
+    pub effective_energy: f64,
+
+    /// Loss percentage applied (decimal)
+    pub loss_factor: f64,
+
+    /// Loss payment model ("RECEIVER" or "SENDER")
+    pub loss_allocation: String,
+
+    /// Distance between zones (km)
+    pub zone_distance_km: f64,
+
+    /// Buyer's zone ID
+    pub buyer_zone: i32,
+
+    /// Seller's zone ID
+    pub seller_zone: i32,
+
+    /// Whether transaction complies with grid constraints
+    pub is_grid_compliant: bool,
+
+    /// Reason for grid violation (if any)
+    pub grid_violation_reason: Option<String>,
+}
+
+/// Market pricing configuration
+#[derive(Debug, Serialize, ToSchema)]
+pub struct P2PMarketPrices {
+    /// Base P2P energy price in THB/kWh
+    pub base_price_thb_kwh: f64,
+
+    /// Price when buying from main grid in THB/kWh
+    pub grid_import_price_thb_kwh: f64,
+
+    /// FiT rate when selling to main grid in THB/kWh
+    pub grid_export_price_thb_kwh: f64,
+
+    /// Loss payment model ("RECEIVER" or "SENDER")
+    pub loss_allocation_model: String,
+
+    /// Zone-based wheeling charges (e.g., "intra_zone": 0.5)
+    pub wheeling_charges: std::collections::HashMap<String, f64>,
+
+    /// Zone-based loss factors (e.g., "intra_zone": 0.01)
+    pub loss_factors: std::collections::HashMap<String, f64>,
+}
+
+/// P2P vs Grid price comparison
+#[derive(Debug, Serialize, ToSchema)]
+pub struct P2PGridComparison {
+    /// P2P transaction cost breakdown
+    pub p2p_transaction: P2PTransactionCost,
+
+    /// Cost if buying from grid (THB)
+    pub grid_import_cost: f64,
+
+    /// Value if selling to grid (THB)
+    pub grid_export_value: f64,
+
+    /// Buyer savings with P2P vs grid (THB)
+    pub buyer_savings_thb: f64,
+
+    /// Seller premium with P2P vs grid export (THB)
+    pub seller_premium_thb: f64,
+
+    /// Is P2P beneficial for buyer?
+    pub is_p2p_beneficial_for_buyer: bool,
+
+    /// Is P2P beneficial for seller?
+    pub is_p2p_beneficial_for_seller: bool,
+}
+
