@@ -273,6 +273,7 @@ pub struct CreateReadingRequest {
     
     // Core Meter Identity
     pub meter_id: Option<String>,
+    pub meter_serial: Option<String>,
     pub meter_type: Option<String>,
     
     // Energy Data (kWh)
@@ -315,6 +316,20 @@ pub struct CreateReadingResponse {
     pub timestamp: chrono::DateTime<chrono::Utc>,
     pub minted: bool,
     pub tx_signature: Option<String>,
+    pub message: String,
+}
+
+/// Batch reading request
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateBatchReadingRequest {
+    pub readings: Vec<CreateReadingRequest>,
+}
+
+/// Batch reading response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BatchReadingResponse {
+    pub success_count: usize,
+    pub failed_count: usize,
     pub message: String,
 }
 

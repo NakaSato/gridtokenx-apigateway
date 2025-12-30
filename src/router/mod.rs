@@ -2,7 +2,7 @@
 //!
 //! Supports both v1 RESTful API and legacy routes for backward compatibility.
 
-use axum::{routing::get, Router, extract::{State, WebSocketUpgrade}, response::IntoResponse, middleware};
+use axum::{routing::{get, post}, Router, extract::{State, WebSocketUpgrade}, response::IntoResponse, middleware};
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, timeout::TimeoutLayer, trace::TraceLayer};
 use utoipa::OpenApi;
@@ -204,7 +204,8 @@ pub fn build_router(app_state: AppState) -> Router {
     // Public routes (no auth required)
     let public_routes = Router::new()
         .route("/meters", get(crate::handlers::auth::meters::public_get_meters))
-        .route("/grid-status", get(crate::handlers::auth::meters::public_grid_status));
+        .route("/grid-status", get(crate::handlers::auth::meters::public_grid_status))
+        .route("/meters/batch/readings", post(crate::handlers::auth::meters::create_batch_readings));
 
     let v1_api = Router::new()
         .nest("/auth", v1_auth_routes())       // POST /api/v1/auth/token, GET /api/v1/auth/verify

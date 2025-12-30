@@ -9,6 +9,7 @@ use axum::{
 };
 use tracing::{info, error};
 use uuid::Uuid;
+use crate::auth::middleware::AuthenticatedUser;
 
 use crate::AppState;
 use super::types::{
@@ -16,6 +17,7 @@ use super::types::{
     VerifyMeterRequest, MeterFilterParams, UpdateMeterStatusRequest,
     CreateReadingRequest, CreateReadingResponse, MeterReadingResponse, ReadingFilterParams,
     CreateReadingParams, MeterStats, PublicGridStatusResponse,
+    CreateBatchReadingRequest, BatchReadingResponse,
 };
 
 /// Get user's registered meters from database
@@ -303,29 +305,10 @@ pub async fn public_grid_status(
 )]
 pub async fn register_meter(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(claims): AuthenticatedUser,
     Json(request): Json<RegisterMeterRequest>,
 ) -> Json<RegisterMeterResponse> {
-    let auth_header = headers
-        .get("Authorization")
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("");
-    
-    let token = auth_header.strip_prefix("Bearer ").unwrap_or(auth_header);
-    
     info!("📊 Register meter request: {}", request.serial_number);
-
-    // Verify user token
-    let claims = match state.jwt_service.decode_token(token) {
-        Ok(c) => c,
-        Err(_) => {
-            return Json(RegisterMeterResponse {
-                success: false,
-                message: "Invalid or expired token. Please login again.".to_string(),
-                meter: None,
-            });
-        }
-    };
 
     let user_id = claims.sub;
     let meter_id = Uuid::new_v4();
@@ -635,6 +618,16 @@ pub async fn create_reading(
     _headers: HeaderMap,
     Json(request): Json<CreateReadingRequest>,
 ) -> Json<CreateReadingResponse> {
+    Json(internal_create_reading(&state, serial, params, request).await)
+}
+
+/// Internal shared logic for creating a reading
+async fn internal_create_reading(
+    state: &AppState,
+    serial: String,
+    params: CreateReadingParams,
+    request: CreateReadingRequest,
+) -> CreateReadingResponse {
     let auto_mint = params.auto_mint.unwrap_or(true);
     let timeout_secs = params.timeout_secs.unwrap_or(30);
     
@@ -658,7 +651,7 @@ pub async fn create_reading(
                 if let Some(req_w) = request.wallet_address.clone() {
                     (mid, uid, req_w)
                 } else {
-                     return Json(CreateReadingResponse {
+                     return CreateReadingResponse {
                         id: Uuid::new_v4(),
                         serial_number: serial,
                         kwh: request.kwh,
@@ -666,11 +659,11 @@ pub async fn create_reading(
                         minted: false,
                         tx_signature: None,
                         message: "Wallet address required (not found on user profile)".to_string(),
-                    });
+                    };
                 }
             }
             _ => {
-                return Json(CreateReadingResponse {
+                return CreateReadingResponse {
                     id: Uuid::new_v4(),
                     serial_number: serial,
                     kwh: request.kwh,
@@ -678,7 +671,7 @@ pub async fn create_reading(
                     minted: false,
                     tx_signature: None,
                     message: "Meter not found".to_string(),
-                });
+                };
             }
         }
     };
@@ -829,6 +822,69 @@ pub async fn create_reading(
                 let (gen, cons, count, balance, co2) = get_aggregate_stats(&db).await;
                 websocket.broadcast_grid_status_updated(gen, cons, balance, count, co2).await;
             });
+
+            // ========================================================================
+            // P2P AUTO-ORDER GENERATION BRIDGE
+            // ========================================================================
+            // Trigger order creation if surplus or deficit is present
+            let market_clearing = state.market_clearing.clone();
+            let serial_clone = serial.clone();
+            let surplus_val = rust_decimal::Decimal::from_f64_retain(surplus).unwrap_or_default();
+            let deficit_val = rust_decimal::Decimal::from_f64_retain(deficit).unwrap_or_default();
+            
+            let sell_price = request.max_sell_price.map(|p| rust_decimal::Decimal::from_f64_retain(p).unwrap_or_default());
+            let buy_price = request.max_buy_price.map(|p| rust_decimal::Decimal::from_f64_retain(p).unwrap_or_default());
+
+            info!("🔍 [Auto-P2P-Debug] Reading for {}: surplus={}, deficit={}, sell_price={:?}, buy_price={:?}", 
+                serial_clone, surplus_val, deficit_val, sell_price, buy_price);
+
+            tokio::spawn(async move {
+                // Handle Surplus -> Sell Order
+                if surplus_val > rust_decimal::Decimal::ZERO {
+                    match sell_price {
+                        Some(price) if price > rust_decimal::Decimal::ZERO => {
+                            info!("📈 [Auto-P2P] Triggering SELL order for meter {}: {} kWh @ {} THB", serial_clone, surplus_val, price);
+                            let res = market_clearing.create_order(
+                                user_id,
+                                crate::database::schema::types::OrderSide::Sell,
+                                crate::database::schema::types::OrderType::Limit,
+                                surplus_val,
+                                Some(price),
+                                None
+                            ).await;
+                            if let Err(e) = res {
+                                error!("❌ [Auto-P2P] Failed to create Sell order for {}: {}", serial_clone, e);
+                            } else {
+                                info!("✅ [Auto-P2P] Created Sell order for {}", serial_clone);
+                            }
+                        }
+                        _ => info!("⚠️ [Auto-P2P] Skipping Sell order for {}: No valid price preference", serial_clone),
+                    }
+                }
+
+                // Handle Deficit -> Buy Order
+                if deficit_val > rust_decimal::Decimal::ZERO {
+                    match buy_price {
+                        Some(price) if price > rust_decimal::Decimal::ZERO => {
+                            info!("📉 [Auto-P2P] Triggering BUY order for meter {}: {} kWh @ {} THB", serial_clone, deficit_val, price);
+                            let res = market_clearing.create_order(
+                                user_id,
+                                crate::database::schema::types::OrderSide::Buy,
+                                crate::database::schema::types::OrderType::Limit,
+                                deficit_val,
+                                Some(price),
+                                None
+                            ).await;
+                            if let Err(e) = res {
+                                error!("❌ [Auto-P2P] Failed to create Buy order for {}: {}", serial_clone, e);
+                            } else {
+                                info!("✅ [Auto-P2P] Created Buy order for {}", serial_clone);
+                            }
+                        }
+                        _ => info!("⚠️ [Auto-P2P] Skipping Buy order for {}: No valid price preference", serial_clone),
+                    }
+                }
+            });
         }
         Err(e) => {
             error!("❌ CRITICAL: Failed to save reading {} to DB: {}", reading_id, e);
@@ -836,7 +892,7 @@ pub async fn create_reading(
         }
     }
 
-    Json(CreateReadingResponse {
+    CreateReadingResponse {
         id: reading_id,
         serial_number: serial,
         kwh: request.kwh,
@@ -844,7 +900,7 @@ pub async fn create_reading(
         minted,
         tx_signature,
         message,
-    })
+    }
 }
 
 /// Get meter readings for the authenticated user
@@ -863,21 +919,13 @@ pub async fn create_reading(
 )]
 pub async fn get_my_readings(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(claims): AuthenticatedUser,
     axum::extract::Query(params): axum::extract::Query<ReadingFilterParams>,
 ) -> Json<Vec<MeterReadingResponse>> {
-    let auth_header = headers
-        .get("Authorization")
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("");
-    
-    let token = auth_header.strip_prefix("Bearer ").unwrap_or(auth_header);
-    
-    info!("📊 Get readings request");
+    info!("📊 Get readings request for user {}", claims.sub);
 
-    if let Ok(claims) = state.jwt_service.decode_token(token) {
-        let limit = params.limit.unwrap_or(50).min(1000);
-        let offset = params.offset.unwrap_or(0);
+    let limit = params.limit.unwrap_or(50).min(1000);
+    let offset = params.offset.unwrap_or(0);
         
         // We query meter_readings. Note: Partition key is reading_timestamp.
         // We order by reading_timestamp DESC.
@@ -902,14 +950,13 @@ pub async fn get_my_readings(
         .fetch_all(&state.db)
         .await;
 
-        match readings_result {
-            Ok(readings) => {
-                info!("✅ Returning {} readings", readings.len());
-                return Json(readings);
-            }
-            Err(e) => {
-                info!("⚠️ Error fetching readings: {}", e);
-            }
+    match readings_result {
+        Ok(readings) => {
+            info!("✅ Returning {} readings", readings.len());
+            return Json(readings);
+        }
+        Err(e) => {
+            info!("⚠️ Error fetching readings: {}", e);
         }
     }
     
@@ -931,18 +978,10 @@ pub async fn get_my_readings(
 )]
 pub async fn get_meter_stats(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AuthenticatedUser(claims): AuthenticatedUser,
 ) -> Json<MeterStats> {
-    let auth_header = headers
-        .get("Authorization")
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("");
-    
-    let token = auth_header.strip_prefix("Bearer ").unwrap_or(auth_header);
-    
-    if let Ok(claims) = state.jwt_service.decode_token(token) {
-        // Query aggregated stats
-        let stats_result = sqlx::query_as::<_, (Option<f64>, Option<f64>, Option<chrono::DateTime<chrono::Utc>>, Option<f64>, Option<i64>, Option<f64>, Option<i64>)>(
+    // Query aggregated stats
+    let stats_result = sqlx::query_as::<_, (Option<f64>, Option<f64>, Option<chrono::DateTime<chrono::Utc>>, Option<f64>, Option<i64>, Option<f64>, Option<i64>)>(
             "SELECT 
                 SUM(energy_generated)::FLOAT8 as total_produced,
                 SUM(energy_consumed)::FLOAT8 as total_consumed,
@@ -958,24 +997,62 @@ pub async fn get_meter_stats(
         .fetch_one(&state.db)
         .await;
 
-        match stats_result {
-            Ok((produced, consumed, last_time, minted, m_count, pending, p_count)) => {
-                let stats = MeterStats {
-                    total_produced: produced.unwrap_or(0.0),
-                    total_consumed: consumed.unwrap_or(0.0),
-                    last_reading_time: last_time,
-                    total_minted: minted.unwrap_or(0.0),
-                    total_minted_count: m_count.unwrap_or(0),
-                    pending_mint: pending.unwrap_or(0.0),
-                    pending_mint_count: p_count.unwrap_or(0),
-                };
-                return Json(stats);
-            }
-            Err(e) => {
-                error!("⚠️ Error fetching meter stats: {}", e);
-            }
+    match stats_result {
+        Ok((produced, consumed, last_time, minted, m_count, pending, p_count)) => {
+            let stats = MeterStats {
+                total_produced: produced.unwrap_or(0.0),
+                total_consumed: consumed.unwrap_or(0.0),
+                last_reading_time: last_time,
+                total_minted: minted.unwrap_or(0.0),
+                total_minted_count: m_count.unwrap_or(0),
+                pending_mint: pending.unwrap_or(0.0),
+                pending_mint_count: p_count.unwrap_or(0),
+            };
+            return Json(stats);
+        }
+        Err(e) => {
+            error!("⚠️ Error fetching meter stats: {}", e);
         }
     }
     
     Json(MeterStats::default())
+}
+
+/// Create multiple readings in a single batch
+#[utoipa::path(
+    post,
+    path = "/api/v1/meters/batch/readings",
+    request_body = CreateBatchReadingRequest,
+    responses(
+        (status = 200, description = "Batch processed", body = BatchReadingResponse)
+    ),
+    tag = "meters"
+)]
+pub async fn create_batch_readings(
+    State(state): State<AppState>,
+    Json(request): Json<CreateBatchReadingRequest>,
+) -> Json<BatchReadingResponse> {
+    let mut success_count = 0;
+    let mut failed_count = 0;
+    
+    info!("📊 Processing batch of {} readings", request.readings.len());
+    
+    for reading in request.readings {
+        let serial = reading.meter_serial.clone().or_else(|| reading.meter_id.clone());
+        
+        if let Some(serial) = serial {
+            // Use defaults for batch items
+            let params = CreateReadingParams::default();
+            let _ = internal_create_reading(&state, serial, params, reading).await;
+            success_count += 1;
+        } else {
+            failed_count += 1;
+        }
+    }
+    
+    Json(BatchReadingResponse {
+        success_count,
+        failed_count,
+        message: format!("Processed {} readings ({} failed)", success_count + failed_count, failed_count),
+    })
 }

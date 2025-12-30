@@ -92,6 +92,9 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
     let market_clearing = services::MarketClearingService::new(
         db_pool.clone(),
         blockchain_service.clone(),
+        config.clone(),
+        wallet_service.clone(),
+        audit_logger.clone(),
     );
     info!("✅ Market clearing service initialized");
 

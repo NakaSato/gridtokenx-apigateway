@@ -16,7 +16,7 @@ use super::{
     meters::{
         get_my_meters, register_meter,
         get_registered_meters_filtered, update_meter_status, create_reading,
-        get_my_readings, get_meter_stats,
+        get_my_readings, get_meter_stats, create_batch_readings,
     },
     wallets::token_balance,
     status::{system_status, meter_status, readiness_probe, liveness_probe},
@@ -52,6 +52,7 @@ pub fn v1_meters_routes() -> Router<AppState> {
         .route("/stats", get(get_meter_stats)) // GET /api/v1/meters/stats
         .route("/{serial}", axum::routing::patch(update_meter_status))  // PATCH /api/v1/meters/{serial}
         .route("/readings", get(get_my_readings))  // GET /api/v1/meters/readings
+        .route("/batch/readings", post(create_batch_readings)) // POST /api/v1/meters/batch/readings
         .route("/{serial}/readings", post(create_reading))  // POST /api/v1/meters/{serial}/readings
         .route("/readings/{reading_id}/mint", post(crate::handlers::meter::mint_user_reading))  // POST /api/v1/meters/readings/{reading_id}/mint
 }

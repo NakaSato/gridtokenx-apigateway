@@ -30,6 +30,14 @@ pub struct WalletService {
     wallet_path: Option<String>,
 }
 
+impl std::fmt::Debug for WalletService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WalletService")
+            .field("wallet_path", &self.wallet_path)
+            .finish_non_exhaustive()
+    }
+}
+
 impl WalletService {
     /// Create a new WalletService instance
     pub fn new(rpc_url: &str) -> Self {
