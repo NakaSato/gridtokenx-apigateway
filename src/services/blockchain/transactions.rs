@@ -587,6 +587,170 @@ impl TransactionHandler {
         }
     }
 
+    /// Wait for transaction to reach target confirmations
+    pub async fn wait_for_confirmations(
+        &self,
+        signature: &Signature,
+        target_confirmations: u64,
+        timeout_secs: u64,
+    ) -> Result<TransactionStatus> {
+        let start = std::time::Instant::now();
+        info!(
+            "Waiting for {} confirmations on signature: {}",
+            target_confirmations, signature
+        );
+
+        loop {
+            if start.elapsed().as_secs() >= timeout_secs {
+                warn!("Transaction confirmation timeout after {}s", timeout_secs);
+                return Ok(TransactionStatus::Pending);
+            }
+
+            match self.get_transaction_status(signature).await? {
+                TransactionStatus::Finalized => {
+                    info!("Transaction {} finalized", signature);
+                    return Ok(TransactionStatus::Finalized);
+                }
+                TransactionStatus::Confirmed(count) if count >= target_confirmations => {
+                    info!(
+                        "Transaction {} reached {} confirmations",
+                        signature, count
+                    );
+                    return Ok(TransactionStatus::Confirmed(count));
+                }
+                TransactionStatus::Failed(err) => {
+                    error!("Transaction {} failed: {}", signature, err);
+                    return Ok(TransactionStatus::Failed(err));
+                }
+                status => {
+                    debug!("Transaction {} status: {:?}, waiting...", signature, status);
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+            }
+        }
+    }
+
+    /// Get detailed transaction status
+    pub async fn get_transaction_status(&self, signature: &Signature) -> Result<TransactionStatus> {
+        use solana_client::rpc_config::RpcTransactionConfig;
+        use solana_transaction_status::UiTransactionEncoding;
+
+        // First check signature status
+        let status = self
+            .rpc_client
+            .get_signature_status(signature)
+            .map_err(|e| anyhow!("Failed to get signature status: {}", e))?;
+
+        match status {
+            None => Ok(TransactionStatus::Pending),
+            Some(result) => match result {
+                Ok(_) => {
+                    // Transaction succeeded, check confirmation level
+                    let config = RpcTransactionConfig {
+                        encoding: Some(UiTransactionEncoding::Json),
+                        commitment: Some(solana_sdk::commitment_config::CommitmentConfig::finalized()),
+                        max_supported_transaction_version: Some(0),
+                    };
+
+                    match self.rpc_client.get_transaction_with_config(signature, config) {
+                        Ok(tx) => {
+                            if tx.slot > 0 {
+                                // Get current slot to calculate confirmations
+                                let current_slot = self.rpc_client.get_slot().unwrap_or(0);
+                                let confirmations = current_slot.saturating_sub(tx.slot);
+                                
+                                // Solana considers 32+ confirmations as finalized
+                                if confirmations >= 32 {
+                                    Ok(TransactionStatus::Finalized)
+                                } else {
+                                    Ok(TransactionStatus::Confirmed(confirmations))
+                                }
+                            } else {
+                                Ok(TransactionStatus::Processed)
+                            }
+                        }
+                        Err(_) => {
+                            // Transaction exists but can't get details - it's at least processed
+                            Ok(TransactionStatus::Processed)
+                        }
+                    }
+                }
+                Err(err) => Ok(TransactionStatus::Failed(format!("{:?}", err))),
+            },
+        }
+    }
+
+    /// Get the number of confirmations for a transaction
+    pub async fn get_confirmation_count(&self, signature: &Signature) -> Result<u64> {
+        match self.get_transaction_status(signature).await? {
+            TransactionStatus::Finalized => Ok(32), // Finalized = 32+ confirmations
+            TransactionStatus::Confirmed(count) => Ok(count),
+            TransactionStatus::Processed => Ok(1),
+            TransactionStatus::Pending => Ok(0),
+            TransactionStatus::Failed(_) => Ok(0),
+        }
+    }
+
+    /// Estimate transaction fee before sending
+    pub async fn estimate_transaction_fee(&self, transaction: &Transaction) -> Result<FeeEstimate> {
+        // Get fee for message
+        let fee = self
+            .rpc_client
+            .get_fee_for_message(&transaction.message)
+            .map_err(|e| anyhow!("Failed to estimate fee: {}", e))?;
+
+        // Get priority fee estimate (simplified - actual implementation would query recent fees)
+        let priority_fee = self.get_priority_fee_estimate().await?;
+
+        Ok(FeeEstimate {
+            base_fee: fee,
+            priority_fee,
+            total_fee: fee + priority_fee,
+        })
+    }
+
+    /// Get priority fee estimate based on recent transactions
+    async fn get_priority_fee_estimate(&self) -> Result<u64> {
+        // Query recent priority fees from the network
+        // For now, use a simple heuristic based on recent blocks
+        // Default priority fee: 0.00001 SOL = 10,000 lamports
+        let default_priority_fee = 10_000u64;
+        
+        // Try to get recent prioritization fees
+        match self.rpc_client.get_recent_prioritization_fees(&[]) {
+            Ok(fees) => {
+                if fees.is_empty() {
+                    Ok(default_priority_fee)
+                } else {
+                    // Calculate median priority fee
+                    let mut fee_values: Vec<u64> = fees.iter().map(|f| f.prioritization_fee).collect();
+                    fee_values.sort();
+                    let median = fee_values[fee_values.len() / 2];
+                    // Add 20% buffer for reliability
+                    Ok(median.saturating_mul(120) / 100)
+                }
+            }
+            Err(_) => Ok(default_priority_fee),
+        }
+    }
+
+    /// Check if account has sufficient SOL for transaction fees
+    pub async fn check_sufficient_sol(&self, pubkey: &Pubkey, required_fee: u64) -> Result<SolBalanceCheck> {
+        let balance = self.get_balance(pubkey).await?;
+        let rent_exempt_minimum = 890_880u64; // Approximate rent-exempt minimum for an account
+        
+        let required_total = required_fee + rent_exempt_minimum;
+        let sufficient = balance >= required_total;
+
+        Ok(SolBalanceCheck {
+            balance,
+            required_fee,
+            rent_exempt_minimum,
+            sufficient,
+            deficit: if sufficient { 0 } else { required_total - balance },
+        })
+    }
+
     /// Send transaction with retry
     pub async fn send_transaction_with_retry(
         &self,
@@ -628,6 +792,47 @@ impl TransactionHandler {
 
         Ok(Transaction::new_with_payer(&instructions, Some(payer)))
     }
+}
+
+/// Transaction status for detailed tracking
+#[derive(Debug, Clone, PartialEq)]
+pub enum TransactionStatus {
+    /// Transaction not yet submitted or not found
+    Pending,
+    /// Transaction included in a block (1 confirmation)
+    Processed,
+    /// Transaction confirmed with N confirmations
+    Confirmed(u64),
+    /// Transaction finalized (32+ confirmations, irreversible)
+    Finalized,
+    /// Transaction failed with error message
+    Failed(String),
+}
+
+/// Fee estimation result
+#[derive(Debug, Clone)]
+pub struct FeeEstimate {
+    /// Base transaction fee in lamports
+    pub base_fee: u64,
+    /// Recommended priority fee in lamports
+    pub priority_fee: u64,
+    /// Total estimated fee (base + priority)
+    pub total_fee: u64,
+}
+
+/// SOL balance check result
+#[derive(Debug, Clone)]
+pub struct SolBalanceCheck {
+    /// Current balance in lamports
+    pub balance: u64,
+    /// Required fee for the transaction
+    pub required_fee: u64,
+    /// Minimum balance to keep for rent exemption
+    pub rent_exempt_minimum: u64,
+    /// Whether balance is sufficient
+    pub sufficient: bool,
+    /// Deficit amount if insufficient (0 if sufficient)
+    pub deficit: u64,
 }
 
 /// Enhanced utilities for transaction operations

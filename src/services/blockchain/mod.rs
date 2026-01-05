@@ -11,5 +11,5 @@ pub mod utils;
 // Re-exports
 pub use instructions::InstructionBuilder;
 pub use service::BlockchainService;
-pub use transactions::TransactionHandler;
+pub use transactions::{TransactionHandler, TransactionStatus, FeeEstimate, SolBalanceCheck};
 pub use utils::BlockchainUtils;
