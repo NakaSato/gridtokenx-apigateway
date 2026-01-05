@@ -4,13 +4,14 @@ pub mod orders;
 pub mod matching;
 pub mod blockchain;
 pub mod escrow;
+pub mod revenue;
 
 use sqlx::PgPool;
 
 pub use types::*;
 
 use crate::config::Config;
-use crate::services::{AuditLogger, BlockchainService, WalletService, WebSocketService};
+use crate::services::{AuditLogger, BlockchainService, WalletService, WebSocketService, ErcService};
 
 #[derive(Clone, Debug)]
 pub struct MarketClearingService {
@@ -20,6 +21,7 @@ pub struct MarketClearingService {
     wallet_service: WalletService,
     audit_logger: AuditLogger,
     websocket_service: WebSocketService,
+    erc_service: ErcService,
 }
 
 impl MarketClearingService {
@@ -30,6 +32,7 @@ impl MarketClearingService {
         wallet_service: WalletService,
         audit_logger: AuditLogger,
         websocket_service: WebSocketService,
+        erc_service: ErcService,
     ) -> Self {
         Self {
             db,
@@ -38,6 +41,7 @@ impl MarketClearingService {
             wallet_service,
             audit_logger,
             websocket_service,
+            erc_service,
         }
     }
 }

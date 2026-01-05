@@ -92,6 +92,10 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
     let audit_logger = services::AuditLogger::new(db_pool.clone());
     info!("✅ Audit logger initialized");
 
+    // Initialize ERC service
+    let erc_service = services::ErcService::new(db_pool.clone(), blockchain_service.clone());
+    info!("✅ ERC service initialized");
+
     // Initialize market clearing service
     let market_clearing = services::MarketClearingService::new(
         db_pool.clone(),
@@ -100,6 +104,7 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
         wallet_service.clone(),
         audit_logger.clone(),
         websocket_service.clone(),
+        erc_service.clone(),
     );
     info!("✅ Market clearing service initialized");
 
@@ -181,8 +186,9 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
         market_clearing_engine,
         futures_service,
         dashboard_service,
-        event_processor,
+        event_processor: event_processor.clone(),
         webhook_service,
+        erc_service,
         metrics_handle,
         http_client,
     };

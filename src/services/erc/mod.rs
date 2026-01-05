@@ -21,7 +21,7 @@ use self::transfer::CertificateTransferManager;
 use crate::services::BlockchainService;
 
 /// Service for managing Energy Renewable Certificates
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ErcService {
     db_pool: PgPool,
     #[allow(dead_code)]
@@ -59,6 +59,7 @@ impl ErcService {
         user_id: Uuid,
         issuer_wallet: &str,
         request: IssueErcRequest,
+        settlement_id: Option<Uuid>,
     ) -> Result<ErcCertificate> {
         info!("Issuing certificate for user {}", user_id);
 
@@ -102,9 +103,9 @@ impl ErcService {
             INSERT INTO erc_certificates (
                 id, certificate_id, user_id, wallet_address,
                 kwh_amount, issue_date, expiry_date,
-                issuer_wallet, status, metadata
+                issuer_wallet, status, metadata, settlement_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Active', $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Active', $9, $10)
             RETURNING
                 id, certificate_id,
                 user_id as "user_id?",
@@ -116,6 +117,7 @@ impl ErcService {
                 status,
                 blockchain_tx_signature,
                 metadata,
+                settlement_id,
                 created_at as "created_at!",
                 updated_at as "updated_at!"
             "#,
@@ -127,7 +129,8 @@ impl ErcService {
             Utc::now(),
             request.expiry_date,
             issuer_wallet,
-            metadata_json
+            metadata_json,
+            settlement_id
         )
         .fetch_one(&self.db_pool)
         .await

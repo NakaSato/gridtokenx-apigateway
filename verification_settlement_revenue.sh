@@ -29,11 +29,11 @@ BUY_ORDER_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 SELL_ORDER_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 docker exec gridtokenx-postgres psql -U gridtokenx_user -d gridtokenx -c "
 INSERT INTO trading_orders (id, user_id, order_type, side, energy_amount, price_per_kwh, status, epoch_id)
-VALUES ('$BUY_ORDER_ID', '$BUY_ORDER_ID', 'limit', 'buy', 100.0, 2.0, 'pending', '$EPOCH_ID');
+VALUES ('$BUY_ORDER_ID', '$BUYER_ID', 'limit', 'buy', 100.0, 2.0, 'pending', '$EPOCH_ID');
 "
 docker exec gridtokenx-postgres psql -U gridtokenx_user -d gridtokenx -c "
 INSERT INTO trading_orders (id, user_id, order_type, side, energy_amount, price_per_kwh, status, epoch_id)
-VALUES ('$SELL_ORDER_ID', '$SELL_ORDER_ID', 'limit', 'sell', 100.0, 2.0, 'pending', '$EPOCH_ID');
+VALUES ('$SELL_ORDER_ID', '$SELLER_ID', 'limit', 'sell', 100.0, 2.0, 'pending', '$EPOCH_ID');
 "
 
 # 5. Simulate Escrow Lock

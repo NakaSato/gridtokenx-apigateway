@@ -19,14 +19,17 @@ impl MarketClearingService {
         info!("Getting order book for epoch: {}", epoch_id);
 
         // Get pending buy orders (sorted by price descending, then time ascending)
+        // energy_amount in the query is the remaining amount (original - filled)
         let buy_orders: Vec<OrderBookEntry> = sqlx::query_as!(
             OrderBookEntry,
             r#"
             SELECT 
                 id as order_id, user_id, side as "side!: OrderSide", 
-                energy_amount, price_per_kwh as "price_per_kwh!", created_at as "created_at!", zone_id
+                (energy_amount - COALESCE(filled_amount, 0)) as "energy_amount!",
+                energy_amount as "original_amount!",
+                price_per_kwh as "price_per_kwh!", created_at as "created_at!", zone_id
             FROM trading_orders 
-            WHERE status = 'pending' AND side = 'buy' AND epoch_id = $1 AND price_per_kwh IS NOT NULL
+            WHERE status IN ('pending', 'partially_filled') AND side = 'buy' AND epoch_id = $1 AND price_per_kwh IS NOT NULL
             ORDER BY price_per_kwh DESC, created_at ASC
             "#,
             epoch_id
@@ -46,9 +49,11 @@ impl MarketClearingService {
             r#"
             SELECT 
                 id as order_id, user_id, side as "side!: OrderSide", 
-                energy_amount, price_per_kwh as "price_per_kwh!", created_at as "created_at!", zone_id
+                (energy_amount - COALESCE(filled_amount, 0)) as "energy_amount!",
+                energy_amount as "original_amount!",
+                price_per_kwh as "price_per_kwh!", created_at as "created_at!", zone_id
             FROM trading_orders 
-            WHERE status = 'pending' AND side = 'sell' AND epoch_id = $1 AND price_per_kwh IS NOT NULL
+            WHERE status IN ('pending', 'partially_filled') AND side = 'sell' AND epoch_id = $1 AND price_per_kwh IS NOT NULL
             ORDER BY price_per_kwh ASC, created_at ASC
             "#,
             epoch_id
@@ -75,8 +80,9 @@ impl MarketClearingService {
         price_per_kwh: Option<Decimal>,
         expiry_time: Option<DateTime<Utc>>,
         zone_id: Option<i32>,
+        meter_id: Option<Uuid>,
     ) -> Result<Uuid> {
-        info!("Creating order in MarketClearingService for user: {}", user_id);
+        info!("Creating order in MarketClearingService for user: {}, meter: {:?}", user_id, meter_id);
 
         if energy_amount <= Decimal::ZERO {
             return Err(anyhow::anyhow!("Energy amount must be positive"));
@@ -174,8 +180,8 @@ impl MarketClearingService {
             r#"
             INSERT INTO trading_orders (
                 id, user_id, order_type, side, energy_amount, price_per_kwh,
-                filled_amount, status, expires_at, created_at, epoch_id, zone_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                filled_amount, status, expires_at, created_at, epoch_id, zone_id, meter_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             "#,
             order_id,
             user_id,
@@ -188,7 +194,8 @@ impl MarketClearingService {
             expires_at,
             now,
             epoch.id,
-            zone_id
+            zone_id,
+            meter_id
         )
         .execute(&mut *tx)
         .await?;
@@ -267,11 +274,18 @@ impl MarketClearingService {
         Ok(())
     }
 
-    /// Cancel an order
+    /// Cancel an order and refund the unfilled escrow amount
     pub async fn cancel_order(&self, order_id: Uuid, user_id: Uuid) -> Result<()> {
-        // Check if order belongs to user and is still pending
+        use crate::handlers::websocket::broadcaster::broadcast_p2p_order_update;
+        
+        // Get full order details including filled amount
         let order = sqlx::query!(
-            "SELECT user_id, status as \"status: OrderStatus\" FROM trading_orders WHERE id = $1",
+            r#"
+            SELECT user_id, side as "side!: OrderSide", status as "status: OrderStatus", 
+                   energy_amount, filled_amount, price_per_kwh as "price_per_kwh"
+            FROM trading_orders 
+            WHERE id = $1
+            "#,
             order_id
         )
         .fetch_optional(&self.db)
@@ -284,21 +298,101 @@ impl MarketClearingService {
                 );
             }
 
-            if !matches!(order.status, OrderStatus::Pending) {
-                return Err(ApiError::BadRequest("Order cannot be cancelled".to_string()).into());
+            // Allow cancellation for pending or partially_filled orders
+            if !matches!(order.status, OrderStatus::Pending | OrderStatus::PartiallyFilled) {
+                return Err(ApiError::BadRequest(format!(
+                    "Order cannot be cancelled (status: {:?})", order.status
+                )).into());
             }
 
-            // Cancel order
-            let status_str = "cancelled";
-            sqlx::query(&format!(
-                "UPDATE trading_orders SET status = '{}'::order_status, updated_at = NOW() WHERE id = $1", 
-                status_str
-            ))
-            .bind(order_id)
-            .execute(&self.db)
+            // Calculate unfilled amount that needs to be refunded
+            let filled = order.filled_amount.unwrap_or(Decimal::ZERO);
+            let original = order.energy_amount;
+            let unfilled = original - filled;
+
+            if unfilled <= Decimal::ZERO {
+                return Err(ApiError::BadRequest(
+                    "Order is fully filled and cannot be cancelled".to_string()
+                ).into());
+            }
+
+            // price_per_kwh is Decimal (not null in trading_orders)
+            let price = order.price_per_kwh;
+
+            // Start transaction for atomicity
+            let mut tx = self.db.begin().await?;
+
+            // Refund based on order side
+            match order.side {
+                OrderSide::Buy => {
+                    // Return locked funds for unfilled portion
+                    let refund_amount = unfilled * price;
+                    sqlx::query!(
+                        "UPDATE users SET balance = balance + $1, locked_amount = locked_amount - $1 WHERE id = $2",
+                        refund_amount,
+                        user_id
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+
+                    info!(
+                        "Refunded {} to user {} for cancelled buy order {} (unfilled: {} kWh @ {})",
+                        refund_amount, user_id, order_id, unfilled, price
+                    );
+                }
+                OrderSide::Sell => {
+                    // Return locked energy for unfilled portion
+                    sqlx::query!(
+                        "UPDATE users SET locked_energy = locked_energy - $1 WHERE id = $2",
+                        unfilled,
+                        user_id
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+
+                    info!(
+                        "Unlocked {} kWh energy for user {} from cancelled sell order {}",
+                        unfilled, user_id, order_id
+                    );
+                }
+            }
+
+            // Update escrow record status
+            sqlx::query!(
+                "UPDATE escrow_records SET status = 'released', description = $1, updated_at = NOW() WHERE order_id = $2 AND status = 'locked'",
+                format!("Order cancelled - refunded unfilled portion: {}", unfilled),
+                order_id
+            )
+            .execute(&mut *tx)
             .await?;
 
-            info!("Order {} cancelled by user {}", order_id, user_id);
+            // Update order status to cancelled
+            sqlx::query(
+                "UPDATE trading_orders SET status = 'cancelled'::order_status, updated_at = NOW() WHERE id = $1"
+            )
+            .bind(order_id)
+            .execute(&mut *tx)
+            .await?;
+
+            tx.commit().await?;
+
+            // Broadcast cancellation via WebSocket
+            let _ = broadcast_p2p_order_update(
+                order_id,
+                user_id,
+                match order.side {
+                    OrderSide::Buy => "buy".to_string(),
+                    OrderSide::Sell => "sell".to_string(),
+                },
+                "cancelled".to_string(),
+                original.to_string(),
+                filled.to_string(),
+                "0".to_string(), // remaining is 0 after cancel
+                price.to_string(),
+            ).await;
+
+            info!("Order {} cancelled by user {} (filled: {}, refunded: {})", 
+                order_id, user_id, filled, unfilled);
         } else {
             return Err(ApiError::NotFound("Order not found".to_string()).into());
         }

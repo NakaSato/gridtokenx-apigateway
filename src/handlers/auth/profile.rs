@@ -45,7 +45,7 @@ pub async fn profile(
     // Try to decode token and get user from database
     if let Ok(claims) = state.jwt_service.decode_token(token) {
         let user_result = sqlx::query_as::<_, UserRow>(
-            "SELECT id, username, email, role::text as role, first_name, last_name, wallet_address 
+            "SELECT id, username, email, role::text as role, first_name, last_name, wallet_address, balance, locked_amount, locked_energy
              FROM users WHERE id = $1"
         )
         .bind(claims.sub)
@@ -62,6 +62,9 @@ pub async fn profile(
                 first_name: user.first_name.unwrap_or_default(),
                 last_name: user.last_name.unwrap_or_default(),
                 wallet_address: user.wallet_address,
+                balance: user.balance.unwrap_or_default(),
+                locked_amount: user.locked_amount.unwrap_or_default(),
+                locked_energy: user.locked_energy.unwrap_or_default(),
             });
         }
     }
@@ -76,6 +79,9 @@ pub async fn profile(
         first_name: "Guest".to_string(),
         last_name: "User".to_string(),
         wallet_address: None,
+        balance: rust_decimal::Decimal::ZERO,
+        locked_amount: rust_decimal::Decimal::ZERO,
+        locked_energy: rust_decimal::Decimal::ZERO,
     })
 }
 
@@ -116,7 +122,7 @@ pub async fn update_wallet(
         UPDATE users 
         SET wallet_address = $1, blockchain_registered = true, updated_at = NOW() 
         WHERE id = $2
-        RETURNING id, username, email, role::text as role, first_name, last_name, wallet_address
+        RETURNING id, username, email, role::text as role, first_name, last_name, wallet_address, balance, locked_amount, locked_energy
         "#
     )
     .bind(&payload.wallet_address)
@@ -138,6 +144,9 @@ pub async fn update_wallet(
         first_name: user.first_name.unwrap_or_default(),
         last_name: user.last_name.unwrap_or_default(),
         wallet_address: user.wallet_address,
+                balance: user.balance.unwrap_or_default(),
+                locked_amount: user.locked_amount.unwrap_or_default(),
+                locked_energy: user.locked_energy.unwrap_or_default(),
     }))
 }
 
@@ -193,7 +202,7 @@ pub async fn generate_wallet(
         UPDATE users 
         SET wallet_address = $1, encrypted_private_key = $2, wallet_salt = $3, encryption_iv = $4, blockchain_registered = true, updated_at = NOW() 
         WHERE id = $5
-        RETURNING id, username, email, role::text as role, first_name, last_name, wallet_address
+        RETURNING id, username, email, role::text as role, first_name, last_name, wallet_address, balance, locked_amount, locked_energy
         "#
     )
     .bind(&pubkey)
@@ -228,5 +237,8 @@ pub async fn generate_wallet(
         first_name: user.first_name.unwrap_or_default(),
         last_name: user.last_name.unwrap_or_default(),
         wallet_address: user.wallet_address,
+                balance: user.balance.unwrap_or_default(),
+                locked_amount: user.locked_amount.unwrap_or_default(),
+                locked_energy: user.locked_energy.unwrap_or_default(),
     }))
 }

@@ -125,6 +125,9 @@ pub async fn register(
         first_name: request.first_name,
         last_name: request.last_name,
         wallet_address: None,
+        balance: rust_decimal::Decimal::ZERO,
+        locked_amount: rust_decimal::Decimal::ZERO,
+        locked_energy: rust_decimal::Decimal::ZERO,
     };
 
     let auth = AuthResponse {

@@ -11,7 +11,7 @@ use solana_sdk::{
 };
 
 /// Manager for transferring ERC certificates
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CertificateTransferManager {
     db_pool: PgPool,
     blockchain_service: BlockchainService,
@@ -73,6 +73,7 @@ impl CertificateTransferManager {
                 status,
                 blockchain_tx_signature,
                 metadata,
+                settlement_id,
                 created_at as "created_at!",
                 updated_at as "updated_at!"
             "#,

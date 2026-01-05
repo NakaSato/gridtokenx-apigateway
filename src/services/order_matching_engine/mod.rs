@@ -113,7 +113,7 @@ impl OrderMatchingEngine {
             SELECT 
                 id, user_id, order_type as "order_type!: OrderType", side as "side!: OrderSide", 
                 energy_amount, price_per_kwh, filled_amount, status as "status!: OrderStatus", 
-                expires_at, created_at, filled_at, epoch_id, zone_id, refund_tx_signature
+                expires_at, created_at, filled_at, epoch_id, zone_id, meter_id, refund_tx_signature
             FROM trading_orders 
             WHERE status IN ('active', 'pending', 'partially_filled') 
             AND expires_at < $1
@@ -231,7 +231,9 @@ impl OrderMatchingEngine {
                 status,
                 expires_at,
                 created_at,
-                filled_at
+                filled_at,
+                meter_id,
+                refund_tx_signature
             FROM trading_orders
             WHERE side = 'buy'::order_side AND status = $1
             ORDER BY created_at ASC
@@ -260,7 +262,9 @@ impl OrderMatchingEngine {
                 status,
                 expires_at,
                 created_at,
-                filled_at
+                filled_at,
+                meter_id,
+                refund_tx_signature
             FROM trading_orders
             WHERE side = 'sell'::order_side AND status = $1
             ORDER BY price_per_kwh ASC, created_at ASC

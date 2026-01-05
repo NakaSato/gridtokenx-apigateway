@@ -26,6 +26,7 @@ pub struct TradingOrder {
     pub filled_at: Option<DateTime<Utc>>,
     pub epoch_id: Option<Uuid>,
     pub zone_id: Option<i32>,
+    pub meter_id: Option<Uuid>,
     pub refund_tx_signature: Option<String>,
 }
 
@@ -44,6 +45,7 @@ pub struct TradingOrderDb {
     pub filled_at: Option<DateTime<Utc>>,
     pub epoch_id: Option<Uuid>,
     pub zone_id: Option<i32>,
+    pub meter_id: Option<Uuid>,
     pub refund_tx_signature: Option<String>,
 }
 
@@ -63,6 +65,7 @@ impl From<TradingOrderDb> for TradingOrder {
             filled_at: db.filled_at,
             epoch_id: db.epoch_id,
             zone_id: db.zone_id,
+            meter_id: db.meter_id,
             refund_tx_signature: db.refund_tx_signature,
         }
     }
@@ -98,6 +101,8 @@ pub struct CreateOrderRequest {
     pub expiry_time: Option<DateTime<Utc>>,
 
     pub zone_id: Option<i32>,
+
+    pub meter_id: Option<Uuid>,
 
     /// HMAC-SHA256 signature of the order parameters
     pub signature: Option<String>,

@@ -74,7 +74,8 @@ pub struct OrderBookEntry {
     pub order_id: Uuid,
     pub user_id: Uuid,
     pub side: OrderSide,
-    pub energy_amount: Decimal,
+    pub energy_amount: Decimal,        // Remaining amount
+    pub original_amount: Decimal,      // Original order amount
     pub price_per_kwh: Decimal,
     pub created_at: DateTime<Utc>,
     pub zone_id: Option<i32>,

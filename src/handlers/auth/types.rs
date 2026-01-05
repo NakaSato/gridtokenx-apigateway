@@ -21,6 +21,9 @@ pub struct UserRow {
     pub first_name: Option<String>,
     pub last_name: Option<String>,
     pub wallet_address: Option<String>,
+    pub balance: Option<rust_decimal::Decimal>,
+    pub locked_amount: Option<rust_decimal::Decimal>,
+    pub locked_energy: Option<rust_decimal::Decimal>,
 }
 
 // ============================================================================
@@ -76,6 +79,9 @@ pub struct UserResponse {
     pub last_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wallet_address: Option<String>,
+    pub balance: rust_decimal::Decimal,
+    pub locked_amount: rust_decimal::Decimal,
+    pub locked_energy: rust_decimal::Decimal,
 }
 
 /// Update Wallet Request

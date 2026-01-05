@@ -737,6 +737,7 @@ async fn internal_create_reading(
         trigger_post_processing(
             state.clone(),
             serial.clone(),
+            meter_id,
             user_id,
             surplus,
             deficit,
@@ -926,6 +927,7 @@ async fn persist_reading_to_db(
 async fn trigger_post_processing(
     state: AppState,
     serial: String,
+    meter_id: Uuid,
     user_id: Uuid,
     surplus: f64,
     deficit: f64,
@@ -979,7 +981,8 @@ async fn trigger_post_processing(
                         surplus_val,
                         Some(price),
                         None,
-                        None
+                        None,
+                        Some(meter_id)
                     ).await;
                     if let Err(e) = res {
                         error!("❌ [Auto-P2P] Failed to create Sell order for {}: {}", serial, e);
@@ -1001,7 +1004,8 @@ async fn trigger_post_processing(
                         deficit_val,
                         Some(price),
                         None,
-                        None
+                        None,
+                        Some(meter_id)
                     ).await;
                     if let Err(e) = res {
                         error!("❌ [Auto-P2P] Failed to create Buy order for {}: {}", serial, e);

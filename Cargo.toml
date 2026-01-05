@@ -116,7 +116,7 @@ regex = "1.10"
 sysinfo = "0.33"
 
 # OpenAPI Documentation
-utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
+utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono", "decimal"] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 
 # Email

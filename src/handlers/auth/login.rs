@@ -31,6 +31,9 @@ struct LoginUserRow {
     first_name: Option<String>,
     last_name: Option<String>,
     wallet_address: Option<String>,
+    balance: Option<rust_decimal::Decimal>,
+    locked_amount: Option<rust_decimal::Decimal>,
+    locked_energy: Option<rust_decimal::Decimal>,
 }
 
 /// Login Handler - queries database for user and verifies password
@@ -53,7 +56,7 @@ pub async fn login(
 
     // Query database for user including password_hash, searching by either username or email
     let user_result = sqlx::query_as::<_, LoginUserRow>(
-        "SELECT id, username, email, password_hash, role::text as role, first_name, last_name, wallet_address 
+        "SELECT id, username, email, password_hash, role::text as role, first_name, last_name, wallet_address, balance, locked_amount, locked_energy
          FROM users WHERE (username = $1 OR email = $1) AND is_active = true"
     )
     .bind(&request.username)
@@ -75,6 +78,9 @@ pub async fn login(
                         first_name: u.first_name,
                         last_name: u.last_name,
                         wallet_address: u.wallet_address,
+                        balance: u.balance,
+                        locked_amount: u.locked_amount,
+                        locked_energy: u.locked_energy,
                     }
                 }
                 Ok(false) => {
@@ -94,6 +100,9 @@ pub async fn login(
                                 first_name: String::new(),
                                 last_name: String::new(),
                                 wallet_address: None,
+                                balance: rust_decimal::Decimal::ZERO,
+                                locked_amount: rust_decimal::Decimal::ZERO,
+                                locked_energy: rust_decimal::Decimal::ZERO,
                             },
                         })
                     ).into_response();
@@ -113,6 +122,9 @@ pub async fn login(
                                 first_name: String::new(),
                                 last_name: String::new(),
                                 wallet_address: None,
+                                balance: rust_decimal::Decimal::ZERO,
+                                locked_amount: rust_decimal::Decimal::ZERO,
+                                locked_energy: rust_decimal::Decimal::ZERO,
                             },
                         })
                     ).into_response();
@@ -136,6 +148,9 @@ pub async fn login(
                         first_name: String::new(),
                         last_name: String::new(),
                         wallet_address: None,
+                        balance: rust_decimal::Decimal::ZERO,
+                        locked_amount: rust_decimal::Decimal::ZERO,
+                        locked_energy: rust_decimal::Decimal::ZERO,
                     },
                 })
             ).into_response();
@@ -155,6 +170,9 @@ pub async fn login(
                         first_name: String::new(),
                         last_name: String::new(),
                         wallet_address: None,
+                        balance: rust_decimal::Decimal::ZERO,
+                        locked_amount: rust_decimal::Decimal::ZERO,
+                        locked_energy: rust_decimal::Decimal::ZERO,
                     },
                 })
             ).into_response();
@@ -180,6 +198,9 @@ pub async fn login(
             first_name: user.first_name.unwrap_or_default(),
             last_name: user.last_name.unwrap_or_default(),
             wallet_address: user.wallet_address,
+            balance: user.balance.unwrap_or_default(),
+            locked_amount: user.locked_amount.unwrap_or_default(),
+            locked_energy: user.locked_energy.unwrap_or_default(),
         },
     }).into_response()
 }
@@ -293,6 +314,9 @@ pub async fn verify_email(
                 first_name: first_name.unwrap_or_default(),
                 last_name: last_name.unwrap_or_default(),
                 wallet_address: wallet,
+                balance: rust_decimal::Decimal::ZERO,
+                locked_amount: rust_decimal::Decimal::ZERO,
+                locked_energy: rust_decimal::Decimal::ZERO,
             },
         })
     };

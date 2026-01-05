@@ -13,7 +13,7 @@ use solana_sdk::{
 use crate::services::BlockchainService;
 
 /// Manager for retiring ERC certificates
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CertificateRetiring {
     db_pool: PgPool,
     blockchain_service: BlockchainService,
@@ -61,6 +61,7 @@ impl CertificateRetiring {
                 status,
                 blockchain_tx_signature,
                 metadata,
+                settlement_id,
                 created_at as "created_at!",
                 updated_at as "updated_at!"
             "#,

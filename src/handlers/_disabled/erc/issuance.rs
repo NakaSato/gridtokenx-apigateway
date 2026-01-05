@@ -89,7 +89,7 @@ pub async fn issue_certificate(
 
     let certificate = state
         .erc_service
-        .issue_certificate(recipient_user_id, &issuer_wallet, cert_request)
+        .issue_certificate(recipient_user_id, &issuer_wallet, cert_request, None)
         .await
         .map_err(|e| {
             error!("Failed to issue certificate: {}", e);

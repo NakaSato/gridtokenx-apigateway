@@ -640,14 +640,16 @@ impl SettlementService {
         Ok(())
     }
 
-    /// Retry failed settlements (called by background job)
+    /// Retry failed settlements with exponential backoff (called by background job)
+    /// Implements smart retry logic with error classification
     pub async fn retry_failed_settlements(&self, max_retries: u32) -> Result<usize, ApiError> {
         // Fetch settlements with status = 'Failed' and retry_count < max_retries
         let failed = sqlx::query!(
             r#"
-            SELECT id FROM settlements
+            SELECT id, retry_count FROM settlements
             WHERE status = 'failed'
             AND retry_count < $1
+            ORDER BY retry_count ASC, updated_at ASC
             "#,
             max_retries as i32
         )
@@ -656,21 +658,119 @@ impl SettlementService {
         .map_err(ApiError::Database)?;
 
         let mut retried = 0;
+        let base_delay_secs = self.config.retry_delay_secs;
+        
         for settlement in failed {
+            // Calculate exponential backoff delay: base * 2^retry_count
+            // e.g., with base=5s: 5s, 10s, 20s, 40s, 80s...
+            let retry_count = settlement.retry_count.unwrap_or(0) as u32;
+            let delay_secs = base_delay_secs * (2_u64.pow(retry_count));
+            let max_delay_secs = 300; // Cap at 5 minutes
+            let actual_delay = delay_secs.min(max_delay_secs);
+            
+            info!(
+                "Retrying settlement {} (attempt {}/{}) with {}s delay",
+                settlement.id, retry_count + 1, max_retries, actual_delay
+            );
+            
+            // Wait with exponential backoff
+            tokio::time::sleep(Duration::from_secs(actual_delay)).await;
+            
             match self.execute_settlement(settlement.id).await {
                 Ok(_) => {
-                    info!("Settlement {} retry succeeded", settlement.id);
+                    info!("✅ Settlement {} retry succeeded", settlement.id);
                     retried += 1;
                 }
                 Err(e) => {
-                    error!("Settlement {} retry failed: {}", settlement.id, e);
-                    // Increment retry count
-                    self.increment_retry_count(&settlement.id).await?;
+                    let error_str = e.to_string();
+                    
+                    // Classify error: determine if retryable
+                    let is_retryable = Self::is_retryable_error(&error_str);
+                    
+                    if is_retryable {
+                        error!("⚠️ Settlement {} retry failed (retryable): {}", settlement.id, e);
+                        self.increment_retry_count(&settlement.id).await?;
+                    } else {
+                        // Non-retryable error - mark as permanently failed
+                        error!("❌ Settlement {} permanently failed (non-retryable): {}", settlement.id, e);
+                        self.mark_settlement_permanent_failure(&settlement.id, &error_str).await?;
+                    }
                 }
             }
         }
 
         Ok(retried)
+    }
+
+    /// Classify if an error is retryable
+    fn is_retryable_error(error: &str) -> bool {
+        let retryable_patterns = [
+            "timeout",
+            "connection refused",
+            "network",
+            "rate limit",
+            "429",
+            "503",
+            "temporary",
+            "try again",
+            "blockhash",
+            "not found", // Transaction not yet confirmed
+        ];
+        
+        let non_retryable_patterns = [
+            "insufficient",
+            "invalid signature",
+            "invalid account",
+            "unauthorized",
+            "forbidden",
+            "already processed",
+            "account not found",  // Permanent missing account
+            "program failed",
+        ];
+        
+        let error_lower = error.to_lowercase();
+        
+        // If matches non-retryable, don't retry
+        for pattern in non_retryable_patterns.iter() {
+            if error_lower.contains(pattern) {
+                return false;
+            }
+        }
+        
+        // If matches retryable, retry
+        for pattern in retryable_patterns.iter() {
+            if error_lower.contains(pattern) {
+                return true;
+            }
+        }
+        
+        // Default: retry unknown errors (conservative)
+        true
+    }
+
+    /// Mark settlement as permanently failed (non-retryable)
+    async fn mark_settlement_permanent_failure(
+        &self,
+        settlement_id: &Uuid,
+        error_message: &str,
+    ) -> Result<(), ApiError> {
+        sqlx::query(
+            r#"
+            UPDATE settlements
+            SET status = 'permanently_failed', 
+                error_message = $1,
+                updated_at = NOW()
+            WHERE id = $2
+            "#,
+        )
+        .bind(error_message)
+        .bind(settlement_id)
+        .execute(&self.db)
+        .await
+        .map_err(ApiError::Database)?;
+        
+        info!("Settlement {} marked as permanently failed: {}", settlement_id, error_message);
+        Ok(())
     }
 
     /// Increment retry count for a settlement

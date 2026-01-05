@@ -10,6 +10,7 @@ use reqwest::Client;
 
 use crate::database::schema::types::OrderStatus;
 use crate::error::ApiError;
+use crate::handlers::websocket::broadcaster::broadcast_p2p_order_update;
 use super::MarketClearingService;
 use super::types::{OrderMatch, Settlement};
 
@@ -93,6 +94,19 @@ impl MarketClearingService {
                             );
                             self.update_order_status(buy_order.order_id, OrderStatus::Filled)
                                 .await?;
+                            
+                            // Broadcast fully filled status
+                            let _ = broadcast_p2p_order_update(
+                                buy_order.order_id,
+                                buy_order.user_id,
+                                "buy".to_string(),
+                                "filled".to_string(),
+                                buy_order.original_amount.to_string(),
+                                buy_order.original_amount.to_string(),
+                                "0".to_string(),
+                                buy_order.price_per_kwh.to_string(),
+                            ).await;
+                            
                             buy_orders.remove(0);
                         } else {
                             info!(
@@ -104,6 +118,19 @@ impl MarketClearingService {
                                 match_amount_clone.clone(),
                             )
                             .await?;
+                            
+                            // Broadcast partial fill status
+                            let filled = buy_order.original_amount - buy_order.energy_amount;
+                            let _ = broadcast_p2p_order_update(
+                                buy_order.order_id,
+                                buy_order.user_id,
+                                "buy".to_string(),
+                                "partially_filled".to_string(),
+                                buy_order.original_amount.to_string(),
+                                filled.to_string(),
+                                buy_order.energy_amount.to_string(),
+                                buy_order.price_per_kwh.to_string(),
+                            ).await;
                         }
 
                         info!(
@@ -117,6 +144,19 @@ impl MarketClearingService {
                             );
                             self.update_order_status(sell_order.order_id, OrderStatus::Filled)
                                 .await?;
+                            
+                            // Broadcast fully filled status
+                            let _ = broadcast_p2p_order_update(
+                                sell_order.order_id,
+                                sell_order.user_id,
+                                "sell".to_string(),
+                                "filled".to_string(),
+                                sell_order.original_amount.to_string(),
+                                sell_order.original_amount.to_string(),
+                                "0".to_string(),
+                                sell_order.price_per_kwh.to_string(),
+                            ).await;
+                            
                             sell_orders.remove(0);
                         } else {
                             info!(
@@ -128,6 +168,19 @@ impl MarketClearingService {
                                 match_amount_clone.clone(),
                             )
                             .await?;
+                            
+                            // Broadcast partial fill status
+                            let filled = sell_order.original_amount - sell_order.energy_amount;
+                            let _ = broadcast_p2p_order_update(
+                                sell_order.order_id,
+                                sell_order.user_id,
+                                "sell".to_string(),
+                                "partially_filled".to_string(),
+                                sell_order.original_amount.to_string(),
+                                filled.to_string(),
+                                sell_order.energy_amount.to_string(),
+                                sell_order.price_per_kwh.to_string(),
+                            ).await;
                         }
                     }
                 } else {
@@ -232,7 +285,7 @@ impl MarketClearingService {
         .await?;
 
         let sell_order = sqlx::query!(
-            "SELECT user_id, zone_id FROM trading_orders WHERE id = $1",
+            "SELECT user_id, zone_id, meter_id FROM trading_orders WHERE id = $1",
             order_match.sell_order_id
         )
         .fetch_one(&self.db)
@@ -311,8 +364,8 @@ impl MarketClearingService {
 
         // Explicit check to avoid pattern match Unsized error
         if buyer_wallet_addr.is_some() && seller_wallet_addr.is_some() {
-            let buyer_wallet_str = buyer_wallet_addr.unwrap();
-            let seller_wallet_str = seller_wallet_addr.unwrap();
+            let _buyer_wallet_str = buyer_wallet_addr.as_ref().unwrap();
+            let _seller_wallet_str = seller_wallet_addr.as_ref().unwrap();
             
             let blockchain_result = async {
                 let authority_keypair = self
@@ -326,9 +379,9 @@ impl MarketClearingService {
                 let token_mint = Pubkey::from_str(&token_mint_str)
                     .map_err(|e| format!("Invalid mint: {}", e))?;
 
-                let buyer_wallet = Pubkey::from_str(&buyer_wallet_str)
+                let buyer_wallet = Pubkey::from_str(buyer_wallet_addr.as_ref().unwrap())
                     .map_err(|e| format!("Invalid buyer wallet: {}", e))?;
-                let seller_wallet = Pubkey::from_str(&seller_wallet_str)
+                let seller_wallet = Pubkey::from_str(seller_wallet_addr.as_ref().unwrap())
                     .map_err(|e| format!("Invalid seller wallet: {}", e))?;
 
                 // 2. Ensure ATAs exist
@@ -437,6 +490,51 @@ impl MarketClearingService {
         )
         .execute(&self.db)
         .await?;
+
+        // =================================================================
+        // NEW: Automated REC Issuance
+        // =================================================================
+        if let Some(meter_id) = sell_order.meter_id {
+            info!("🌿 Triggering automated REC issuance for settlement {} (Meter: {})", settlement.id, meter_id);
+            
+            let erc_service = self.erc_service.clone();
+            let seller_id = sell_order.user_id;
+            let seller_wallet_str = seller_wallet_addr.clone().unwrap_or_default();
+            let energy_amount = settlement.energy_amount;
+            let settlement_id = settlement.id;
+            
+            // Fetch meter serial for REC metadata
+            let meter_serial = sqlx::query!("SELECT serial_number FROM meters WHERE id = $1", meter_id)
+                .fetch_optional(&self.db)
+                .await
+                .ok()
+                .flatten()
+                .map(|r| r.serial_number)
+                .unwrap_or_else(|| meter_id.to_string());
+
+            tokio::spawn(async move {
+                let cert_request = crate::services::erc::IssueErcRequest {
+                    wallet_address: seller_wallet_str,
+                    meter_id: Some(meter_serial),
+                    kwh_amount: energy_amount,
+                    expiry_date: Some(Utc::now() + chrono::Duration::days(365)), // 1 year expiry
+                    metadata: Some(serde_json::json!({
+                        "renewable_source": "Solar",
+                        "validation_data": format!("Settlement: {}", settlement_id)
+                    })),
+                };
+
+                // Use a system/platform authority as issuer for automated issuance
+                // For now, using seller wallet as placeholder issuer if needed, 
+                // but ErcService::issue_certificate takes an issuer_wallet string.
+                let issuer_wallet = "PlatformAuthority"; 
+
+                match erc_service.issue_certificate(seller_id, issuer_wallet, cert_request, Some(settlement_id)).await {
+                    Ok(cert) => info!("✅ Automated REC issued: {} for settlement {}", cert.certificate_id, settlement_id),
+                    Err(e) => error!("❌ Failed to issue automated REC: {}", e),
+                }
+            });
+        }
 
         Ok(settlement)
     }

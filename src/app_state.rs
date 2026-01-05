@@ -47,6 +47,7 @@ pub struct AppState {
     pub dashboard_service: services::DashboardService,
     pub event_processor: services::EventProcessorService,
     pub webhook_service: services::WebhookService,
+    pub erc_service: services::ErcService,
     
     /// Prometheus metrics handle
     pub metrics_handle: metrics_exporter_prometheus::PrometheusHandle,

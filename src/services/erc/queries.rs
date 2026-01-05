@@ -7,7 +7,7 @@ use crate::services::erc::types::{CertificateStats, ErcCertificate};
 use crate::services::BlockchainService;
 
 /// Manager for Energy Renewable Certificate queries
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ErcQueryManager {
     db_pool: PgPool,
     #[allow(dead_code)]
@@ -101,6 +101,7 @@ impl ErcQueryManager {
                 status,
                 blockchain_tx_signature,
                 metadata,
+                settlement_id,
                 created_at as "created_at!",
                 updated_at as "updated_at!"
             FROM erc_certificates
@@ -124,7 +125,7 @@ impl ErcQueryManager {
                 id, certificate_id, user_id, wallet_address,
                 kwh_amount, issue_date, expiry_date,
                 issuer_wallet, status,
-                blockchain_tx_signature, metadata,
+                blockchain_tx_signature, metadata, settlement_id,
                 created_at as "created_at!",
                 updated_at as "updated_at!"
             FROM erc_certificates
@@ -159,7 +160,7 @@ impl ErcQueryManager {
                     id, certificate_id, user_id, wallet_address,
                     kwh_amount, issue_date, expiry_date,
                     issuer_wallet, status,
-                    blockchain_tx_signature, metadata,
+                    blockchain_tx_signature, metadata, settlement_id,
                     created_at as "created_at!",
                 updated_at as "updated_at!"
                 FROM erc_certificates
@@ -176,7 +177,7 @@ impl ErcQueryManager {
                     id, certificate_id, user_id, wallet_address,
                     kwh_amount, issue_date, expiry_date,
                     issuer_wallet, status,
-                    blockchain_tx_signature, metadata,
+                    blockchain_tx_signature, metadata, settlement_id,
                     created_at as "created_at!",
                 updated_at as "updated_at!"
                 FROM erc_certificates
@@ -258,6 +259,7 @@ impl ErcQueryManager {
                 status,
                 blockchain_tx_signature,
                 metadata,
+                settlement_id,
                 created_at as "created_at!",
                 updated_at as "updated_at!"
             FROM erc_certificates

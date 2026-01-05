@@ -8,6 +8,7 @@ use super::orders::{create_order, cancel_order, update_order, get_order_book, ge
 use super::blockchain::{get_blockchain_market_data, match_blockchain_orders};
 use super::p2p::{calculate_p2p_cost, get_p2p_market_prices};
 use super::status::{get_matching_status, get_settlement_stats};
+use super::revenue::{get_revenue_summary, get_revenue_records};
 
 /// Build the v1 trading routes
 pub fn v1_trading_routes() -> Router<AppState> {
@@ -35,6 +36,10 @@ pub fn v1_trading_routes() -> Router<AppState> {
         // Status & Monitoring
         .route("/matching-status", get(get_matching_status))
         .route("/settlement-stats", get(get_settlement_stats))
+        
+        // Revenue (Admin)
+        .route("/revenue/summary", get(get_revenue_summary))
+        .route("/revenue/records", get(get_revenue_records))
         
         // Admin
         .route("/admin/match-orders", post(match_blockchain_orders))

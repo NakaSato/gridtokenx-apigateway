@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use sqlx::PgPool;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AggregatedIssuance {
     db_pool: PgPool,
     #[allow(dead_code)]
@@ -52,6 +52,7 @@ impl AggregatedIssuance {
                 status,
                 blockchain_tx_signature,
                 metadata,
+                settlement_id,
                 created_at as "created_at!", 
                 updated_at as "updated_at!"
             "#,

@@ -20,7 +20,8 @@ pub struct ErcCertificate {
     pub issuer_wallet: Option<String>,
     pub status: String,
     pub blockchain_tx_signature: Option<String>,
-    pub metadata: Option<serde_json::Value>, /* Changed from serde_json::Value to Option<serde_json::Value> based on handler usage `updated_certificate.metadata`/`cert.metadata` vs my types.rs `metadata: Value` */
+    pub metadata: Option<serde_json::Value>,
+    pub settlement_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
