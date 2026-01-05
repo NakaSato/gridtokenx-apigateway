@@ -169,6 +169,9 @@ pub struct MeterResponse {
     /// Longitude coordinate for map display
     #[serde(skip_serializing_if = "Option::is_none")]
     pub longitude: Option<f64>,
+    /// Zone ID for the meter
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zone_id: Option<i32>,
 }
 
 /// Public Meter Response (for unauthenticated public API)
@@ -249,6 +252,8 @@ pub struct RegisterMeterRequest {
     pub latitude: Option<f64>,
     /// Longitude coordinate for map display
     pub longitude: Option<f64>,
+    /// Zone ID for the meter
+    pub zone_id: Option<i32>,
 }
 
 /// Meter Registration Response

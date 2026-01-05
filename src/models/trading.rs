@@ -26,6 +26,7 @@ pub struct TradingOrder {
     pub filled_at: Option<DateTime<Utc>>,
     pub epoch_id: Option<Uuid>,
     pub zone_id: Option<i32>,
+    pub refund_tx_signature: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -43,6 +44,7 @@ pub struct TradingOrderDb {
     pub filled_at: Option<DateTime<Utc>>,
     pub epoch_id: Option<Uuid>,
     pub zone_id: Option<i32>,
+    pub refund_tx_signature: Option<String>,
 }
 
 impl From<TradingOrderDb> for TradingOrder {
@@ -61,8 +63,24 @@ impl From<TradingOrderDb> for TradingOrder {
             filled_at: db.filled_at,
             epoch_id: db.epoch_id,
             zone_id: db.zone_id,
+            refund_tx_signature: db.refund_tx_signature,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
+pub struct EscrowRecord {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub order_id: Option<Uuid>,
+    #[schema(value_type = String)]
+    pub amount: Decimal,
+    pub asset_type: String, // 'currency', 'energy'
+    pub escrow_type: String, // 'buy_lock', 'sell_lock'
+    pub status: String, // 'locked', 'released', 'refunded'
+    pub description: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]

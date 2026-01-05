@@ -74,6 +74,26 @@ pub async fn create_order(
         tracing::info!("P2P Order signature verified successfully");
     }
 
+    // Auto-detect zone if not provided
+    let zone_id = if let Some(zid) = payload.zone_id {
+        Some(zid)
+    } else {
+        // Try to find user's zone from their registered meter
+        let meter_zone = sqlx::query!(
+            "SELECT zone_id FROM meter_registry WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+            user.0.sub
+        )
+        .fetch_optional(&state.db)
+        .await
+        .unwrap_or(None)
+        .and_then(|r| r.zone_id);
+        
+        if meter_zone.is_none() {
+            tracing::warn!("User {} has no registered meter/zone. Defaulting to unknown zone.", user.0.sub);
+        }
+        meter_zone
+    };
+
     // Call MarketClearingService to handle order creation (DB + On-Chain)
     let order_id = state
         .market_clearing
@@ -84,7 +104,7 @@ pub async fn create_order(
             payload.energy_amount,
             payload.price_per_kwh,
             payload.expiry_time,
-            payload.zone_id,
+            zone_id,
         )
         .await
         .map_err(|e| {

@@ -32,12 +32,33 @@ pub mod types {
         Sell,
     }
 
+    impl OrderType {
+        pub fn as_str(&self) -> &'static str {
+            match self {
+                OrderType::Limit => "limit",
+                OrderType::Market => "market",
+            }
+        }
+    }
+
+    impl fmt::Display for OrderType {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.as_str())
+        }
+    }
+
+    impl OrderSide {
+        pub fn as_str(&self) -> &'static str {
+            match self {
+                OrderSide::Buy => "buy",
+                OrderSide::Sell => "sell",
+            }
+        }
+    }
+
     impl fmt::Display for OrderSide {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            match self {
-                OrderSide::Buy => write!(f, "buy"),
-                OrderSide::Sell => write!(f, "sell"),
-            }
+            write!(f, "{}", self.as_str())
         }
     }
 

@@ -121,8 +121,9 @@ pub async fn register_meter(
             manufacturer,
             installation_date,
             created_at,
-            updated_at
-        ) VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8, NOW(), NOW())
+            updated_at,
+            zone_id
+        ) VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8, NOW(), NOW(), $9)
         RETURNING id
         "#,
         user.sub,
@@ -132,7 +133,8 @@ pub async fn register_meter(
         request.meter_type,
         request.location_address,
         request.manufacturer,
-        request.installation_date
+        request.installation_date,
+        request.zone_id
     )
     .fetch_one(&state.db)
     .await
@@ -213,7 +215,8 @@ pub async fn get_user_meters(
             location_address,
             verification_status,
             verified_at,
-            created_at
+            created_at,
+            zone_id
         FROM meter_registry
         WHERE user_id = $1
         ORDER BY created_at DESC

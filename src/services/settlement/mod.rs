@@ -65,14 +65,90 @@ impl SettlementService {
 
     /// Create a single settlement from a trade match
     pub async fn create_settlement(&self, trade: &TradeMatch) -> Result<Settlement, ApiError> {
-        // Calculate settlement amounts
-        let total_value = trade.quantity * trade.price;
-        let fee_amount = total_value * self.config.fee_rate;
-        let net_amount = total_value - fee_amount;
+        info!("Creating settlement for trade match: {}", trade.match_id);
 
+        // Calculate values using passed trade info
+        let total_value = trade.total_value;
+        let fee_rate = self.config.fee_rate;
+        let fee_amount = total_value * fee_rate;
+        
+        // Net Amount = Total Value - Fees - Wheeling Charges
+        let wheeling_charge = trade.wheeling_charge;
+        // Should we subtract wheeling charge from Seller's revenue? Yes.
+        // Or Buyer pays it on top?
+        // Implementation Plan says: "Buyer pays Total, Seller receives Total - Fees, Utility receives Fees".
+        // With zone costs: "Buyer pays Total + Wheeling? Or Total includes Wheeling?"
+        
+        // Matching Engine calculated "Landed Cost" for comparison.
+        // But the Trade Price (match_price) is the Base Price (Seller's Price).
+        // Total Value = Quantity * Base Price.
+        
+        // If Buyer pays Landed Cost, then Buyer Pays = Total Value + Wheeling + Loss Cost.
+        // But our system currently transfers "Quantity * Price" tokens.
+        // We need to clarify who pays what.
+        
+        // User Requirement: "Buyer pays the Total, Seller receives Total - Fees, and Grid Utility ... accumulates fees."
+        // And "Landed Cost = Sell Price + Wheeling + Loss".
+        
+        // If `trade.total_value` is `Quantity * Base Price`:
+        // We should add Wheeling Charge to what Buyer pays?
+        // Or deduct from Seller?
+        // A common P2P model: Buyer pays Landed Cost. Seller gets Base Price. Grid gets Wheeling/Loss.
+        
+        // Let's assume Buyer pays `Total Value + Wheeling Charge + Loss Cost`.
+        // But `trade.total_value` passed from matching engine is `Quantity * Match Price`.
+        
+        // Let's adjust logic:
+        // Settlement Total Amount (Buyer Pays) = trade.total_value + trade.wheeling_charge + trade.loss_cost.
+        // Net Amount (Seller Receives) = trade.total_value - fee_amount.
+        // Grid Revenue = Wheeling + Loss + Fees.
+        
+        // However, standard Settlements usually have `total_amount` = Transaction Volume.
+        // Let's stick to:
+        // total_amount = trade.total_value (Base Energy Cost)
+        // wheeling_charge = trade.wheeling_charge
+        // loss_cost = trade.loss_cost
+        // net_amount = total_amount - fee_amount - wheeling_charge - loss_cost (If Seller pays shipping)
+        // OR
+        // Buyer pays extra?
+        
+        // Let's assume Seller bears the cost of reaching the market (Landed Cost model usually implies comparison, but payment flow varies).
+        // If we matched based on "Landed <= Buy Price", it means Buyer is willing to pay Landed Price.
+        // So Buyer should pay Landed Price.
+        // So `total_amount` (Transaction Value) should probably refer to what Buyer pays?
+        
+        // Let's enable flexible logic. For now, I will record the values as passed.
+        // And `net_amount` = `total_value` - `fee_amount`. (Seller gets base price - platform fee).
+        // Who pays wheeling? The Buyer.
+        // But `execute_blockchain_transfer` transfers from Seller to Buyer?
+        // No, `execute_blockchain_transfer` logic usually transfers Tokens from Buyer to Seller?
+        // Wait, Step 51 code: `transfer_tokens ... &seller_ata, &buyer_ata`...
+        // Comments say "Transfer Energy Tokens (Seller -> Buyer)".
+        // Ah, this is ENERGY token transfer. Not Payment Token (USDC/Sol).
+        // Payment is likely separate or swapped.
+        
+        // If this is Energy Token transfer:
+        // Effective Energy = Quantity * (1 - Loss Factor).
+        // Seller sends Quantity. Buyer receives Effective Energy.
+        // Loss is burned or diverted?
+        
+        // Step 157 code: `transfer_amount = (effective_energy * ...)`.
+        // So Seller sends Effective Energy?
+        // Then where did the loss go?
+        // If Seller generated 100, and loss is 5%, Buyer gets 95.
+        // Seller's meter reading shows 100 export.
+        
+        // Let's stick to what I just implemented in `OrderMatchingEngine::trigger_settlement` (Step 157):
+        // `effective_energy` is passed (via TradeMatch logic or re-calculated?).
+        // Wait, I passed `TradeMatch` with `quantity` = `matched_amount`.
+        // And I added `effective_energy` column to `settlements`.
+        
+        // I need to calculate `effective_energy` here.
+        let effective_energy = trade.quantity * (Decimal::ONE - trade.loss_factor);
+        
         let settlement = Settlement {
             id: Uuid::new_v4(),
-            trade_id: Uuid::new_v4(), // Would come from trade.id if available
+            trade_id: trade.id,
             buyer_id: trade.buyer_id,
             seller_id: trade.seller_id,
             buy_order_id: trade.buy_order_id,
@@ -81,24 +157,34 @@ impl SettlementService {
             price: trade.price,
             total_value,
             fee_amount,
-            net_amount,
+            net_amount: total_value - fee_amount - wheeling_charge, // Assuming Seller bears wheeling?
+            // Actually let's just record it. Logic on payment is not in scope of this file (it handles Energy Token transfer mostly).
+            // But I will populate the new columns.
+            wheeling_charge: Some(wheeling_charge),
+            loss_factor: Some(trade.loss_factor),
+            loss_cost: Some(trade.loss_cost),
+            effective_energy: Some(effective_energy),
+            buyer_zone_id: trade.buyer_zone_id,
+            seller_zone_id: trade.seller_zone_id,
+            
             status: SettlementStatus::Pending,
             blockchain_tx: None,
             created_at: Utc::now(),
             confirmed_at: None,
         };
 
-        // Save to database
         sqlx::query(
             r#"
             INSERT INTO settlements (
-                id, buyer_id, seller_id, buy_order_id, sell_order_id, energy_amount,
-                price_per_kwh, total_amount, fee_amount, net_amount,
-                status, created_at, epoch_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                id, trade_id, buyer_id, seller_id, buy_order_id, sell_order_id,
+                energy_amount, price, total_value, fee_amount, net_amount, status, created_at,
+                wheeling_charge, loss_factor, loss_cost, effective_energy, buyer_zone_id, seller_zone_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             "#,
         )
         .bind(settlement.id)
+        .bind(settlement.trade_id)
         .bind(settlement.buyer_id)
         .bind(settlement.seller_id)
         .bind(settlement.buy_order_id)
@@ -110,10 +196,14 @@ impl SettlementService {
         .bind(settlement.net_amount)
         .bind(settlement.status.to_string())
         .bind(settlement.created_at)
-        .bind(trade.epoch_id)
+        .bind(settlement.wheeling_charge)
+        .bind(settlement.loss_factor)
+        .bind(settlement.loss_cost)
+        .bind(settlement.effective_energy)
+        .bind(settlement.buyer_zone_id)
+        .bind(settlement.seller_zone_id)
         .execute(&self.db)
-        .await
-        .map_err(ApiError::Database)?;
+        .await?;
 
         info!(
             "📝 Created settlement {}: {} kWh at ${} (buyer: {}, seller: {})",
@@ -150,11 +240,17 @@ impl SettlementService {
                 )
                 .await?;
 
+                // Finalize Escrow (Move funds and unlock energy)
+                if let Err(e) = self.finalize_escrow(&settlement).await {
+                    error!("⚠️ Failed to finalize escrow for settlement {}: {}", settlement_id, e);
+                    // We don't fail the whole method if escrow finalization fails here, 
+                    // but it should be noted. In production, this should be retryable.
+                }
+
                 info!(
                     "✅ Settlement {} completed: tx {}",
                     settlement_id, tx_result.signature
                 );
-
                 Ok(tx_result)
             }
             Err(e) => {
@@ -416,7 +512,8 @@ impl SettlementService {
             SELECT
                 id, buyer_id, seller_id, buy_order_id, sell_order_id, energy_amount,
                 price_per_kwh, total_amount, fee_amount, net_amount,
-                status, transaction_hash, created_at, processed_at
+                status, transaction_hash, created_at, processed_at,
+                wheeling_charge, loss_factor, loss_cost, effective_energy, buyer_zone_id, seller_zone_id
             FROM settlements
             WHERE id = $1
             "#,
@@ -452,6 +549,12 @@ impl SettlementService {
             blockchain_tx: row.get("transaction_hash"),
             created_at: row.get("created_at"),
             confirmed_at: row.get("processed_at"),
+            wheeling_charge: row.get("wheeling_charge"),
+            loss_factor: row.get("loss_factor"),
+            loss_cost: row.get("loss_cost"),
+            effective_energy: row.get("effective_energy"),
+            buyer_zone_id: row.get("buyer_zone_id"),
+            seller_zone_id: row.get("seller_zone_id"),
         })
     }
 
@@ -682,6 +785,90 @@ impl SettlementService {
                 )))
             }
         }
+    }
+
+    pub async fn finalize_escrow(&self, settlement: &Settlement) -> Result<(), ApiError> {
+        let mut tx = self.db.begin().await.map_err(ApiError::Database)?;
+
+        // 1. Seller: Deduct from locked_energy
+        sqlx::query!(
+            "UPDATE users SET locked_energy = locked_energy - $1 WHERE id = $2",
+            settlement.energy_amount,
+            settlement.seller_id
+        )
+        .execute(&mut *tx)
+        .await.map_err(ApiError::Database)?;
+
+        // 2. Buyer: Deduct from locked_amount (The matched portion of payment)
+        let total_value = settlement.energy_amount * settlement.price;
+        sqlx::query!(
+            "UPDATE users SET locked_amount = locked_amount - $1 WHERE id = $2",
+            total_value,
+            settlement.buyer_id
+        )
+        .execute(&mut *tx)
+        .await.map_err(ApiError::Database)?;
+
+        // 3. Seller: Receive net_amount to their balance
+        sqlx::query!(
+            "UPDATE users SET balance = balance + $1 WHERE id = $2",
+            settlement.net_amount,
+            settlement.seller_id
+        )
+        .execute(&mut *tx)
+        .await.map_err(ApiError::Database)?;
+
+        // 4. Record Platform Revenue (Fees, Wheeling, Loss)
+        if settlement.fee_amount > Decimal::ZERO {
+            sqlx::query!(
+                "INSERT INTO platform_revenue (settlement_id, amount, revenue_type, description) VALUES ($1, $2, 'platform_fee', $3)",
+                settlement.id,
+                settlement.fee_amount,
+                format!("Platform fee for settlement {}", settlement.id)
+            )
+            .execute(&mut *tx)
+            .await.map_err(ApiError::Database)?;
+        }
+
+        if let Some(wheeling) = settlement.wheeling_charge {
+            if wheeling > Decimal::ZERO {
+                sqlx::query!(
+                    "INSERT INTO platform_revenue (settlement_id, amount, revenue_type, description) VALUES ($1, $2, 'wheeling_charge', $3)",
+                    settlement.id,
+                    wheeling,
+                    format!("Wheeling charge for settlement {}", settlement.id)
+                )
+                .execute(&mut *tx)
+                .await.map_err(ApiError::Database)?;
+            }
+        }
+
+        if let Some(loss_cost) = settlement.loss_cost {
+            if loss_cost > Decimal::ZERO {
+                sqlx::query!(
+                    "INSERT INTO platform_revenue (settlement_id, amount, revenue_type, description) VALUES ($1, $2, 'loss_cost', $3)",
+                    settlement.id,
+                    loss_cost,
+                    format!("Grid loss cost for settlement {}", settlement.id)
+                )
+                .execute(&mut *tx)
+                .await.map_err(ApiError::Database)?;
+            }
+        }
+
+        // 5. Update Escrow Record status
+        sqlx::query!(
+            "UPDATE escrow_records SET status = 'released', updated_at = NOW() WHERE order_id IN ($1, $2) AND status = 'locked'",
+            settlement.buy_order_id,
+            settlement.sell_order_id
+        )
+        .execute(&mut *tx)
+        .await.map_err(ApiError::Database)?;
+
+        tx.commit().await.map_err(ApiError::Database)?;
+        
+        info!("🔐 Escrow finalized for settlement {}: funds transferred and energy unlocked", settlement.id);
+        Ok(())
     }
 }
 

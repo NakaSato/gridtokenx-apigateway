@@ -1,57 +1,29 @@
-# =============================================================================
-# API Gateway Dockerfile - Optimized Multi-Stage Build
-# Uses cargo-chef for dependency caching to speed up rebuilds
-# =============================================================================
+# Build Stage
+FROM rust:1.81-slim-bookworm as builder
 
-# Stage 1: Planner - Generate recipe for dependencies
-FROM lukemathwalker/cargo-chef:latest-rust-1 AS planner
-WORKDIR /app
+WORKDIR /usr/src/app
 COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
-
-# Stage 2: Builder - Build dependencies (cached) then app
-FROM lukemathwalker/cargo-chef:latest-rust-1 AS builder
-WORKDIR /app
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y pkg-config libssl-dev libpq-dev
 
-# Enable SQLx offline mode (uses .sqlx cache)
-ENV SQLX_OFFLINE=true
-
-# Copy recipe and build dependencies first (cached layer)
-COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
-
-# Now copy source code and build application
-COPY . .
+# Build the application
+# We use --bin api-gateway to specifically build the gateway binary
 RUN cargo build --release --bin api-gateway
 
-# Stage 3: Runtime - Minimal production image
-FROM debian:bookworm-slim AS runtime
+# Runtime Stage
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y libssl-dev libpq-dev ca-certificates && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Install only runtime dependencies
-RUN apt-get update && apt-get install -y \
-    libssl3 \
-    ca-certificates \
-    curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd -r -s /bin/false apigateway
+# Copy the binary from builder
+COPY --from=builder /usr/src/app/target/release/api-gateway /app/api-gateway
 
-# Copy binary from builder
-COPY --from=builder /app/target/release/api-gateway /usr/local/bin/
-
-# Run as non-root user
-USER apigateway
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:4000/health || exit 1
-
+# Expose port (adjust if needed)
 EXPOSE 4000
 
-CMD ["api-gateway"]
+# Run the binary
+CMD ["./api-gateway"]

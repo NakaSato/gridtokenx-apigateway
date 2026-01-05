@@ -43,6 +43,13 @@ pub struct Settlement {
     pub blockchain_tx: Option<String>,
     pub created_at: DateTime<Utc>,
     pub confirmed_at: Option<DateTime<Utc>>,
+    // Zone and Cost allocations
+    pub buyer_zone_id: Option<i32>,
+    pub seller_zone_id: Option<i32>,
+    pub wheeling_charge: Option<Decimal>,
+    pub loss_cost: Option<Decimal>,
+    pub loss_factor: Option<Decimal>,
+    pub effective_energy: Option<Decimal>,
 }
 
 /// Settlement transaction result

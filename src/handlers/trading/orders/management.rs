@@ -62,7 +62,28 @@ pub async fn cancel_order(
     .await
     .map_err(ApiError::Database)?;
 
-    // 4. Return updated order
+    // 4. Refund Escrow for remaining portion
+    use rust_decimal::Decimal;
+    use crate::database::schema::types::OrderSide;
+    
+    let remaining_amount = updated_order.energy_amount - updated_order.filled_amount.unwrap_or(Decimal::ZERO);
+    if remaining_amount > Decimal::ZERO {
+        match updated_order.side {
+            OrderSide::Buy => {
+                let refund_value = remaining_amount * updated_order.price_per_kwh;
+                if let Err(e) = state.market_clearing.unlock_funds(user.0.sub, order_id, refund_value, "Order Cancelled").await {
+                    tracing::error!("Failed to refund funds for cancelled order {}: {}", order_id, e);
+                }
+            }
+            OrderSide::Sell => {
+                if let Err(e) = state.market_clearing.unlock_energy(user.0.sub, order_id, remaining_amount, "Order Cancelled").await {
+                    tracing::error!("Failed to unlock energy for cancelled order {}: {}", order_id, e);
+                }
+            }
+        }
+    }
+
+    // 5. Return updated order
     Ok(Json(updated_order.into()))
 }
 
@@ -128,7 +149,36 @@ pub async fn update_order(
     let new_energy = payload.energy_amount.unwrap_or(order.energy_amount);
     let new_price = payload.price_per_kwh.unwrap_or(order.price_per_kwh);
 
-    // 5. Update DB
+    // 5. Adjust Escrow
+    use crate::database::schema::types::OrderSide;
+    match order.side {
+        OrderSide::Buy => {
+            let old_escrow = order.energy_amount * order.price_per_kwh;
+            let new_escrow = new_energy * new_price;
+            if new_escrow > old_escrow {
+                if let Err(e) = state.market_clearing.lock_funds(user.0.sub, order_id, new_escrow - old_escrow).await {
+                    return Err(ApiError::BadRequest(format!("Insufficient balance for update: {}", e)));
+                }
+            } else if new_escrow < old_escrow {
+                if let Err(e) = state.market_clearing.unlock_funds(user.0.sub, order_id, old_escrow - new_escrow, "Order Updated").await {
+                    tracing::error!("Failed to adjust escrow for updated order {}: {}", order_id, e);
+                }
+            }
+        }
+        OrderSide::Sell => {
+            if new_energy > order.energy_amount {
+                if let Err(e) = state.market_clearing.lock_energy(user.0.sub, order_id, new_energy - order.energy_amount).await {
+                    return Err(ApiError::Internal(format!("Energy lock failed: {}", e)));
+                }
+            } else if new_energy < order.energy_amount {
+                if let Err(e) = state.market_clearing.unlock_energy(user.0.sub, order_id, order.energy_amount - new_energy, "Order Updated").await {
+                    tracing::error!("Failed to adjust energy lock for updated order {}: {}", order_id, e);
+                }
+            }
+        }
+    }
+
+    // 6. Update DB
     let updated_order = sqlx::query_as::<_, crate::models::trading::TradingOrderDb>(
         r#"
         UPDATE trading_orders 

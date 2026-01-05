@@ -41,6 +41,11 @@ pub struct TradeMatch {
     pub quantity: Decimal,
     pub price: Decimal,
     pub total_value: Decimal,
+    pub wheeling_charge: Decimal,
+    pub loss_factor: Decimal,
+    pub loss_cost: Decimal,
+    pub buyer_zone_id: Option<i32>,
+    pub seller_zone_id: Option<i32>,
     pub matched_at: DateTime<Utc>,
 }
 

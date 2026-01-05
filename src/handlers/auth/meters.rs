@@ -48,8 +48,8 @@ pub async fn get_my_meters(
 
     if let Ok(claims) = state.jwt_service.decode_token(token) {
         // Query meters from database including coordinates
-        let meters_result = sqlx::query_as::<_, (Uuid, String, String, String, bool, Option<String>, Option<f64>, Option<f64>)>(
-            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude
+        let meters_result = sqlx::query_as::<_, (Uuid, String, String, String, bool, Option<String>, Option<f64>, Option<f64>, Option<i32>)>(
+            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude, m.zone_id
              FROM meters m
              JOIN users u ON m.user_id = u.id
              WHERE m.user_id = $1"
@@ -59,7 +59,7 @@ pub async fn get_my_meters(
         .await;
 
         if let Ok(meters) = meters_result {
-            let responses: Vec<MeterResponse> = meters.iter().map(|(id, serial, mtype, loc, verified, wallet, lat, lng)| {
+            let responses: Vec<MeterResponse> = meters.iter().map(|(id, serial, mtype, loc, verified, wallet, lat, lng, zone)| {
                 MeterResponse {
                     id: *id,
                     serial_number: serial.clone(),
@@ -69,6 +69,7 @@ pub async fn get_my_meters(
                     wallet_address: wallet.clone().unwrap_or_default(),
                     latitude: *lat,
                     longitude: *lng,
+                    zone_id: *zone,
                 }
             }).collect();
             
@@ -94,8 +95,8 @@ pub async fn get_registered_meters(
 ) -> Json<Vec<MeterResponse>> {
     info!("📊 Get all registered meters");
     
-    let meters_result = sqlx::query_as::<_, (Uuid, String, String, String, bool, Option<String>, Option<f64>, Option<f64>)>(
-        "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude
+    let meters_result = sqlx::query_as::<_, (Uuid, String, String, String, bool, Option<String>, Option<f64>, Option<f64>, Option<i32>)>(
+        "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude, m.zone_id
          FROM meters m
          JOIN users u ON m.user_id = u.id
          WHERE m.is_verified = true"
@@ -105,7 +106,7 @@ pub async fn get_registered_meters(
 
     match meters_result {
         Ok(meters) => {
-            let responses: Vec<MeterResponse> = meters.iter().map(|(id, serial, mtype, loc, verified, wallet, lat, lng)| {
+            let responses: Vec<MeterResponse> = meters.iter().map(|(id, serial, mtype, loc, verified, wallet, lat, lng, zone)| {
                 MeterResponse {
                     id: *id,
                     serial_number: serial.clone(),
@@ -115,6 +116,7 @@ pub async fn get_registered_meters(
                     wallet_address: wallet.clone().unwrap_or_default(),
                     latitude: *lat,
                     longitude: *lng,
+                    zone_id: *zone,
                 }
             }).collect();
             
@@ -369,10 +371,10 @@ pub async fn register_meter(
         });
     }
 
-    // Insert meter into database with coordinates
+    // Insert meter into database with coordinates and zone
     let insert_result = sqlx::query(
-        "INSERT INTO meters (id, user_id, serial_number, meter_type, location, latitude, longitude, is_verified, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true, NOW(), NOW())"
+        "INSERT INTO meters (id, user_id, serial_number, meter_type, location, latitude, longitude, zone_id, is_verified, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, NOW(), NOW())"
     )
     .bind(meter_id)
     .bind(user_id)
@@ -381,23 +383,25 @@ pub async fn register_meter(
     .bind(&location)
     .bind(request.latitude)
     .bind(request.longitude)
+    .bind(request.zone_id)
     .execute(&state.db)
     .await;
 
     match insert_result {
         Ok(_) => {
-            info!("✅ Meter {} registered for user {}", request.serial_number, user_id);
+            info!("✅ Meter {} registered for user {} (Zone: {:?})", request.serial_number, user_id, request.zone_id);
             
             // Sync to meter_registry for FK constraints
             let _ = sqlx::query(
-                "INSERT INTO meter_registry (id, user_id, meter_serial, meter_type, location_address, meter_key_hash, verification_method, verification_status)
-                 VALUES ($1, $2, $3, $4, $5, 'mock_hash', 'serial', 'verified')"
+                "INSERT INTO meter_registry (id, user_id, meter_serial, meter_type, location_address, meter_key_hash, verification_method, verification_status, zone_id)
+                 VALUES ($1, $2, $3, $4, $5, 'mock_hash', 'serial', 'verified', $6)"
             )
             .bind(meter_id)
             .bind(user_id)
             .bind(&request.serial_number)
             .bind(&meter_type)
             .bind(&location)
+            .bind(request.zone_id)
             .execute(&state.db)
             .await
             .map_err(|e| error!("Failed to sync meter_registry: {}", e));
@@ -427,6 +431,7 @@ pub async fn register_meter(
                     wallet_address: wallet,
                     latitude: request.latitude,
                     longitude: request.longitude,
+                    zone_id: request.zone_id,
                 }),
             })
         }
@@ -542,26 +547,26 @@ pub async fn get_registered_meters_filtered(
     
     let query = match params.status.as_deref() {
         Some("verified") | Some("active") => {
-            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude
+            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude, m.zone_id
              FROM meters m JOIN users u ON m.user_id = u.id WHERE m.is_verified = true"
         }
         Some("pending") => {
-            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude
+            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude, m.zone_id
              FROM meters m JOIN users u ON m.user_id = u.id WHERE m.is_verified = false"
         }
         _ => {
-            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude
+            "SELECT m.id, m.serial_number, m.meter_type, m.location, m.is_verified, u.wallet_address, m.latitude, m.longitude, m.zone_id
              FROM meters m JOIN users u ON m.user_id = u.id"
         }
     };
 
-    let meters_result = sqlx::query_as::<_, (Uuid, String, String, String, bool, Option<String>, Option<f64>, Option<f64>)>(query)
+    let meters_result = sqlx::query_as::<_, (Uuid, String, String, String, bool, Option<String>, Option<f64>, Option<f64>, Option<i32>)>(query)
         .fetch_all(&state.db)
         .await;
 
     match meters_result {
         Ok(meters) => {
-            let responses: Vec<MeterResponse> = meters.iter().map(|(id, serial, mtype, loc, verified, wallet, lat, lng)| {
+            let responses: Vec<MeterResponse> = meters.iter().map(|(id, serial, mtype, loc, verified, wallet, lat, lng, zone)| {
                 MeterResponse {
                     id: *id,
                     serial_number: serial.clone(),
@@ -571,6 +576,7 @@ pub async fn get_registered_meters_filtered(
                     wallet_address: wallet.clone().unwrap_or_default(),
                     latitude: *lat,
                     longitude: *lng,
+                    zone_id: *zone,
                 }
             }).collect();
             Json(responses)

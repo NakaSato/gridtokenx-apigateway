@@ -4,7 +4,7 @@ use anyhow::Result;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use sqlx::PgPool;
-use sqlx::Row;
+
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -13,8 +13,8 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::{
-    database::schema::types::OrderStatus,
-    services::{market_clearing::TradeMatch, SettlementService, WebSocketService},
+    database::schema::types::{OrderStatus, OrderSide, OrderType},
+    services::{market_clearing::{TradeMatch, MarketClearingService}, SettlementService, WebSocketService, GridTopologyService},
     middleware::metrics::{track_order_matched, track_trading_operation},
 };
 
@@ -26,6 +26,8 @@ pub struct OrderMatchingEngine {
     match_interval_secs: u64,
     websocket_service: Option<WebSocketService>,
     settlement: Option<SettlementService>,
+    market_clearing: Option<MarketClearingService>,
+    grid_topology: GridTopologyService,
 }
 
 impl OrderMatchingEngine {
@@ -46,7 +48,15 @@ impl OrderMatchingEngine {
             match_interval_secs,
             websocket_service: None,
             settlement: None,
+            market_clearing: None,
+            grid_topology: GridTopologyService::new(),
         }
+    }
+
+    /// Set the Market Clearing service for processing escrow refunds
+    pub fn with_market_clearing(mut self, market_clearing: MarketClearingService) -> Self {
+        self.market_clearing = Some(market_clearing);
+        self
     }
 
     /// Set the WebSocket service for broadcasting match events
@@ -89,6 +99,78 @@ impl OrderMatchingEngine {
         info!("⏹️  Stopped automated order matching engine");
     }
 
+    /// Minimum trade amount in kWh to avoid dust
+    const MIN_TRADE_AMOUNT: Decimal = Decimal::from_parts(1, 1, 0, false, 0); // 0.1
+
+    /// Expire orders that have passed their expiration time
+    pub async fn expire_stale_orders(&self) -> Result<u64> {
+        let now = chrono::Utc::now();
+        
+        // Fetch stale orders that need expiry
+        let stale_orders = sqlx::query_as!(
+            crate::models::trading::TradingOrderDb,
+            r#"
+            SELECT 
+                id, user_id, order_type as "order_type!: OrderType", side as "side!: OrderSide", 
+                energy_amount, price_per_kwh, filled_amount, status as "status!: OrderStatus", 
+                expires_at, created_at, filled_at, epoch_id, zone_id, refund_tx_signature
+            FROM trading_orders 
+            WHERE status IN ('active', 'pending', 'partially_filled') 
+            AND expires_at < $1
+            "#,
+            now
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        let mut expired_count = 0;
+        for order in stale_orders {
+            info!("🕒 Expiring order {}: type={}, side={}, amount={}, status={}", 
+                order.id, order.order_type.as_str(), order.side.as_str(), order.energy_amount, order.status.as_str());
+
+            // 1. Update status to expired
+            sqlx::query(
+                "UPDATE trading_orders SET status = 'expired', updated_at = NOW() WHERE id = $1"
+            )
+            .bind(order.id)
+            .execute(&self.db)
+            .await?;
+
+            // 2. Process Refund/Unlock
+            if let Some(market_clearing) = &self.market_clearing {
+                let remaining_amount = order.energy_amount - order.filled_amount.unwrap_or(Decimal::ZERO);
+                
+                if remaining_amount > Decimal::ZERO {
+                    match order.side {
+                        OrderSide::Buy => {
+                            let refund_value = remaining_amount * order.price_per_kwh;
+                            if let Err(e) = market_clearing.unlock_funds(order.user_id, order.id, refund_value, "Order Expired").await {
+                                error!("Failed to refund funds for expired order {}: {}", order.id, e);
+                            } else {
+                                info!("💰 Refunded {} for expired buy order {}", refund_value, order.id);
+                            }
+                        }
+                        OrderSide::Sell => {
+                            if let Err(e) = market_clearing.unlock_energy(order.user_id, order.id, remaining_amount, "Order Expired").await {
+                                error!("Failed to unlock energy for expired order {}: {}", order.id, e);
+                            } else {
+                                info!("⚡ Unlocked {} energy for expired sell order {}", remaining_amount, order.id);
+                            }
+                        }
+                    }
+                }
+            }
+
+            expired_count += 1;
+        }
+
+        if expired_count > 0 {
+            info!("🧹 Expired {} stale orders totaling", expired_count);
+        }
+        
+        Ok(expired_count)
+    }
+
     /// Main matching loop
     async fn run_matching_loop(&self) {
         loop {
@@ -98,6 +180,11 @@ impl OrderMatchingEngine {
                 if !*running {
                     break;
                 }
+            }
+
+            // Cleanup expired orders first
+            if let Err(e) = self.expire_stale_orders().await {
+                error!("❌ Error expiring stale orders: {}", e);
             }
 
             // Run one matching cycle
@@ -126,8 +213,10 @@ impl OrderMatchingEngine {
 
     /// Run one matching cycle
     async fn match_orders_cycle(&self) -> Result<usize> {
+        use crate::models::trading::TradingOrderDb;
+
         // Get all pending buy orders
-        let buy_orders = sqlx::query(
+        let buy_orders_db: Vec<TradingOrderDb> = sqlx::query_as(
             r#"
             SELECT 
                 id, 
@@ -135,7 +224,14 @@ impl OrderMatchingEngine {
                 energy_amount, 
                 price_per_kwh,
                 filled_amount,
-                epoch_id
+                epoch_id,
+                zone_id,
+                order_type,
+                side,
+                status,
+                expires_at,
+                created_at,
+                filled_at
             FROM trading_orders
             WHERE side = 'buy'::order_side AND status = $1
             ORDER BY created_at ASC
@@ -145,10 +241,11 @@ impl OrderMatchingEngine {
         .fetch_all(&self.db)
         .await?;
 
-        info!("Fetched {} buy orders", buy_orders.len());
+        info!("Fetched {} buy orders", buy_orders_db.len());
 
         // Get all pending sell orders
-        let sell_orders = sqlx::query(
+        // We load them into a mutable vector to track fills during this cycle
+        let mut sell_orders_db: Vec<TradingOrderDb> = sqlx::query_as(
             r#"
             SELECT 
                 id, 
@@ -156,7 +253,14 @@ impl OrderMatchingEngine {
                 energy_amount, 
                 price_per_kwh,
                 filled_amount,
-                epoch_id
+                epoch_id,
+                zone_id,
+                order_type,
+                side,
+                status,
+                expires_at,
+                created_at,
+                filled_at
             FROM trading_orders
             WHERE side = 'sell'::order_side AND status = $1
             ORDER BY price_per_kwh ASC, created_at ASC
@@ -166,192 +270,185 @@ impl OrderMatchingEngine {
         .fetch_all(&self.db)
         .await?;
 
-        info!("Fetched {} sell orders", sell_orders.len());
+        info!("Fetched {} sell orders", sell_orders_db.len());
 
-        if buy_orders.is_empty() || sell_orders.is_empty() {
+        if buy_orders_db.is_empty() || sell_orders_db.is_empty() {
             return Ok(0);
         }
 
-        info!(
-            "Found {} buy orders and {} sell orders to process",
-            buy_orders.len(),
-            sell_orders.len()
-        );
-
         let mut matches_created = 0;
 
-        // Try to match each buy order with sell orders
-        for buy_order in &buy_orders {
-            let buy_order_id: Uuid = buy_order.try_get("id")?;
-            let buyer_id: Uuid = buy_order.try_get("user_id")?;
-            let buy_energy_amount: Decimal = buy_order.try_get("energy_amount")?;
-            let buy_filled_amount: Decimal = buy_order.try_get("filled_amount")?;
-            let buy_price_per_kwh: Decimal = buy_order.try_get("price_per_kwh")?;
-            let epoch_id: Option<Uuid> = buy_order.try_get("epoch_id")?;
-
+        // Try to match each buy order
+        for buy_order in &buy_orders_db {
+            let mut buy_filled_amount = buy_order.filled_amount.unwrap_or(Decimal::ZERO);
+            let buy_energy_amount = buy_order.energy_amount;
+            
             // Calculate remaining amount needed
-            let remaining_buy_amount = buy_energy_amount - buy_filled_amount;
-            let zero = Decimal::ZERO;
-            if remaining_buy_amount <= zero {
-                continue; // Order already fully filled
+            let mut remaining_buy_amount = buy_energy_amount - buy_filled_amount;
+            
+            // Dust protection: If remaining amount is too small, mark as filled/cancelled to stop matching
+            if remaining_buy_amount < Self::MIN_TRADE_AMOUNT {
+                if remaining_buy_amount > Decimal::ZERO {
+                    // Start a new logical block to avoid borrowing issues if we were scanning orders
+                    // But here we are just deciding to skip/close this buy order
+                    let _ = sqlx::query("UPDATE trading_orders SET status = 'cancelled', updated_at = NOW() WHERE id = $1")
+                        .bind(buy_order.id)
+                        .execute(&self.db).await;
+                    info!("Cancelled dust buy order {} (rem: {})", buy_order.id, remaining_buy_amount);
+                }
+                continue; 
             }
 
-            // Find compatible sell orders (price <= buy price)
-            for sell_order in &sell_orders {
-                let sell_order_id: Uuid = sell_order.try_get("id")?;
-                let seller_id: Uuid = sell_order.try_get("user_id")?;
-                let sell_energy_amount: Decimal = sell_order.try_get("energy_amount")?;
-                let sell_filled_amount: Decimal = sell_order.try_get("filled_amount")?;
-                let sell_price_per_kwh: Decimal = sell_order.try_get("price_per_kwh")?;
-                let sell_epoch_id: Option<Uuid> = sell_order.try_get("epoch_id")?;
+            // 1. Calculate Landed Cost for all available sellers relative to THIS buyer
+            // 2. Filter eligible sellers
+            // 3. Sort by Landed Cost ASC
+            
+            // We create a list of indices to sell_orders_db to avoid cloning the whole structs
+            struct Candidate {
+                index: usize,
+                landed_cost: Decimal,
+                match_price: Decimal, // The base price (sell price)
+                wheeling_charge_per_kwh: Decimal,
+                loss_factor: Decimal,
+                loss_cost_per_kwh: Decimal,
+            }
 
-                // Check if sell order is compatible
-                if sell_price_per_kwh > buy_price_per_kwh {
-                    debug!("Skipping match: Sell price {} > Buy price {}", sell_price_per_kwh, buy_price_per_kwh);
-                    continue; // Sell price too high
+            let mut candidates: Vec<Candidate> = Vec::new();
+
+            for (idx, sell_order) in sell_orders_db.iter().enumerate() {
+                let sell_filled = sell_order.filled_amount.unwrap_or(Decimal::ZERO);
+                let sell_energy = sell_order.energy_amount;
+                let remaining_sell = sell_energy - sell_filled;
+                
+                if remaining_sell < Self::MIN_TRADE_AMOUNT {
+                    continue; // Skip dust entries
                 }
 
-                // Relaxed Epoch Check for Continuous Trading
-                // We allow matching across epochs. We'll use the Buy Order's epoch (likely the newer one) 
-                // as the transaction epoch.
-                if let (Some(buy_epoch), Some(sell_epoch)) = (epoch_id, sell_epoch_id) {
-                    if sell_epoch != buy_epoch {
-                        debug!("Cross-epoch match: Buy: {}, Sell: {} (Proceeding)", buy_epoch, sell_epoch);
-                    }
+                // Calculate Costs
+                // If zone_id is missing, we use None which results in higher default fees
+                let wheeling_charge = self.grid_topology.calculate_wheeling_charge(sell_order.zone_id, buy_order.zone_id);
+                let loss_factor = self.grid_topology.calculate_loss_factor(sell_order.zone_id, buy_order.zone_id);
+                
+                let sell_price = sell_order.price_per_kwh;
+                let loss_cost_unit = sell_price * loss_factor;
+                let landed_price = sell_price + wheeling_charge + loss_cost_unit;
+
+                // Check compatibility
+                if landed_price <= buy_order.price_per_kwh {
+                    candidates.push(Candidate {
+                        index: idx,
+                        landed_cost: landed_price,
+                        match_price: sell_price,
+                        wheeling_charge_per_kwh: wheeling_charge,
+                        loss_factor,
+                        loss_cost_per_kwh: loss_cost_unit,
+                    });
+                }
+            }
+
+            // Sort by Landed Cost ASC
+            candidates.sort_by(|a, b| a.landed_cost.cmp(&b.landed_cost));
+
+            // Execute matches against candidates
+            for candidate in candidates {
+                if remaining_buy_amount <= Decimal::ZERO {
+                    break;
+                }
+
+                // Access the mutable sell order via index
+                let sell_order = &mut sell_orders_db[candidate.index];
+                
+                let sell_filled = sell_order.filled_amount.unwrap_or(Decimal::ZERO);
+                let remaining_sell = sell_order.energy_amount - sell_filled;
+
+                if remaining_sell <= Decimal::ZERO {
+                    continue;
+                }
+
+                // Match amount
+                let match_amount = if remaining_buy_amount < remaining_sell {
+                    remaining_buy_amount
                 } else {
-                     // If one is missing, we still proceed if we have at least one to track the match
-                     if epoch_id.is_none() && sell_epoch_id.is_none() {
-                        debug!("Skipping match: Both orders missing epoch ID");
-                        continue;
-                     }
-                }
-
-                // Calculate remaining amount available to sell
-                let remaining_sell_amount = sell_energy_amount - sell_filled_amount;
-                if remaining_sell_amount <= zero {
-                    continue; // Sell order already fully filled
-                }
-
-                // Calculate match amount (min of remaining buy and sell amounts)
-                let match_amount = if remaining_buy_amount < remaining_sell_amount {
-                    remaining_buy_amount.clone()
-                } else {
-                    remaining_sell_amount.clone()
+                    remaining_sell
                 };
 
-                let match_price = sell_price_per_kwh; // Use sell price (market maker advantage)
-                let total_price = match_amount * match_price;
+                let total_energy_cost = match_amount * candidate.match_price;
+                let total_wheeling = match_amount * candidate.wheeling_charge_per_kwh;
+                let total_loss_cost = match_amount * candidate.loss_cost_per_kwh;
 
                 info!(
-                    "Matching buy order {} with sell order {}: {} kWh at ${}/kWh (total: ${})",
-                    buy_order_id, sell_order_id, match_amount, match_price, total_price
+                    "Matching buy order {} with sell order {}: {} kWh at ${}/kWh base (Landed: ${})",
+                    buy_order.id, sell_order.id, match_amount, candidate.match_price, candidate.landed_cost
                 );
 
-                // Create order match - safe to unwrap since we validated both epochs above
-                let epoch_id = epoch_id
-                    .ok_or_else(|| anyhow::anyhow!("Epoch ID is required for order matching"))?;
+                let epoch_id = buy_order.epoch_id.or(sell_order.epoch_id)
+                    .ok_or_else(|| anyhow::anyhow!("Epoch ID required"))?;
 
-                match self
-                    .create_order_match(
-                        epoch_id,
-                        buy_order_id,
-                        sell_order_id,
-                        buyer_id,
-                        seller_id,
-                        match_amount,
-                        match_price,
-                        total_price,
-                    )
-                    .await
-                {
+                // DB Actions
+                match self.create_order_match(
+                    epoch_id,
+                    buy_order.id,
+                    sell_order.id,
+                    buy_order.user_id,
+                    sell_order.user_id,
+                    match_amount,
+                    candidate.match_price,
+                    total_energy_cost
+                ).await {
                     Ok(match_id) => {
-                        info!(
-                            "✅ Created match {}: {} kWh from sell order {} to buy order {} at ${}/kWh",
-                            match_id, match_amount, sell_order_id, buy_order_id, match_price
-                        );
-                        matches_created += 1;
+                         matches_created += 1;
+                         // metrics...
+                         track_order_matched("p2p", match_amount.to_f64().unwrap_or(0.0));
+                         track_trading_operation("match", true);
 
-                        // Track metrics
-                        track_order_matched("p2p", match_amount.to_f64().unwrap_or(0.0));
-                        track_trading_operation("match", true);
+                         // Trigger settlement
+                         // Note: We need to pass the extra costs to settlement service eventually.
+                         // For now, we use the standard method.
+                         self.trigger_settlement(
+                            match_id, buy_order.id, sell_order.id, 
+                            buy_order.user_id, sell_order.user_id, 
+                            match_amount, candidate.match_price, total_energy_cost, epoch_id,
+                            (total_wheeling, candidate.loss_factor, total_loss_cost, buy_order.zone_id, sell_order.zone_id)
+                         ).await;
 
-                        // Trigger settlement creation
-                        self.trigger_settlement(
-                            match_id,
-                            buy_order_id,
-                            sell_order_id,
-                            buyer_id,
-                            seller_id,
-                            match_amount,
-                            match_price,
-                            total_price,
-                            epoch_id,
-                        )
-                        .await;
+                         // Update In-Memory State
+                         sell_order.filled_amount = Some(sell_filled + match_amount);
+                         buy_filled_amount += match_amount;
+                         remaining_buy_amount -= match_amount;
 
-                        // Update buy order filled amount
-                        let new_buy_filled = buy_filled_amount + match_amount;
-                        let buy_complete = new_buy_filled >= buy_energy_amount;
-                        let new_buy_status = if buy_complete {
-                            OrderStatus::Filled
-                        } else if new_buy_filled > Decimal::ZERO {
-                            OrderStatus::PartiallyFilled
-                        } else {
-                            OrderStatus::Active
-                        };
-
-                        sqlx::query(
-                            r#"
-                            UPDATE trading_orders 
-                            SET filled_amount = $1, 
-                            status = $2,
-                            updated_at = NOW()
-                            WHERE id = $3
-                            "#,
-                        )
-                        .bind(&new_buy_filled)
-                        .bind(&new_buy_status)
-                        .bind(buy_order_id)
-                        .execute(&self.db)
-                        .await?;
-
-                        // Update sell order filled amount
-                        let new_sell_filled = sell_filled_amount + match_amount;
-                        let sell_complete = new_sell_filled >= sell_energy_amount;
-                        let new_sell_status = if sell_complete {
-                            OrderStatus::Filled
-                        } else if new_sell_filled > Decimal::ZERO {
-                            OrderStatus::PartiallyFilled
-                        } else {
-                            OrderStatus::Active
-                        };
-
-                        sqlx::query(
-                            r#"
-                            UPDATE trading_orders 
-                            SET filled_amount = $1, 
-                            status = $2,
-                            updated_at = NOW()
-                            WHERE id = $3
-                            "#,
-                        )
-                        .bind(&new_sell_filled)
-                        .bind(&new_sell_status)
-                        .bind(sell_order_id)
-                        .execute(&self.db)
-                        .await?;
-
-                        if buy_complete {
-                            debug!("Buy order {} fully filled", buy_order_id);
-                            break; // Move to next buy order
-                        }
-                    }
+                         // Update DB - Sell Order
+                         let new_sell_status = if sell_order.filled_amount.unwrap() >= sell_order.energy_amount {
+                             OrderStatus::Filled
+                         } else {
+                             OrderStatus::PartiallyFilled
+                         };
+                         
+                         let _ = sqlx::query("UPDATE trading_orders SET filled_amount = $1, status = $2, updated_at = NOW() WHERE id = $3")
+                            .bind(sell_order.filled_amount)
+                            .bind(new_sell_status)
+                            .bind(sell_order.id)
+                            .execute(&self.db).await;
+                    },
                     Err(e) => {
-                        error!("Failed to create order match: {}", e);
-                        continue;
+                        error!("Failed to create match: {}", e);
                     }
                 }
             }
+
+            // Update DB - Buy Order (after processing all candidates)
+            let new_buy_status = if buy_filled_amount >= buy_energy_amount {
+                OrderStatus::Filled
+            } else if buy_filled_amount > Decimal::ZERO {
+                OrderStatus::PartiallyFilled
+            } else {
+                OrderStatus::Active
+            };
+
+            let _ = sqlx::query("UPDATE trading_orders SET filled_amount = $1, status = $2, updated_at = NOW() WHERE id = $3")
+                .bind(buy_filled_amount)
+                .bind(new_buy_status)
+                .bind(buy_order.id)
+                .execute(&self.db).await;
         }
 
         Ok(matches_created)
@@ -430,8 +527,11 @@ impl OrderMatchingEngine {
         match_price: Decimal,
         total_price: Decimal,
         epoch_id: Uuid,
+        matches_costs: (Decimal, Decimal, Decimal, Option<i32>, Option<i32>), // wheeling, loss_factor, loss_cost, b_zone, s_zone
     ) {
         if let Some(settlement) = &self.settlement {
+            let (wheeling_charge, loss_factor, loss_cost, buyer_zone_id, seller_zone_id) = matches_costs;
+            
             // Create a TradeMatch object to pass to settlement service
             let trade_match = TradeMatch {
                 id: Uuid::new_v4(),
@@ -443,6 +543,11 @@ impl OrderMatchingEngine {
                 quantity: matched_amount,
                 price: match_price,
                 total_value: total_price,
+                wheeling_charge,
+                loss_factor,
+                loss_cost,
+                buyer_zone_id,
+                seller_zone_id,
                 matched_at: chrono::Utc::now(),
                 epoch_id,
             };

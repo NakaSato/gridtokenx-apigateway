@@ -299,10 +299,16 @@ pub async fn get_my_trades(
                 ELSE buy_order.user_id
             END as counterparty_id,
             om.match_time as executed_at,
-            om.status
+            om.status,
+            s.wheeling_charge,
+            s.loss_cost,
+            s.effective_energy,
+            s.buyer_zone_id,
+            s.seller_zone_id
         FROM order_matches om
         JOIN trading_orders buy_order ON om.buy_order_id = buy_order.id
         JOIN trading_orders sell_order ON om.sell_order_id = sell_order.id
+        LEFT JOIN settlements s ON s.trade_id = om.id
         WHERE buy_order.user_id = $1 OR sell_order.user_id = $1
         ORDER BY om.match_time DESC
         LIMIT $2
@@ -338,6 +344,14 @@ pub struct TradeRecord {
     pub counterparty_id: uuid::Uuid,
     pub executed_at: chrono::DateTime<chrono::Utc>,
     pub status: String,
+    #[schema(value_type = Option<String>)]
+    pub wheeling_charge: Option<rust_decimal::Decimal>,
+    #[schema(value_type = Option<String>)]
+    pub loss_cost: Option<rust_decimal::Decimal>,
+    #[schema(value_type = Option<String>)]
+    pub effective_energy: Option<rust_decimal::Decimal>,
+    pub buyer_zone_id: Option<i32>,
+    pub seller_zone_id: Option<i32>,
 }
 
 #[derive(Debug, serde::Serialize, ToSchema)]
