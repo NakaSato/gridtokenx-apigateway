@@ -24,6 +24,7 @@ pub mod validation;
 pub mod webhook;
 pub mod erc;
 pub mod grid_topology;
+pub mod notification;
 
 // Re-exports
 pub use auth::AuthService;
@@ -45,3 +46,4 @@ pub use event_processor::EventProcessorService;
 pub use webhook::WebhookService;
 pub use erc::ErcService;
 pub use grid_topology::GridTopologyService;
+pub use notification::NotificationService;
