@@ -80,3 +80,20 @@ pub struct OrderBookEntry {
     pub created_at: DateTime<Utc>,
     pub zone_id: Option<i32>,
 }
+
+/// Market clearing price result from supply-demand intersection
+#[derive(Debug, Clone)]
+pub struct ClearingPrice {
+    /// The calculated clearing price (midpoint of bid-ask spread)
+    pub price: Decimal,
+    /// Total volume that can be cleared at this price
+    pub volume: Decimal,
+    /// Number of buy orders participating
+    pub buy_orders_count: usize,
+    /// Number of sell orders participating  
+    pub sell_orders_count: usize,
+    /// Best bid price
+    pub best_bid: Decimal,
+    /// Best ask price
+    pub best_ask: Decimal,
+}

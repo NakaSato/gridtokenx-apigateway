@@ -34,10 +34,12 @@ impl MarketClearingService {
         // Order matching algorithm: price-time priority
         while let Some(buy_order) = buy_orders.first_mut() {
             if let Some(sell_order) = sell_orders.first_mut() {
-                // Check if orders can be matched
+                // Check if orders can be matched (bid >= ask)
                 if buy_order.price_per_kwh >= sell_order.price_per_kwh {
-                    // Determine match price (use sell order price for simplicity)
-                    let match_price = sell_order.price_per_kwh.clone(); // Market clearing price
+                    // Calculate clearing price as midpoint of bid-ask spread
+                    // This ensures fair pricing for both parties
+                    let match_price = (buy_order.price_per_kwh + sell_order.price_per_kwh) 
+                        / Decimal::from(2);
 
                     // Calculate match amount (minimum of remaining amounts)
                     let match_amount = buy_order
