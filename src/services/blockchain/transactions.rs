@@ -844,34 +844,80 @@ pub mod utils {
     use tracing::debug;
 
     /// Create a transfer instruction with proper validation
+    /// Uses spl_token::instruction::transfer_checked for Token-2022 compatibility
     pub fn create_transfer_instruction(
-        from_pubkey: &Pubkey,
-        to_pubkey: &Pubkey,
+        from_ata: &Pubkey,
+        to_ata: &Pubkey,
         mint_pubkey: &Pubkey,
+        owner: &Pubkey,
         amount: u64,
-        _decimals: u8,
+        decimals: u8,
     ) -> Result<Instruction> {
         // Validate inputs
         if amount == 0 {
             return Err(anyhow!("Transfer amount cannot be zero"));
         }
 
-        if !is_valid_pubkey(from_pubkey)
-            || !is_valid_pubkey(to_pubkey)
+        if !is_valid_pubkey(from_ata)
+            || !is_valid_pubkey(to_ata)
             || !is_valid_pubkey(mint_pubkey)
         {
             return Err(anyhow!("Invalid public key in transfer instruction"));
         }
 
         debug!(
-            "Creating transfer instruction: {} tokens from {} to {}",
-            amount, from_pubkey, to_pubkey
+            "Creating transfer_checked instruction: {} tokens from {} to {}",
+            amount, from_ata, to_ata
         );
 
-        // Return a placeholder - actual implementation would use spl_token
-        Err(anyhow!(
-            "Transfer instruction creation not yet implemented - type conflicts with anchor_lang"
-        ))
+        // Use transfer_checked for Token-2022 compatibility
+        let instruction = spl_token::instruction::transfer_checked(
+            &spl_token::ID,  // Use standard token program; caller can override for Token-2022
+            from_ata,
+            mint_pubkey,
+            to_ata,
+            owner,
+            &[],  // No multisig signers
+            amount,
+            decimals,
+        )?;
+
+        Ok(instruction)
+    }
+
+    /// Create a transfer instruction for Token-2022
+    pub fn create_transfer_instruction_2022(
+        from_ata: &Pubkey,
+        to_ata: &Pubkey,
+        mint_pubkey: &Pubkey,
+        owner: &Pubkey,
+        amount: u64,
+        decimals: u8,
+    ) -> Result<Instruction> {
+        if amount == 0 {
+            return Err(anyhow!("Transfer amount cannot be zero"));
+        }
+
+        debug!(
+            "Creating Token-2022 transfer_checked instruction: {} tokens from {} to {}",
+            amount, from_ata, to_ata
+        );
+
+        // Token-2022 program ID
+        let token_2022_program = Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")?;
+
+        let instruction = spl_token::instruction::transfer_checked(
+            &token_2022_program,
+            from_ata,
+            mint_pubkey,
+            to_ata,
+            owner,
+            &[],
+            amount,
+            decimals,
+        )?;
+
+        Ok(instruction)
     }
 
     /// Validate a Solana public key
@@ -880,15 +926,104 @@ pub mod utils {
         pubkey.to_bytes() != [0u8; 32]
     }
 
+    /// Get the associated token account address for an owner and mint
+    pub fn get_ata_address(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+        spl_associated_token_account::get_associated_token_address(owner, mint)
+    }
+
+    /// Get the associated token account address for Token-2022
+    pub fn get_ata_address_2022(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+        let token_2022_program = Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+            .expect("Invalid Token-2022 program ID");
+        spl_associated_token_account::get_associated_token_address_with_program_id(
+            owner,
+            mint,
+            &token_2022_program,
+        )
+    }
+
     /// Get or create an associated token account
+    /// Returns the ATA address and optionally an instruction to create it
     pub async fn get_or_create_ata(
-        _rpc_client: &Arc<RpcClient>,
-        _owner: &Pubkey,
-        _mint: &Pubkey,
-    ) -> Result<Pubkey> {
-        // Disabled due to type conflicts between solana_sdk and anchor_lang Pubkey types
-        Err(anyhow!(
-            "ATA creation not yet implemented - type conflicts with anchor_lang"
-        ))
+        rpc_client: &Arc<RpcClient>,
+        owner: &Pubkey,
+        mint: &Pubkey,
+        payer: &Pubkey,
+    ) -> Result<(Pubkey, Option<Instruction>)> {
+        let ata = get_ata_address(owner, mint);
+
+        // Check if the ATA already exists
+        match rpc_client.get_account(&ata) {
+            Ok(account) => {
+                if account.data.len() > 0 {
+                    debug!("ATA {} already exists for owner {}", ata, owner);
+                    return Ok((ata, None));
+                }
+            }
+            Err(_) => {
+                // Account doesn't exist, need to create it
+            }
+        }
+
+        debug!("Creating ATA instruction for owner {} mint {}", owner, mint);
+
+        // Create instruction to create the ATA
+        let create_ata_ix = spl_associated_token_account::instruction::create_associated_token_account(
+            payer,
+            owner,
+            mint,
+            &spl_token::ID,
+        );
+
+        Ok((ata, Some(create_ata_ix)))
+    }
+
+    /// Get or create an associated token account for Token-2022
+    pub async fn get_or_create_ata_2022(
+        rpc_client: &Arc<RpcClient>,
+        owner: &Pubkey,
+        mint: &Pubkey,
+        payer: &Pubkey,
+    ) -> Result<(Pubkey, Option<Instruction>)> {
+        let token_2022_program = Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")?;
+        let ata = spl_associated_token_account::get_associated_token_address_with_program_id(
+            owner,
+            mint,
+            &token_2022_program,
+        );
+
+        // Check if the ATA already exists
+        match rpc_client.get_account(&ata) {
+            Ok(account) => {
+                if account.data.len() > 0 {
+                    debug!("Token-2022 ATA {} already exists for owner {}", ata, owner);
+                    return Ok((ata, None));
+                }
+            }
+            Err(_) => {
+                // Account doesn't exist
+            }
+        }
+
+        debug!("Creating Token-2022 ATA instruction for owner {} mint {}", owner, mint);
+
+        let create_ata_ix = spl_associated_token_account::instruction::create_associated_token_account(
+            payer,
+            owner,
+            mint,
+            &token_2022_program,
+        );
+
+        Ok((ata, Some(create_ata_ix)))
+    }
+
+    /// Determine if a mint uses Token-2022
+    pub async fn is_token_2022(rpc_client: &Arc<RpcClient>, mint: &Pubkey) -> Result<bool> {
+        let token_2022_program = Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")?;
+        
+        match rpc_client.get_account(mint) {
+            Ok(account) => Ok(account.owner == token_2022_program),
+            Err(e) => Err(anyhow!("Failed to get mint account: {}", e)),
+        }
     }
 }
