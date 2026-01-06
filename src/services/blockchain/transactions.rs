@@ -792,6 +792,97 @@ impl TransactionHandler {
 
         Ok(Transaction::new_with_payer(&instructions, Some(payer)))
     }
+
+    // ============ ESCROW METHODS ============
+    
+    /// Derive escrow PDA for an order
+    pub fn derive_escrow_pda(order_id: &[u8; 32], program_id: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[b"escrow", order_id], program_id)
+    }
+
+    /// Lock tokens to escrow for a buy order
+    pub async fn lock_tokens_to_escrow(
+        &self,
+        buyer_wallet: &Pubkey,
+        buyer_ata: &Pubkey,
+        escrow_ata: &Pubkey,
+        token_mint: &Pubkey,
+        amount: u64,
+        decimals: u8,
+    ) -> Result<Signature> {
+        info!("🔒 Locking {} tokens to escrow: {} -> {}", amount, buyer_ata, escrow_ata);
+        
+        let token_program = Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")?;
+        let transfer_ix = spl_token::instruction::transfer_checked(
+            &token_program, buyer_ata, token_mint, escrow_ata, buyer_wallet, &[], amount, decimals,
+        )?;
+
+        let payer: Keypair = self.get_payer_keypair().await?;
+        let recent_blockhash = self.get_recent_blockhash().await?;
+        let transaction = Transaction::new_signed_with_payer(
+            &[transfer_ix], Some(&payer.pubkey()), &[&payer], recent_blockhash,
+        );
+
+        let signature = self.submit_transaction(transaction).await?;
+        info!("🔒 Escrow lock complete: {}", signature);
+        Ok(signature)
+    }
+
+    /// Release escrow tokens to seller after settlement
+    pub async fn release_escrow_to_seller(
+        &self,
+        escrow_authority: &Keypair,
+        escrow_ata: &Pubkey,
+        seller_ata: &Pubkey,
+        token_mint: &Pubkey,
+        amount: u64,
+        decimals: u8,
+    ) -> Result<Signature> {
+        info!("✅ Releasing {} tokens from escrow: {} -> {}", amount, escrow_ata, seller_ata);
+        
+        let token_program = Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")?;
+        let transfer_ix = spl_token::instruction::transfer_checked(
+            &token_program, escrow_ata, token_mint, seller_ata, &escrow_authority.pubkey(), &[], amount, decimals,
+        )?;
+
+        let payer: Keypair = self.get_payer_keypair().await?;
+        let recent_blockhash = self.get_recent_blockhash().await?;
+        let transaction = Transaction::new_signed_with_payer(
+            &[transfer_ix], Some(&payer.pubkey()), &[&payer, escrow_authority], recent_blockhash,
+        );
+
+        let signature = self.submit_transaction(transaction).await?;
+        info!("✅ Escrow release complete: {}", signature);
+        Ok(signature)
+    }
+
+    /// Refund escrow tokens to buyer on order cancel
+    pub async fn refund_escrow_to_buyer(
+        &self,
+        escrow_authority: &Keypair,
+        escrow_ata: &Pubkey,
+        buyer_ata: &Pubkey,
+        token_mint: &Pubkey,
+        amount: u64,
+        decimals: u8,
+    ) -> Result<Signature> {
+        info!("↩️ Refunding {} tokens from escrow: {} -> {}", amount, escrow_ata, buyer_ata);
+        
+        let token_program = Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")?;
+        let transfer_ix = spl_token::instruction::transfer_checked(
+            &token_program, escrow_ata, token_mint, buyer_ata, &escrow_authority.pubkey(), &[], amount, decimals,
+        )?;
+
+        let payer: Keypair = self.get_payer_keypair().await?;
+        let recent_blockhash = self.get_recent_blockhash().await?;
+        let transaction = Transaction::new_signed_with_payer(
+            &[transfer_ix], Some(&payer.pubkey()), &[&payer, escrow_authority], recent_blockhash,
+        );
+
+        let signature = self.submit_transaction(transaction).await?;
+        info!("↩️ Escrow refund complete: {}", signature);
+        Ok(signature)
+    }
 }
 
 /// Transaction status for detailed tracking
@@ -1026,4 +1117,6 @@ pub mod utils {
             Err(e) => Err(anyhow!("Failed to get mint account: {}", e)),
         }
     }
+
+
 }
