@@ -52,7 +52,7 @@ impl Default for SolanaProgramsConfig {
             registry_program_id: "CVS6pz2qdEmjusHCmiwe2R21KVrSoGubdEy5d766KooN".to_string(),
             oracle_program_id: "3hSEt5vVzbiMCegFnhdMpFGkXEDY8BinrPb8egJoS7C7".to_string(),
             governance_program_id: "GAZQm4bHUyNhSYrAq5noBohXcTaf6dKZNDKju8499e6w".to_string(),
-            energy_token_program_id: "HaT3koMseafcCB9aUQUCrSLMDfN1km7Xik9UhZSG9UV6".to_string(),
+            energy_token_program_id: "MwAdshY2978VqcpJzWSKmPfDtKfweD7YLMCQSBcR4wP".to_string(),
             trading_program_id: "8gHn9oeYcUQgNrMi8fNYGyMCKJTMwM6K413f41AANFt4".to_string(),
         }
     }
@@ -206,7 +206,7 @@ impl Config {
                 governance_program_id: env::var("SOLANA_GOVERNANCE_PROGRAM_ID")
                     .unwrap_or_else(|_| "GAZQm4bHUyNhSYrAq5noBohXcTaf6dKZNDKju8499e6w".to_string()),
                 energy_token_program_id: env::var("SOLANA_ENERGY_TOKEN_PROGRAM_ID")
-                    .unwrap_or_else(|_| "HaT3koMseafcCB9aUQUCrSLMDfN1km7Xik9UhZSG9UV6".to_string()),
+                    .unwrap_or_else(|_| "MwAdshY2978VqcpJzWSKmPfDtKfweD7YLMCQSBcR4wP".to_string()),
                 trading_program_id: env::var("SOLANA_TRADING_PROGRAM_ID")
                     .unwrap_or_else(|_| "8gHn9oeYcUQgNrMi8fNYGyMCKJTMwM6K413f41AANFt4".to_string()),
             },

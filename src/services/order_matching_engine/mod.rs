@@ -3,6 +3,7 @@ pub mod types;
 use anyhow::Result;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use solana_sdk::pubkey::Pubkey; // Added for Pubkey utilities
 use sqlx::PgPool;
 
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use uuid::Uuid;
 
 use crate::{
     database::schema::types::{OrderStatus, OrderSide, OrderType},
-    services::{market_clearing::{TradeMatch, MarketClearingService}, SettlementService, WebSocketService, GridTopologyService},
+    services::{market_clearing::{TradeMatch, MarketClearingService}, SettlementService, WebSocketService, GridTopologyService, BlockchainService},
     middleware::metrics::{track_order_matched, track_trading_operation},
 };
 
@@ -27,6 +28,7 @@ pub struct OrderMatchingEngine {
     websocket_service: Option<WebSocketService>,
     settlement: Option<SettlementService>,
     market_clearing: Option<MarketClearingService>,
+    blockchain_service: Option<BlockchainService>,
     grid_topology: GridTopologyService,
 }
 
@@ -49,6 +51,7 @@ impl OrderMatchingEngine {
             websocket_service: None,
             settlement: None,
             market_clearing: None,
+            blockchain_service: None,
             grid_topology: GridTopologyService::new(),
         }
     }
@@ -68,6 +71,12 @@ impl OrderMatchingEngine {
     /// Set the Settlement service for processing matched trades
     pub fn with_settlement(mut self, settlement: SettlementService) -> Self {
         self.settlement = Some(settlement);
+        self
+    }
+
+    /// Set the Blockchain service for on-chain matching
+    pub fn with_blockchain(mut self, blockchain_service: BlockchainService) -> Self {
+        self.blockchain_service = Some(blockchain_service);
         self
     }
 
@@ -100,7 +109,7 @@ impl OrderMatchingEngine {
     }
 
     /// Minimum trade amount in kWh to avoid dust
-    const MIN_TRADE_AMOUNT: Decimal = Decimal::from_parts(1, 1, 0, false, 0); // 0.1
+    const MIN_TRADE_AMOUNT: Decimal = Decimal::from_parts(100000000, 0, 0, false, 9); // 0.100000000
 
     /// Expire orders that have passed their expiration time
     pub async fn expire_stale_orders(&self) -> Result<u64> {
@@ -113,7 +122,7 @@ impl OrderMatchingEngine {
             SELECT 
                 id, user_id, order_type as "order_type!: OrderType", side as "side!: OrderSide", 
                 energy_amount, price_per_kwh, filled_amount, status as "status!: OrderStatus", 
-                expires_at, created_at, filled_at, epoch_id, zone_id, meter_id, refund_tx_signature
+                expires_at, created_at, filled_at, epoch_id, zone_id, meter_id, refund_tx_signature, order_pda
             FROM trading_orders 
             WHERE status IN ('active', 'pending', 'partially_filled') 
             AND expires_at < $1
@@ -233,13 +242,14 @@ impl OrderMatchingEngine {
                 created_at,
                 filled_at,
                 meter_id,
-                refund_tx_signature
+                refund_tx_signature,
+                order_pda
             FROM trading_orders
-            WHERE side = 'buy'::order_side AND status = $1
+            WHERE side = 'buy'::order_side AND status IN ('pending', 'active', 'partially_filled')
             ORDER BY created_at ASC
             "#,
         )
-        .bind(OrderStatus::Pending)
+        //.bind(OrderStatus::Pending) - No longer binding single status
         .fetch_all(&self.db)
         .await?;
 
@@ -264,13 +274,14 @@ impl OrderMatchingEngine {
                 created_at,
                 filled_at,
                 meter_id,
-                refund_tx_signature
+                refund_tx_signature,
+                order_pda
             FROM trading_orders
-            WHERE side = 'sell'::order_side AND status = $1
+            WHERE side = 'sell'::order_side AND status IN ('pending', 'active', 'partially_filled')
             ORDER BY price_per_kwh ASC, created_at ASC
             "#,
         )
-        .bind(OrderStatus::Pending)
+        //.bind(OrderStatus::Pending) - No longer binding single status
         .fetch_all(&self.db)
         .await?;
 
@@ -397,7 +408,9 @@ impl OrderMatchingEngine {
                     sell_order.user_id,
                     match_amount,
                     candidate.match_price,
-                    total_energy_cost
+                    total_energy_cost,
+                    buy_order.order_pda.as_deref(),
+                    sell_order.order_pda.as_deref()
                 ).await {
                     Ok(match_id) => {
                          matches_created += 1;
@@ -469,6 +482,8 @@ impl OrderMatchingEngine {
         energy_amount: Decimal,
         price_per_kwh: Decimal,
         _total_price: Decimal,
+        buy_order_pda: Option<&str>,
+        sell_order_pda: Option<&str>,
     ) -> Result<Uuid> {
         let match_id = Uuid::new_v4();
 
@@ -497,6 +512,47 @@ impl OrderMatchingEngine {
         .bind(OrderStatus::Pending)
         .execute(&self.db)
         .await?;
+
+
+        // 2. Execute On-Chain Match (if blockchain service is available)
+        if let Some(blockchain) = &self.blockchain_service {
+             // We need the authority keypair to sign the match
+             match blockchain.get_authority_keypair().await {
+                 Ok(authority) => {
+                     // We need the Market Pubkey. 
+                     // Ideally this comes from config or DB. 
+                     // For now, let's derive it or fetch from env since there is usually 1 market per deployment.
+                     // Or we can get it from the order_pda logic if we knew it.
+                     // Let's rely on the instructions module knowing the program ID and deriving the market PDA if it's deterministic (seeds=[b"market"]).
+                     // But execute_match_orders takes string pubkeys.
+                     
+                     // Helper to derive market PDA
+                     let market_pda = Pubkey::find_program_address(&[b"market"], &blockchain.trading_program_id().unwrap_or_default()).0;
+                     
+                                             
+                     if let (Some(b_pda), Some(s_pda)) = (buy_order_pda, sell_order_pda) {
+                         let match_u64 = (energy_amount * Decimal::from(1_000_000_000)).to_u64().unwrap_or(0);
+                         
+                         info!("Executing on-chain match: Buyer {}, Seller {}, Amount {}", b_pda, s_pda, match_u64);
+                         
+                         match blockchain.execute_match_orders(&authority, &market_pda.to_string(), b_pda, s_pda, match_u64).await {
+                             Ok(sig) => {
+                                 info!("✅ On-chain match successful: {}", sig);
+                                 // Update order_matches with signature?
+                                 // Schema might not have it yet.
+                             },
+                             Err(e) => {
+                                 error!("❌ On-chain match failed: {}", e);
+                                 // We continue, as off-chain settlement is primary for now.
+                             }
+                         }
+                     } else {
+                         warn!("Skipping on-chain match: Missing Order PDAs for {} or {}", buy_order_id, sell_order_id);
+                     }
+                 },
+                 Err(e) => error!("Failed to get authority keypair for matching: {}", e),
+             }
+        }
 
         // Broadcast order matched event via WebSocket
         if let Some(ws_service) = &self.websocket_service {

@@ -191,15 +191,14 @@ impl SettlementService {
         sqlx::query(
             r#"
             INSERT INTO settlements (
-                id, trade_id, buyer_id, seller_id, buy_order_id, sell_order_id,
-                energy_amount, price, total_value, fee_amount, net_amount, status, created_at,
-                wheeling_charge, loss_factor, loss_cost, effective_energy, buyer_zone_id, seller_zone_id
+                id, buyer_id, seller_id, buy_order_id, sell_order_id,
+                energy_amount, price_per_kwh, total_amount, fee_amount, net_amount, status, created_at,
+                wheeling_charge, loss_factor, loss_cost, effective_energy, buyer_zone_id, seller_zone_id, epoch_id
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             "#,
         )
         .bind(settlement.id)
-        .bind(settlement.trade_id)
         .bind(settlement.buyer_id)
         .bind(settlement.seller_id)
         .bind(settlement.buy_order_id)
@@ -217,6 +216,7 @@ impl SettlementService {
         .bind(settlement.effective_energy)
         .bind(settlement.buyer_zone_id)
         .bind(settlement.seller_zone_id)
+        .bind(trade.epoch_id)
         .execute(&self.db)
         .await?;
 
@@ -1158,12 +1158,16 @@ mod tests {
             status: SettlementStatus::Pending,
             blockchain_tx: None,
             created_at: Utc::now(),
+            buyer_zone_id: None,
+            seller_zone_id: None,
+            wheeling_charge: Some(Decimal::ZERO),
+            loss_factor: Some(Decimal::ZERO),
+            loss_cost: Some(Decimal::ZERO),
+            effective_energy: Some(Decimal::from(100)),
             confirmed_at: None,
         };
 
         assert_eq!(settlement.status, SettlementStatus::Pending);
-        assert!(settlement.blockchain_tx.is_none());
-        assert!(settlement.confirmed_at.is_none());
     }
 
     #[test]

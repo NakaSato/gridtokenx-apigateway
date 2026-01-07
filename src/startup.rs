@@ -127,7 +127,8 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
     let market_clearing_engine = services::OrderMatchingEngine::new(db_pool.clone())
         .with_websocket(websocket_service.clone())
         .with_settlement(settlement.clone())
-        .with_market_clearing(market_clearing.clone());
+        .with_market_clearing(market_clearing.clone())
+        .with_blockchain(blockchain_service.clone());
     info!("✅ Order matching engine initialized");
 
     // Initialize futures service

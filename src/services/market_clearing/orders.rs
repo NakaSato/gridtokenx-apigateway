@@ -3,7 +3,7 @@ use chrono::{DateTime, Duration, Utc};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use uuid::Uuid;
-use tracing::info;
+use tracing::{info, error};
 
 use crate::database::schema::types::{OrderSide, OrderStatus, OrderType};
 use crate::error::ApiError;
@@ -111,7 +111,32 @@ impl MarketClearingService {
         // 1. Start transaction
         let mut tx = self.db.begin().await?;
 
-        // 2. Handle Escrow (Lock Funds/Energy)
+        // 2. Insert order into DB (Must process first to satisfy FK for escrow_records)
+        sqlx::query!(
+            r#"
+            INSERT INTO trading_orders (
+                id, user_id, order_type, side, energy_amount, price_per_kwh,
+                filled_amount, status, expires_at, created_at, epoch_id, zone_id, meter_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            "#,
+            order_id,
+            user_id,
+            order_type as OrderType,
+            side as OrderSide,
+            energy_amount,
+            price_per_kwh_val,
+            Decimal::ZERO,
+            OrderStatus::Pending as OrderStatus,
+            expires_at,
+            now,
+            epoch.id,
+            zone_id,
+            meter_id
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // 3. Handle Escrow (Lock Funds/Energy)
         match side {
             OrderSide::Buy => {
                 let total_escrow_amount = energy_amount * price_per_kwh_val;
@@ -175,30 +200,7 @@ impl MarketClearingService {
             }
         }
 
-        // 3. Insert order into DB
-        sqlx::query!(
-            r#"
-            INSERT INTO trading_orders (
-                id, user_id, order_type, side, energy_amount, price_per_kwh,
-                filled_amount, status, expires_at, created_at, epoch_id, zone_id, meter_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            "#,
-            order_id,
-            user_id,
-            order_type as OrderType,
-            side as OrderSide,
-            energy_amount,
-            price_per_kwh_val,
-            Decimal::ZERO,
-            OrderStatus::Pending as OrderStatus,
-            expires_at,
-            now,
-            epoch.id,
-            zone_id,
-            meter_id
-        )
-        .execute(&mut *tx)
-        .await?;
+
 
         tx.commit().await?;
 
@@ -393,6 +395,28 @@ impl MarketClearingService {
 
             info!("Order {} cancelled by user {} (filled: {}, refunded: {})", 
                 order_id, user_id, filled, unfilled);
+
+            // Execute On-Chain Refund
+            // Buy Order -> Refund Currency (unfilled * price)
+            // Sell Order -> Refund Energy (unfilled)
+            let (asset_type, refund_amount) = match order.side {
+                OrderSide::Buy => ("currency", unfilled * price),
+                OrderSide::Sell => ("energy", unfilled),
+            };
+
+            if refund_amount > Decimal::ZERO {
+                match self.execute_escrow_refund(user_id, refund_amount, asset_type).await {
+                    Ok(sig) => {
+                        info!("On-chain escrow refund executed for order {}: {}", order_id, sig);
+                    }
+                    Err(e) => {
+                         // Critical error if DB refunded but Chain failed. 
+                         // For now, we log it. In a real system, this needs a reconciliation queue.
+                         error!("Failed to execute on-chain refund for order {}: {}", order_id, e);
+                    }
+                }
+            }
+
         } else {
             return Err(ApiError::NotFound("Order not found".to_string()).into());
         }

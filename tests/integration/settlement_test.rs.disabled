@@ -1,14 +1,19 @@
 // Settlement Integration Test
 // Tests the complete settlement process for energy trading
 // This test requires a running Solana localnet validator and PostgreSQL database
+//
+// TODO: These tests need to be updated to match the current API:
+// - SettlementService::new() now requires encryption_secret parameter
+// - Import paths have changed: market -> market_clearing, settlement_service -> settlement  
+// - SettlementConfig and SettlementStatus are in settlement::types
 
 use anyhow::Result;
 use api_gateway::config::SolanaProgramsConfig;
 use api_gateway::database::schema::types::OrderSide;
 use api_gateway::services::{
     blockchain::BlockchainService,
-    market::{ClearingPrice, TradeMatch},
-    settlement_service::{SettlementConfig, SettlementService, SettlementStatus},
+    market_clearing::{ClearingPrice, TradeMatch},
+    settlement::{SettlementConfig, SettlementService, SettlementStatus},
 };
 use chrono::Utc;
 use rust_decimal::Decimal;
@@ -92,8 +97,10 @@ async fn setup_settlement_test() -> Result<(PgPool, Arc<BlockchainService>, Sett
         .expect("Failed to create blockchain service"),
     );
 
-    // Initialize settlement service
-    let settlement_service = SettlementService::new(db_pool.clone(), (*blockchain_service).clone());
+    // Initialize settlement service with test encryption secret
+    let encryption_secret = std::env::var("ENCRYPTION_SECRET")
+        .unwrap_or_else(|_| "test_encryption_secret_32chars!!".to_string());
+    let settlement_service = SettlementService::new(db_pool.clone(), (*blockchain_service).clone(), encryption_secret);
 
     Ok((db_pool, blockchain_service, settlement_service, epoch_id))
 }
@@ -151,7 +158,7 @@ async fn test_settlement_service_initialization() -> Result<()> {
 
 #[tokio::test]
 async fn test_create_settlement_from_trade() -> Result<()> {
-    let (db_pool, _blockchain_service, settlement_service, epoch_id) =
+    let (db_pool, _blockchain_service, settlement_service, epoch_id): (PgPool, Arc<BlockchainService>, SettlementService, Uuid) =
         setup_settlement_test().await?;
 
     println!("\n📝 ============================================");
@@ -202,7 +209,7 @@ async fn test_create_settlement_from_trade() -> Result<()> {
 
 #[tokio::test]
 async fn test_settlement_fee_calculation() -> Result<()> {
-    let (db_pool, blockchain_service, _, epoch_id) = setup_settlement_test().await?;
+    let (db_pool, blockchain_service, _, epoch_id): (PgPool, Arc<BlockchainService>, SettlementService, Uuid) = setup_settlement_test().await?;
 
     println!("\n💰 ============================================");
     println!("   Test: Settlement Fee Calculation");
@@ -226,8 +233,10 @@ async fn test_settlement_fee_calculation() -> Result<()> {
             retry_delay_secs: 60,
         };
 
+        let encryption_secret = std::env::var("ENCRYPTION_SECRET")
+            .unwrap_or_else(|_| "test_encryption_secret_32chars!!".to_string());
         let settlement_service =
-            SettlementService::with_config(db_pool.clone(), (*blockchain_service).clone(), config);
+            SettlementService::with_config(db_pool.clone(), (*blockchain_service).clone(), config, encryption_secret);
 
         let buyer_id = create_test_user(&db_pool).await?;
         let seller_id = create_test_user(&db_pool).await?;
@@ -255,7 +264,7 @@ async fn test_settlement_fee_calculation() -> Result<()> {
 
 #[tokio::test]
 async fn test_settlement_status_transitions() -> Result<()> {
-    let (db_pool, _blockchain_service, settlement_service, epoch_id) =
+    let (db_pool, _blockchain_service, settlement_service, epoch_id): (PgPool, Arc<BlockchainService>, SettlementService, Uuid) =
         setup_settlement_test().await?;
 
     println!("\n🔄 ============================================");
@@ -312,7 +321,7 @@ async fn test_settlement_status_transitions() -> Result<()> {
 
 #[tokio::test]
 async fn test_batch_settlement_creation() -> Result<()> {
-    let (db_pool, _blockchain_service, settlement_service, epoch_id) =
+    let (db_pool, _blockchain_service, settlement_service, epoch_id): (PgPool, Arc<BlockchainService>, SettlementService, Uuid) =
         setup_settlement_test().await?;
 
     println!("\n📦 ============================================");
@@ -373,7 +382,7 @@ async fn test_batch_settlement_creation() -> Result<()> {
 
 #[tokio::test]
 async fn test_settlement_statistics() -> Result<()> {
-    let (db_pool, _blockchain_service, settlement_service, epoch_id) =
+    let (db_pool, _blockchain_service, settlement_service, epoch_id): (PgPool, Arc<BlockchainService>, SettlementService, Uuid) =
         setup_settlement_test().await?;
 
     println!("\n📊 ============================================");
@@ -434,7 +443,7 @@ async fn test_settlement_statistics() -> Result<()> {
 
 #[tokio::test]
 async fn test_on_chain_settlement_execution() -> Result<()> {
-    let (db_pool, _blockchain_service, settlement_service, epoch_id) =
+    let (db_pool, _blockchain_service, settlement_service, epoch_id): (PgPool, Arc<BlockchainService>, SettlementService, Uuid) =
         setup_settlement_test().await?;
 
     println!("\n⛓️ ============================================");
@@ -474,7 +483,7 @@ async fn test_on_chain_settlement_execution() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_complete_settlement_workflow() -> Result<()> {
-    let (db_pool, blockchain_service, settlement_service, epoch_id) =
+    let (db_pool, blockchain_service, settlement_service, epoch_id): (PgPool, Arc<BlockchainService>, SettlementService, Uuid) =
         setup_settlement_test().await?;
 
     println!("\n♻️ ============================================");

@@ -3,7 +3,7 @@ import json
 from solana.rpc.api import Client
 from solders.pubkey import Pubkey
 
-ENERGY_TOKEN_PROGRAM_ID = Pubkey.from_string("HaT3koMseafcCB9aUQUCrSLMDfN1km7Xik9UhZSG9UV6")
+ENERGY_TOKEN_PROGRAM_ID = Pubkey.from_string("5T7PuWV6wbzhJP9WDfDegPMGRiadMhxHrUc2n2LAB9gY")
 SEEDS = [b"mint"]
 
 mint_pda, bump = Pubkey.find_program_address(SEEDS, ENERGY_TOKEN_PROGRAM_ID)

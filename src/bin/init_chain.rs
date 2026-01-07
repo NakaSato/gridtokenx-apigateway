@@ -21,7 +21,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Config
     let rpc_url = env::var("SOLANA_RPC_URL").unwrap_or("http://localhost:8899".to_string());
-    let program_config = SolanaProgramsConfig::default();
+    let program_config = SolanaProgramsConfig {
+        registry_program_id: env::var("SOLANA_REGISTRY_PROGRAM_ID")
+            .unwrap_or_else(|_| "HWoKSbNy4jJBFJ7g7drxZgAfTmjFqvg1Sx6vXosfJNAi".to_string()),
+        oracle_program_id: env::var("SOLANA_ORACLE_PROGRAM_ID")
+            .unwrap_or_else(|_| "5z6Qaf6UUv42uCqbxQLfKz7cSXhMABsq73mRMwvHKzFA".to_string()),
+        governance_program_id: env::var("SOLANA_GOVERNANCE_PROGRAM_ID")
+            .unwrap_or_else(|_| "2WrMSfreZvCCKdQMQGY7bTFgXKgr42fYipJR6VXn1Q8c".to_string()),
+        energy_token_program_id: env::var("SOLANA_ENERGY_TOKEN_PROGRAM_ID")
+            .unwrap_or_else(|_| "MwAdshY2978VqcpJzWSKmPfDtKfweD7YLMCQSBcR4wP".to_string()),
+        trading_program_id: env::var("SOLANA_TRADING_PROGRAM_ID")
+            .unwrap_or_else(|_| "Fmk6vb74MjZpXVE9kAS5q4U5L8hr2AEJcDikfRSFTiyY".to_string()),
+    };
     
     // Initialize Blockchain Service
     let blockchain = BlockchainService::new(rpc_url.clone(), "localnet".to_string(), program_config)

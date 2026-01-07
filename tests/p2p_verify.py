@@ -6,10 +6,27 @@ import random
 import uuid
 
 # Configuration
+import subprocess
+import os
+
+# Configuration
 BASE_URL = "http://localhost:4000/api/v1"
 SELLER_EMAIL = f"seller_{random.randint(1000,9999)}@test.com"
 BUYER_EMAIL = f"buyer_{random.randint(1000,9999)}@test.com"
 PASSWORD = "StrongP@ssw0rd!2025"
+
+def get_env_var(key):
+    try:
+        with open("../.env", "r") as f:
+            for line in f:
+                if line.startswith(f"{key}="):
+                    return line.strip().split("=")[1]
+    except Exception:
+        pass
+    return None
+
+CURRENCY_MINT = get_env_var("CURRENCY_TOKEN_MINT")
+
 
 class GridTokenXClient:
     def __init__(self, email, password, role="user"):
@@ -203,6 +220,26 @@ def main():
     print("Waiting for mint confirmation...")
     time.sleep(5) 
 
+    # 3b. Fund Buyer with Currency
+    if CURRENCY_MINT:
+        print(f"[{buyer.email}] Funding with Currency ({CURRENCY_MINT})...")
+        try:
+             # Ensure buyer has ATA
+            subprocess.run(
+                ["spl-token", "create-account", CURRENCY_MINT, "--owner", buyer.wallet, "--fee-payer", "dev-wallet.json"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=".."
+            )
+            # Mint tokens
+            subprocess.run(
+                ["spl-token", "mint", CURRENCY_MINT, "1000", buyer.wallet, "--fee-payer", "dev-wallet.json", "--mint-authority", "dev-wallet.json"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=".."
+            )
+            print(f"[{buyer.email}] Funded with 1000 Currency Tokens.")
+        except Exception as e:
+            print(f"Failed to fund buyer: {e}")
+    else:
+        print("WARNING: CURRENCY_TOKEN_MINT not found in .env, buyer might fail to lock escrow.")
+    
     # 4. Create Orders
     price = 2.0
     amount = 10.0

@@ -1,6 +1,5 @@
 use sqlx::postgres::PgPoolOptions;
-use uuid::Uuid;
-use dotenv::dotenv;
+use dotenvy::dotenv;
 use std::env;
 
 #[tokio::main]
@@ -16,7 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Querying data for user: {}", username);
 
     let row = sqlx::query!(
-        "SELECT id, username, wallet_address, solana_wallet, encrypted_private_key IS NOT NULL as has_key, wallet_salt IS NOT NULL as has_salt, encryption_iv IS NOT NULL as has_iv FROM users WHERE username = $1",
+        "SELECT id, username, wallet_address, encrypted_private_key IS NOT NULL as has_key, wallet_salt IS NOT NULL as has_salt, encryption_iv IS NOT NULL as has_iv FROM users WHERE username = $1",
         username
     )
     .fetch_one(&pool)
@@ -25,7 +24,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("ID: {}", row.id);
     println!("Username: {}", row.username);
     println!("wallet_address: {:?}", row.wallet_address);
-    println!("solana_wallet: {:?}", row.solana_wallet);
     println!("Has Key: {:?}", row.has_key);
     println!("Has Salt: {:?}", row.has_salt);
     println!("Has IV: {:?}", row.has_iv);

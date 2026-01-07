@@ -130,19 +130,19 @@ impl TokenManager {
 
         // Get energy token program ID from environment (with fallback to deployed program ID)
         let energy_token_program_id = std::env::var("SOLANA_ENERGY_TOKEN_PROGRAM_ID")
-            .unwrap_or_else(|_| "HaT3koMseafcCB9aUQUCrSLMDfN1km7Xik9UhZSG9UV6".to_string());
+            .unwrap_or_else(|_| "MwAdshY2978VqcpJzWSKmPfDtKfweD7YLMCQSBcR4wP".to_string());
         let energy_token_program_id = Pubkey::from_str(&energy_token_program_id)
             .map_err(|e| anyhow!("Invalid SOLANA_ENERGY_TOKEN_PROGRAM_ID: {}", e))?;
 
         // Derive the mint PDA from energy_token program
         let (mint_pda, _) = Pubkey::find_program_address(
-            &[b"mint"],
+            &[b"mint_2022"],
             &energy_token_program_id,
         );
 
         // Derive token_info PDA (this is the mint authority)
         let (token_info_pda, _) = Pubkey::find_program_address(
-            &[b"token_info"],
+            &[b"token_info_2022"],
             &energy_token_program_id,
         );
 

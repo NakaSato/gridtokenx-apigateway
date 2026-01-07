@@ -66,6 +66,26 @@ else
     sed -i "s/ENERGY_TOKEN_MINT=.*/ENERGY_TOKEN_MINT=$NEW_MINT/" .env
 fi
 
+echo "💵 Creating Currency Token Mint (USDC Mock)..."
+CURRENCY_MINT=$(spl-token create-token --program-id TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb --decimals 6 --fee-payer $WALLET --mint-authority $WALLET --url $RPC_URL | grep "Address:" | awk '{print $NF}')
+echo "✅ Currency Mint: $CURRENCY_MINT"
+
+echo "📝 Updating .env with currency mint..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # Check if CURRENCY_TOKEN_MINT exists in .env, if not append it
+    if grep -q "CURRENCY_TOKEN_MINT=" .env; then
+        sed -i '' "s/CURRENCY_TOKEN_MINT=.*/CURRENCY_TOKEN_MINT=$CURRENCY_MINT/" .env
+    else
+        echo "CURRENCY_TOKEN_MINT=$CURRENCY_MINT" >> .env
+    fi
+else
+    if grep -q "CURRENCY_TOKEN_MINT=" .env; then
+        sed -i "s/CURRENCY_TOKEN_MINT=.*/CURRENCY_TOKEN_MINT=$CURRENCY_MINT/" .env
+    else
+        echo "CURRENCY_TOKEN_MINT=$CURRENCY_MINT" >> .env
+    fi
+fi
+
 echo "🧹 Clearing Database Trading Data..."
 cargo run --example clear_trading_data
 

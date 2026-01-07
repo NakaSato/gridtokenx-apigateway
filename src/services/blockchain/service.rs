@@ -886,6 +886,56 @@ impl BlockchainService {
             .await
     }
 
+    /// Derive escrow PDA
+    pub fn derive_escrow_pda(order_id: &[u8; 32], program_id: &Pubkey) -> (Pubkey, u8) {
+        TransactionHandler::derive_escrow_pda(order_id, program_id)
+    }
+
+    /// Lock tokens to escrow
+    pub async fn lock_tokens_to_escrow(
+        &self,
+        buyer_authority: &Keypair,
+        buyer_ata: &Pubkey,
+        escrow_ata: &Pubkey,
+        token_mint: &Pubkey,
+        amount: u64,
+        decimals: u8,
+    ) -> Result<Signature> {
+        self.transaction_handler
+            .lock_tokens_to_escrow(buyer_authority, buyer_ata, escrow_ata, token_mint, amount, decimals)
+            .await
+    }
+
+    /// Release escrow to seller
+    pub async fn release_escrow_to_seller(
+        &self,
+        escrow_authority: &Keypair,
+        escrow_ata: &Pubkey,
+        seller_ata: &Pubkey,
+        token_mint: &Pubkey,
+        amount: u64,
+        decimals: u8,
+    ) -> Result<Signature> {
+        self.transaction_handler
+            .release_escrow_to_seller(escrow_authority, escrow_ata, seller_ata, token_mint, amount, decimals)
+            .await
+    }
+
+    /// Refund escrow to buyer
+    pub async fn refund_escrow_to_buyer(
+        &self,
+        escrow_authority: &Keypair,
+        escrow_ata: &Pubkey,
+        buyer_ata: &Pubkey,
+        token_mint: &Pubkey,
+        amount: u64,
+        decimals: u8,
+    ) -> Result<Signature> {
+        self.transaction_handler
+            .refund_escrow_to_buyer(escrow_authority, escrow_ata, buyer_ata, token_mint, amount, decimals)
+            .await
+    }
+
     /// Mint tokens directly to a user's wallet using the Anchor energy_token program
     pub async fn mint_tokens_direct(&self, user_wallet: &Pubkey, amount: u64) -> Result<Signature> {
         info!(

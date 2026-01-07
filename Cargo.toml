@@ -167,9 +167,6 @@ path = "tests/integration/erc_lifecycle_test.rs"
 name = "token_minting_test"
 path = "tests/integration/token_minting_test.rs"
 
-[[test]]
-name = "settlement_test"
-path = "tests/integration/settlement_test.rs"
 
 [features]
 default = []

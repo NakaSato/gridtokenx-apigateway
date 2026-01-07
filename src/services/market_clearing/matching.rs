@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use rust_decimal::prelude::{ToPrimitive, FromPrimitive};
 use rust_decimal::Decimal;
-use solana_sdk::pubkey::Pubkey;
+
 use uuid::Uuid;
 use std::str::FromStr;
 use tracing::{error, info};
@@ -341,18 +341,7 @@ impl MarketClearingService {
         // Total settlement value includes fees and wheeling charges
         let net_amount = total_amount - fee_amount - wheeling_charge;
 
-        // =================================================================
-        // NEW: Execute On-Chain Transfer (Settlement)
-        // =================================================================
-
-        // 1. Fetch Wallets
-        let buyer_wallet_row = sqlx::query!(
-            "SELECT wallet_address FROM users WHERE id = $1",
-            buy_order.user_id
-        )
-        .fetch_one(&self.db)
-        .await
-        .map_err(|e| ApiError::Database(e))?;
+        // Fetch Seller Wallet for REC issuance (and potential future use)
         let seller_wallet_row = sqlx::query!(
             "SELECT wallet_address FROM users WHERE id = $1",
             sell_order.user_id
@@ -360,80 +349,46 @@ impl MarketClearingService {
         .fetch_one(&self.db)
         .await
         .map_err(|e| ApiError::Database(e))?;
-
-        let buyer_wallet_addr: Option<String> = buyer_wallet_row.wallet_address;
         let seller_wallet_addr: Option<String> = seller_wallet_row.wallet_address;
 
-        // Explicit check to avoid pattern match Unsized error
-        if buyer_wallet_addr.is_some() && seller_wallet_addr.is_some() {
-            let _buyer_wallet_str = buyer_wallet_addr.as_ref().unwrap();
-            let _seller_wallet_str = seller_wallet_addr.as_ref().unwrap();
-            
-            let blockchain_result = async {
-                let authority_keypair = self
-                    .blockchain_service
-                    .get_authority_keypair()
-                    .await
-                    .map_err(|e| format!("Failed to load authority: {}", e))?;
 
-                let token_mint_str = std::env::var("ENERGY_TOKEN_MINT")
-                    .unwrap_or_else(|_| "94G1r674LmRDmLN2UPjDFD8Eh7zT8JaSaxv9v68GyEur".to_string());
-                let token_mint = Pubkey::from_str(&token_mint_str)
-                    .map_err(|e| format!("Invalid mint: {}", e))?;
 
-                let buyer_wallet = Pubkey::from_str(buyer_wallet_addr.as_ref().unwrap())
-                    .map_err(|e| format!("Invalid buyer wallet: {}", e))?;
-                let seller_wallet = Pubkey::from_str(seller_wallet_addr.as_ref().unwrap())
-                    .map_err(|e| format!("Invalid seller wallet: {}", e))?;
+        // =================================================================
+        // NEW: Execute On-Chain Settlement (Escrow Release)
+        // =================================================================
+        // 1. Release Net Payment to Seller (Currency)
+        // Note: Fees and Wheeling Charges remain in Authority Escrow (as revenue)
+        // 4. Trigger Blockchain Settlement (Atomic Swap)
+        // In a real implementation, this would build a single atomic transaction
+        // For this demo, we'll do two transfers (USDC -> Seller, Energy -> Buyer)
+        // NOTE: This is not truly atomic but sufficient for the MVP demo.
 
-                // 2. Ensure ATAs exist
-                let buyer_ata = self
-                    .blockchain_service
-                    .ensure_token_account_exists(&authority_keypair, &buyer_wallet, &token_mint)
-                    .await
-                    .map_err(|e| format!("Failed to get buyer ATA: {}", e))?;
-                let seller_ata = self
-                    .blockchain_service
-                    .ensure_token_account_exists(&authority_keypair, &seller_wallet, &token_mint)
-                    .await
-                    .map_err(|e| format!("Failed to get seller ATA: {}", e))?;
-
-                // 3. Transfer Energy Tokens (Seller -> Buyer)
-                let transfer_amount = (effective_energy * Decimal::from(1_000_000_000))
-                    .to_u64()
-                    .unwrap_or(0);
-
-                if transfer_amount > 0 {
-                    let signature = self
-                        .blockchain_service
-                        .transfer_tokens(
-                            &authority_keypair,
-                            &seller_ata, // From Seller
-                            &buyer_ata,  // To Buyer
-                            &token_mint,
-                            transfer_amount,
-                            9, // Decimals
-                        )
-                        .await
-                        .map_err(|e| format!("Transfer failed: {}", e))?;
-
-                    Ok::<String, String>(signature.to_string())
-                } else {
-                    Ok("Zero amount".to_string())
-                }
-            }
-            .await;
-
-            match blockchain_result {
-                Ok(sig) => tracing::info!(
-                    "Settlement on-chain transfer successful. Signature: {}",
-                    sig
-                ),
-                Err(e) => tracing::error!("Settlement on-chain transfer failed: {}", e),
-            }
-        } else {
-            tracing::warn!("Skipping on-chain settlement: Seller or Buyer missing wallet address");
+        // Transfer USDC from Escrow -> Seller
+        match self
+            .execute_escrow_release(
+                sell_order.user_id, 
+                net_amount, 
+                "currency"
+            )
+            .await
+        {
+            Ok(_sig) => info!("Settlement Payment Release triggered: {} -> Seller {}", net_amount, sell_order.user_id),
+            Err(e) => error!("Failed to release payment escrow: {}", e),
         }
+
+        // Transfer Energy from Escrow -> Buyer
+        match self
+            .execute_escrow_release(
+                buy_order.user_id, 
+                effective_energy, 
+                "energy"
+            )
+            .await
+        {
+            Ok(_sig) => info!("Settlement Energy Release triggered: {} -> Buyer {}", effective_energy, buy_order.user_id),
+            Err(e) => error!("Failed to release energy escrow for {}: {}", buy_order.user_id, e),
+        }
+
 
         let settlement = Settlement {
             id: Uuid::new_v4(),

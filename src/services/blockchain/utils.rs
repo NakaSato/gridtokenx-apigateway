@@ -82,7 +82,7 @@ impl BlockchainUtils {
 
         // Derive token_info PDA
         let (token_info_pda, _) =
-            Pubkey::find_program_address(&[b"token_info"], &energy_token_program_id);
+            Pubkey::find_program_address(&[b"token_info_2022"], &energy_token_program_id);
 
         // Build instruction data
         let mut instruction_data = Vec::new();
@@ -435,7 +435,7 @@ impl BlockchainUtils {
 
         // Derive token_info PDA
         let (token_info_pda, _) =
-            Pubkey::find_program_address(&[b"token_info"], &energy_token_program_id);
+            Pubkey::find_program_address(&[b"token_info_2022"], &energy_token_program_id);
 
         // Build instruction data
         let mut instruction_data = Vec::new();
@@ -506,7 +506,7 @@ impl BlockchainUtils {
     /// Get Energy Token program ID
     fn energy_token_program_id() -> Result<Pubkey> {
         let program_id = std::env::var("SOLANA_ENERGY_TOKEN_PROGRAM_ID")
-            .unwrap_or_else(|_| "HaT3koMseafcCB9aUQUCrSLMDfN1km7Xik9UhZSG9UV6".to_string());
+            .unwrap_or_else(|_| "MwAdshY2978VqcpJzWSKmPfDtKfweD7YLMCQSBcR4wP".to_string());
 
         program_id
             .parse()

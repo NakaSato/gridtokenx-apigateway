@@ -10,11 +10,11 @@ use std::str::FromStr;
 const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
 
 /// Program IDs (localnet) — keep in sync with `gridtokenx-anchor/Anchor.toml`
-pub const REGISTRY_PROGRAM_ID: &str = "CVS6pz2qdEmjusHCmiwe2R21KVrSoGubdEy5d766KooN";
-pub const ORACLE_PROGRAM_ID: &str = "3hSEt5vVzbiMCegFnhdMpFGkXEDY8BinrPb8egJoS7C7";
-pub const GOVERNANCE_PROGRAM_ID: &str = "GAZQm4bHUyNhSYrAq5noBohXcTaf6dKZNDKju8499e6w";
-pub const ENERGY_TOKEN_PROGRAM_ID: &str = "HaT3koMseafcCB9aUQUCrSLMDfN1km7Xik9UhZSG9UV6";
-pub const TRADING_PROGRAM_ID: &str = "8gHn9oeYcUQgNrMi8fNYGyMCKJTMwM6K413f41AANFt4";
+pub const REGISTRY_PROGRAM_ID: &str = "HWoKSbNy4jJBFJ7g7drxZgAfTmjFqvg1Sx6vXosfJNAi";
+pub const ORACLE_PROGRAM_ID: &str = "5z6Qaf6UUv42uCqbxQLfKz7cSXhMABsq73mRMwvHKzFA";
+pub const GOVERNANCE_PROGRAM_ID: &str = "2WrMSfreZvCCKdQMQGY7bTFgXKgr42fYipJR6VXn1Q8c";
+pub const ENERGY_TOKEN_PROGRAM_ID: &str = "MwAdshY2978VqcpJzWSKmPfDtKfweD7YLMCQSBcR4wP";
+pub const TRADING_PROGRAM_ID: &str = "Fmk6vb74MjZpXVE9kAS5q4U5L8hr2AEJcDikfRSFTiyY";
 
 /// Instruction builder for Solana programs
 #[derive(Clone, Debug)]
@@ -151,7 +151,7 @@ impl InstructionBuilder {
             AccountMeta::new(recipient_pubkey, false),
             AccountMeta::new(mint_pubkey, false),
             AccountMeta::new_readonly(self.payer, true),
-            AccountMeta::new_readonly(spl_token::ID, false),
+            AccountMeta::new_readonly(Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")?, false),
         ];
 
         // Build instruction data
@@ -186,7 +186,7 @@ impl InstructionBuilder {
             AccountMeta::new(to_pubkey, false),
             AccountMeta::new(mint_pubkey, false),
             AccountMeta::new_readonly(self.payer, true),
-            AccountMeta::new_readonly(spl_token::ID, false),
+            AccountMeta::new_readonly(Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")?, false),
         ];
 
         // Build instruction data
@@ -608,12 +608,12 @@ impl InstructionBuilder {
     pub fn build_initialize_energy_token_instruction(&self, authority: Pubkey) -> Result<Instruction> {
         let program_id = Pubkey::from_str(ENERGY_TOKEN_PROGRAM_ID)?;
         let system_program = Pubkey::from_str(SYSTEM_PROGRAM_ID)?;
-        let token_program = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")?; // Standard Token
+        let token_program = Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")?; // Token-2022
         let rent = solana_sdk::sysvar::rent::ID;
 
         // PDAs
-        let (token_info_pda, _) = Pubkey::find_program_address(&[b"token_info"], &program_id);
-        let (mint_pda, _) = Pubkey::find_program_address(&[b"mint"], &program_id);
+        let (token_info_pda, _) = Pubkey::find_program_address(&[b"token_info_2022"], &program_id);
+        let (mint_pda, _) = Pubkey::find_program_address(&[b"mint_2022"], &program_id);
 
         let accounts = vec![
             AccountMeta::new(token_info_pda, false),

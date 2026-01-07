@@ -28,6 +28,7 @@ pub struct TradingOrder {
     pub zone_id: Option<i32>,
     pub meter_id: Option<Uuid>,
     pub refund_tx_signature: Option<String>,
+    pub order_pda: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -47,6 +48,7 @@ pub struct TradingOrderDb {
     pub zone_id: Option<i32>,
     pub meter_id: Option<Uuid>,
     pub refund_tx_signature: Option<String>,
+    pub order_pda: Option<String>,
 }
 
 impl From<TradingOrderDb> for TradingOrder {
@@ -67,6 +69,7 @@ impl From<TradingOrderDb> for TradingOrder {
             zone_id: db.zone_id,
             meter_id: db.meter_id,
             refund_tx_signature: db.refund_tx_signature,
+            order_pda: db.order_pda,
         }
     }
 }

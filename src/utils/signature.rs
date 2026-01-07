@@ -108,6 +108,14 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
     use rand::rngs::OsRng;
+    use rand::RngCore;
+
+    fn generate_signing_key() -> SigningKey {
+        let mut csprng = OsRng;
+        let mut bytes = [0u8; 32];
+        csprng.fill_bytes(&mut bytes);
+        SigningKey::from_bytes(&bytes)
+    }
 
     #[test]
     fn test_canonical_message_format() {
@@ -127,7 +135,7 @@ mod tests {
     #[test]
     fn test_signature_verification() {
         // Generate keypair
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let signing_key = generate_signing_key();
 
         // Create message
         let message = MeterReadingMessage {
@@ -153,8 +161,8 @@ mod tests {
     #[test]
     fn test_invalid_signature() {
         // Generate two different keypairs
-        let signing_key1 = SigningKey::generate(&mut OsRng);
-        let signing_key2 = SigningKey::generate(&mut OsRng);
+        let signing_key1 = generate_signing_key();
+        let signing_key2 = generate_signing_key();
 
         // Create message
         let message = MeterReadingMessage {

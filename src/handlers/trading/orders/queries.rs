@@ -308,7 +308,7 @@ pub async fn get_my_trades(
         FROM order_matches om
         JOIN trading_orders buy_order ON om.buy_order_id = buy_order.id
         JOIN trading_orders sell_order ON om.sell_order_id = sell_order.id
-        LEFT JOIN settlements s ON s.trade_id = om.id
+        LEFT JOIN settlements s ON om.settlement_id = s.id
         WHERE buy_order.user_id = $1 OR sell_order.user_id = $1
         ORDER BY om.match_time DESC
         LIMIT $2
