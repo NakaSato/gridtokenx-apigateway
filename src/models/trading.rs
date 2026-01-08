@@ -261,3 +261,133 @@ pub struct ConditionalOrder {
     pub triggered_at: Option<DateTime<Utc>>,
 }
 
+// ==================== Recurring Orders (DCA) ====================
+
+/// Interval type for recurring orders
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, ToSchema)]
+#[sqlx(type_name = "interval_type", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum IntervalType {
+    Hourly,
+    Daily,
+    Weekly,
+    Monthly,
+}
+
+/// Status of a recurring order
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, ToSchema)]
+#[sqlx(type_name = "recurring_status", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum RecurringStatus {
+    Active,
+    Paused,
+    Completed,
+    Cancelled,
+}
+
+impl std::fmt::Display for IntervalType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IntervalType::Hourly => write!(f, "hourly"),
+            IntervalType::Daily => write!(f, "daily"),
+            IntervalType::Weekly => write!(f, "weekly"),
+            IntervalType::Monthly => write!(f, "monthly"),
+        }
+    }
+}
+
+impl std::fmt::Display for RecurringStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RecurringStatus::Active => write!(f, "active"),
+            RecurringStatus::Paused => write!(f, "paused"),
+            RecurringStatus::Completed => write!(f, "completed"),
+            RecurringStatus::Cancelled => write!(f, "cancelled"),
+        }
+    }
+}
+
+/// Request to create a recurring order
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct CreateRecurringOrderRequest {
+    /// Order side (buy/sell)
+    pub side: OrderSide,
+    
+    /// Amount of energy per execution
+    #[schema(value_type = String, example = "10.0")]
+    pub energy_amount: Decimal,
+    
+    /// Max price for buy orders
+    #[schema(value_type = String, example = "0.20")]
+    pub max_price_per_kwh: Option<Decimal>,
+    
+    /// Min price for sell orders
+    #[schema(value_type = String, example = "0.10")]
+    pub min_price_per_kwh: Option<Decimal>,
+    
+    /// Interval type (hourly, daily, weekly, monthly)
+    pub interval_type: IntervalType,
+    
+    /// Execute every N intervals (default: 1)
+    pub interval_value: Option<i32>,
+    
+    /// Maximum number of executions (null = unlimited)
+    pub max_executions: Option<i32>,
+    
+    /// User-friendly name for this order
+    pub name: Option<String>,
+    
+    /// Optional description
+    pub description: Option<String>,
+}
+
+/// Response for recurring order creation
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RecurringOrderResponse {
+    pub id: Uuid,
+    pub status: RecurringStatus,
+    pub next_execution_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub message: String,
+}
+
+/// Full recurring order info
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct RecurringOrder {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub side: OrderSide,
+    #[schema(value_type = String)]
+    pub energy_amount: Decimal,
+    #[schema(value_type = String)]
+    pub max_price_per_kwh: Option<Decimal>,
+    #[schema(value_type = String)]
+    pub min_price_per_kwh: Option<Decimal>,
+    pub interval_type: IntervalType,
+    pub interval_value: i32,
+    pub next_execution_at: DateTime<Utc>,
+    pub last_executed_at: Option<DateTime<Utc>>,
+    pub status: RecurringStatus,
+    pub total_executions: i32,
+    pub max_executions: Option<i32>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Request to update a recurring order
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct UpdateRecurringOrderRequest {
+    #[schema(value_type = String)]
+    pub energy_amount: Option<Decimal>,
+    #[schema(value_type = String)]
+    pub max_price_per_kwh: Option<Decimal>,
+    #[schema(value_type = String)]
+    pub min_price_per_kwh: Option<Decimal>,
+    pub interval_type: Option<IntervalType>,
+    pub interval_value: Option<i32>,
+    pub max_executions: Option<i32>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+}

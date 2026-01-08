@@ -26,6 +26,7 @@ pub mod erc;
 pub mod grid_topology;
 pub mod notification;
 pub mod price_monitor;
+pub mod recurring_scheduler;
 
 // Re-exports
 pub use auth::AuthService;
@@ -49,4 +50,4 @@ pub use erc::ErcService;
 pub use grid_topology::GridTopologyService;
 pub use notification::NotificationService;
 pub use price_monitor::{PriceMonitor, PriceMonitorConfig};
-
+pub use recurring_scheduler::{RecurringScheduler, RecurringSchedulerConfig};
