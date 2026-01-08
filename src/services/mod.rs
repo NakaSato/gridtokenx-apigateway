@@ -27,6 +27,7 @@ pub mod grid_topology;
 pub mod notification;
 pub mod price_monitor;
 pub mod recurring_scheduler;
+pub mod notification_dispatcher;
 
 // Re-exports
 pub use auth::AuthService;
@@ -51,3 +52,5 @@ pub use grid_topology::GridTopologyService;
 pub use notification::NotificationService;
 pub use price_monitor::{PriceMonitor, PriceMonitorConfig};
 pub use recurring_scheduler::{RecurringScheduler, RecurringSchedulerConfig};
+pub use notification_dispatcher::{NotificationDispatcher, NotificationDispatcherConfig};
+

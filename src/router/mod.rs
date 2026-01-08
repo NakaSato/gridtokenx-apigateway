@@ -212,6 +212,14 @@ pub fn build_router(app_state: AppState) -> Router {
         .route("/grid-status/history", get(crate::handlers::auth::meters::public_grid_history))
         .route("/meters/batch/readings", post(crate::handlers::auth::meters::create_batch_readings));
 
+    // Notifications routes (auth required)
+    let notifications_routes = Router::new()
+        .route("/", get(crate::handlers::notifications::list_notifications))
+        .route("/{id}/read", axum::routing::put(crate::handlers::notifications::mark_as_read))
+        .route("/read-all", axum::routing::put(crate::handlers::notifications::mark_all_as_read))
+        .route("/preferences", get(crate::handlers::notifications::get_preferences).put(crate::handlers::notifications::update_preferences))
+        .layer(middleware::from_fn_with_state(app_state.clone(), auth_middleware));
+
     let v1_api = Router::new()
         .nest("/auth", v1_auth_routes())       // POST /api/v1/auth/token, GET /api/v1/auth/verify
         .nest("/users", v1_users_routes())     // POST /api/v1/users, GET /api/v1/users/me
@@ -222,6 +230,7 @@ pub fn build_router(app_state: AppState) -> Router {
         .nest("/futures", futures_routes)      // /api/v1/futures
         .nest("/analytics", analytics_routes)  // /api/v1/analytics
         .nest("/dashboard", v1_dashboard_routes()) // /api/v1/dashboard/metrics
+        .nest("/notifications", notifications_routes) // /api/v1/notifications
         .nest("/dev", dev::dev_routes())       // POST /api/v1/dev/faucet
         .nest("/public", public_routes)        // GET /api/v1/public/meters (no auth)
         .route("/rpc", axum::routing::post(crate::handlers::rpc::rpc_handler)); // /api/v1/rpc
