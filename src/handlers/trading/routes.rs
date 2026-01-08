@@ -9,6 +9,7 @@ use super::blockchain::{get_blockchain_market_data, match_blockchain_orders};
 use super::conditional::{create_conditional_order, list_conditional_orders, cancel_conditional_order};
 use super::recurring::{create_recurring_order, list_recurring_orders, get_recurring_order, cancel_recurring_order, pause_recurring_order, resume_recurring_order};
 use super::price_alerts::{create_price_alert, list_price_alerts, delete_price_alert};
+use super::export::{export_csv, export_json};
 use super::p2p::{calculate_p2p_cost, get_p2p_market_prices};
 use super::status::{get_matching_status, get_settlement_stats};
 use super::revenue::{get_revenue_summary, get_revenue_records};
@@ -33,6 +34,10 @@ pub fn v1_trading_routes() -> Router<AppState> {
         // Price Alerts
         .route("/price-alerts", post(create_price_alert).get(list_price_alerts))
         .route("/price-alerts/{id}", delete(delete_price_alert))
+        
+        // Export
+        .route("/export/csv", get(export_csv))
+        .route("/export/json", get(export_json))
         
         // Order Book
         .route("/orderbook", get(get_order_book))
