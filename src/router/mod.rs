@@ -2,7 +2,7 @@
 //!
 //! Supports both v1 RESTful API and legacy routes for backward compatibility.
 
-use axum::{routing::{get, post}, Router, extract::{State, WebSocketUpgrade}, response::IntoResponse, middleware};
+use axum::{routing::{get, post}, Router, extract::State, middleware};
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, timeout::TimeoutLayer, trace::TraceLayer};
 use utoipa::OpenApi;
@@ -17,7 +17,6 @@ use crate::handlers::{
     v1_auth_routes, v1_users_routes, v1_meters_routes, v1_wallets_routes, v1_status_routes,
     v1_trading_routes, v1_dashboard_routes,
 };
-use crate::services::WebSocketService;
 use crate::auth::middleware::auth_middleware;
 use crate::middleware::{metrics_middleware, active_requests_middleware};
 
@@ -74,16 +73,17 @@ use crate::middleware::{metrics_middleware, active_requests_middleware};
         crate::handlers::analytics::admin::get_admin_stats,
         crate::handlers::analytics::admin::get_admin_activity,
         crate::handlers::analytics::admin::get_system_health,
+        crate::handlers::analytics::admin::get_zone_economic_insights,
         crate::handlers::futures::get_products,
         crate::handlers::futures::create_order,
         crate::handlers::futures::get_my_orders,
         crate::handlers::futures::get_positions,
         crate::handlers::futures::close_position,
-        crate::handlers::futures::get_candles,
-        crate::handlers::futures::get_order_book,
-        crate::handlers::websocket::handlers::websocket_handler,
-        crate::handlers::websocket::handlers::market_websocket_handler,
-        crate::handlers::websocket::handlers::websocket_stats,
+        crate::handlers::meter::stub::get_meter_readings,
+        crate::handlers::meter::stub::get_meter_trends,
+        crate::handlers::meter::stub::get_meter_health,
+        crate::handlers::meter::get_zones,
+        crate::handlers::meter::get_zone_stats,
         crate::handlers::dev::metrics::get_metrics,
         crate::handlers::dashboard::get_dashboard_metrics,
     ),
@@ -151,6 +151,9 @@ use crate::middleware::{metrics_middleware, active_requests_middleware};
             crate::handlers::analytics::types::WealthPoint,
             crate::handlers::analytics::types::UserTransaction,
             crate::handlers::analytics::types::UserTransactionsResponse,
+            crate::handlers::analytics::types::ZoneTradeStats,
+            crate::handlers::analytics::types::ZoneRevenueBreakdown,
+            crate::handlers::analytics::types::ZoneEconomicInsights,
             crate::handlers::analytics::admin::AdminStatsResponse,
             crate::services::audit_logger::types::AuditEventRecord,
             crate::services::health_check::types::DetailedHealthStatus,
@@ -168,6 +171,10 @@ use crate::middleware::{metrics_middleware, active_requests_middleware};
             crate::services::event_processor::types::EventProcessorStats,
             crate::handlers::trading::types::OrderBookResponse,
             crate::handlers::trading::types::OrderBookEntry,
+            crate::handlers::auth::types::TrendResponse,
+            crate::handlers::auth::types::TrendRecord,
+            crate::handlers::meter::ZoneSummary,
+            crate::handlers::meter::ZoneStats,
         )
     )
 )]
@@ -175,16 +182,22 @@ struct ApiDoc;
 
 /// Build the application router with both v1 and legacy routes.
 pub fn build_router(app_state: AppState) -> Router {
-    // Health check routes (always at root)
+    // Health check routes (always at root, no auth)
     let health = Router::new()
         .route("/health", get(health_check))
         .route("/api/health", get(health_check))
-        .route("/metrics", get(crate::handlers::dev::metrics::get_metrics))
-        .route("/api/meters/submit-reading", post(crate::handlers::meter::submit_reading));
+        .route("/metrics", get(crate::handlers::dev::metrics::get_metrics));
 
-    // WebSocket endpoint
+    // Meter reading submission (auth required)
+    let meter_submit = Router::new()
+        .route("/api/meters/submit-reading", post(crate::handlers::meter::submit_reading))
+        .layer(middleware::from_fn_with_state(app_state.clone(), auth_middleware));
+
+    // WebSocket endpoints
     let ws = Router::new()
-        .route("/ws", get(websocket_handler));
+        .route("/ws", get(crate::handlers::websocket::handlers::websocket_handler))
+        .route("/ws/{*channel}", get(crate::handlers::websocket::handlers::websocket_channel_handler))
+        .route("/api/market/ws", get(crate::handlers::websocket::handlers::market_websocket_handler));
 
     // Swagger UI
     let swagger = SwaggerUi::new("/api/docs")
@@ -211,6 +224,11 @@ pub fn build_router(app_state: AppState) -> Router {
         .route("/grid-status", get(crate::handlers::auth::meters::public_grid_status))
         .route("/grid-status/history", get(crate::handlers::auth::meters::public_grid_history))
         .route("/meters/batch/readings", post(crate::handlers::auth::meters::create_batch_readings));
+
+    // Simulator routes (auth required for meter registration)
+    let simulator_routes = Router::new()
+        .route("/meters/register", post(crate::handlers::meter::stub::register_meter_by_id))
+        .layer(middleware::from_fn_with_state(app_state.clone(), auth_middleware));
 
     // Notifications routes (auth required)
     let notifications_routes = Router::new()
@@ -250,6 +268,7 @@ pub fn build_router(app_state: AppState) -> Router {
         .nest("/notifications", notifications_routes) // /api/v1/notifications
         .nest("/dev", dev::dev_routes())       // POST /api/v1/dev/faucet
         .nest("/public", public_routes)        // GET /api/v1/public/meters (no auth)
+        .nest("/simulator", simulator_routes)  // POST /api/v1/simulator/meters/register (no auth)
         .route("/rpc", axum::routing::post(crate::handlers::rpc::rpc_handler)); // /api/v1/rpc
 
     // Proxy routes implementation (at root /api/*)
@@ -259,6 +278,7 @@ pub fn build_router(app_state: AppState) -> Router {
 
     health
         .merge(ws)
+        .merge(meter_submit)
         .merge(proxy_routes)
         .merge(swagger)  // Swagger UI at /api/docs
         // V1 API
@@ -310,13 +330,4 @@ async fn health_check(
     axum::Json(status)
 }
 
-/// WebSocket handler for real-time updates
-async fn websocket_handler(
-    ws: WebSocketUpgrade,
-    State(websocket_service): State<WebSocketService>,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| async move {
-        websocket_service.register_client(socket).await;
-    })
-}
 

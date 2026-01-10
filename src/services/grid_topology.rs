@@ -17,21 +17,21 @@ impl GridTopologyService {
             (Some(mz), Some(bz)) => {
                 if mz == bz {
                     // Local distribution fee only
-                    Decimal::from_f64(0.50).unwrap()
+                    Decimal::from_f64(0.50).expect("hardcoded decimal 0.50")
                 } else {
                     let distance = (mz - bz).abs();
                     if distance == 1 {
                         // Adjacent zone
-                        Decimal::from_f64(1.00).unwrap()
+                        Decimal::from_f64(1.00).expect("hardcoded decimal 1.00")
                     } else {
                         // Cross-zone transmission
-                        Decimal::from_f64(1.50).unwrap() + Decimal::from(distance) * Decimal::from_f64(0.1).unwrap()
+                        Decimal::from_f64(1.50).expect("hardcoded decimal 1.50") + Decimal::from(distance) * Decimal::from_f64(0.1).expect("hardcoded decimal 0.1")
                     }
                 }
             }
             _ => {
                 // Default high fee if zones unknown
-                Decimal::from_f64(2.00).unwrap()
+                Decimal::from_f64(2.00).expect("hardcoded decimal 2.00")
             }
         }
     }
@@ -43,21 +43,21 @@ impl GridTopologyService {
             (Some(mz), Some(bz)) => {
                 if mz == bz {
                     // Minimal local loss
-                    Decimal::from_f64(0.01).unwrap()
+                    Decimal::from_f64(0.01).expect("hardcoded decimal 0.01")
                 } else {
                     let distance = (mz - bz).abs();
                     if distance == 1 {
-                        Decimal::from_f64(0.03).unwrap()
+                        Decimal::from_f64(0.03).expect("hardcoded decimal 0.03")
                     } else {
                         // Max cap at 15%
                         let loss = 0.03 + (distance as f64 * 0.01);
-                        Decimal::from_f64(loss.min(0.15)).unwrap()
+                        Decimal::from_f64(loss.min(0.15)).expect("loss calculation overflow")
                     }
                 }
             }
             _ => {
                 // Conservative default
-                Decimal::from_f64(0.05).unwrap()
+                Decimal::from_f64(0.05).expect("hardcoded decimal 0.05")
             }
         }
     }

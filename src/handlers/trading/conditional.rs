@@ -65,29 +65,32 @@ pub async fn create_conditional_order(
     };
 
     // Insert conditional order into database
-    let result = sqlx::query!(
+    // Persist session_token in the database
+    let result = sqlx::query(
         r#"
         INSERT INTO trading_orders (
             id, user_id, order_type, side, energy_amount, price_per_kwh,
             filled_amount, status, expires_at, created_at,
-            trigger_price, trigger_type, trigger_status, trailing_offset
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            trigger_price, trigger_type, trigger_status, trailing_offset,
+            session_token
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         "#,
-        order_id,
-        user.0.sub,
-        order_type as OrderType,
-        payload.side as OrderSide,
-        payload.energy_amount,
-        payload.limit_price.unwrap_or(Decimal::ZERO),
-        Decimal::ZERO,
-        OrderStatus::Pending as OrderStatus,
-        expires_at,
-        now,
-        payload.trigger_price,
-        payload.trigger_type as TriggerType,
-        TriggerStatus::Pending as TriggerStatus,
-        payload.trailing_offset
     )
+    .bind(order_id)
+    .bind(user.0.sub)
+    .bind(order_type as OrderType)
+    .bind(payload.side as OrderSide)
+    .bind(payload.energy_amount)
+    .bind(payload.limit_price.unwrap_or(Decimal::ZERO))
+    .bind(Decimal::ZERO)
+    .bind(OrderStatus::Pending as OrderStatus)
+    .bind(expires_at)
+    .bind(now)
+    .bind(payload.trigger_price)
+    .bind(payload.trigger_type as TriggerType)
+    .bind(TriggerStatus::Pending as TriggerStatus)
+    .bind(payload.trailing_offset)
+    .bind(payload.session_token)
     .execute(&state.db)
     .await
     .map_err(|e| {

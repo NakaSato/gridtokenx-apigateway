@@ -19,7 +19,8 @@ pub async fn proxy_to_simulator(
         .unwrap_or(path);
 
     // Target URL (Simulator)
-    let target_url = format!("http://127.0.0.1:8000{}", path_query);
+    let simulator_url = std::env::var("SIMULATOR_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
+    let target_url = format!("{}{}", simulator_url, path_query);
 
     // Create a new Reqwest client
     let client = reqwest::Client::new();

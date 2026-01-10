@@ -1,6 +1,7 @@
 use anyhow::Result;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use sqlx::Row;
 use solana_sdk::pubkey::Pubkey;
 use uuid::Uuid;
 use tracing::{error, info};
@@ -17,68 +18,72 @@ impl MarketClearingService {
         side: OrderSide,
         energy_amount: Decimal,
         price_per_kwh: Decimal,
+        session_token: Option<&str>,
     ) -> Result<()> {
         use base64::{engine::general_purpose, Engine as _};
         use solana_sdk::signature::{Keypair, Signer};
 
-        // Fetch user keys
-        let db_user = sqlx::query!(
-            "SELECT wallet_address, encrypted_private_key, wallet_salt, encryption_iv FROM users WHERE id = $1",
-            user_id
-        )
-        .fetch_optional(&self.db)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("User not found"))?;
+        // Session cache disabled (Secure Passcode removed)
+        let private_key_bytes: Option<Vec<u8>> = None;
 
-        let keypair = if let (Some(enc_key), Some(iv), Some(salt)) = (
-            db_user.encrypted_private_key,
-            db_user.encryption_iv,
-            db_user.wallet_salt,
-        ) {
-            let master_secret = &self.config.encryption_secret;
-            let enc_key_b64 = general_purpose::STANDARD.encode(enc_key);
-            let iv_b64 = general_purpose::STANDARD.encode(iv);
-            let salt_b64 = general_purpose::STANDARD.encode(salt);
-
-            let private_key_bytes = WalletService::decrypt_private_key(
-                master_secret,
-                &enc_key_b64,
-                &salt_b64,
-                &iv_b64,
-            )?;
-
-            Keypair::from_base58_string(&bs58::encode(&private_key_bytes).into_string())
+        let keypair = if let Some(key_bytes) = private_key_bytes {
+            Keypair::try_from(key_bytes.as_slice())
+                .map_err(|e| anyhow::anyhow!("Invalid session key: {}", e))?
         } else {
-            // Lazy wallet generation if missing
-            info!("User {} missing keys, generating new wallet...", user_id);
-            let master_secret = &self.config.encryption_secret;
-            let new_keypair = Keypair::new();
-            let pubkey = new_keypair.pubkey().to_string();
-
-            let (enc_key_b64, salt_b64, iv_b64) =
-                WalletService::encrypt_private_key(master_secret, &new_keypair.to_bytes())?;
-
-            let enc_key_bytes = general_purpose::STANDARD.decode(&enc_key_b64)?;
-            let salt_bytes = general_purpose::STANDARD.decode(&salt_b64)?;
-            let iv_bytes = general_purpose::STANDARD.decode(&iv_b64)?;
-
-            sqlx::query!(
-                 "UPDATE users SET wallet_address=$1, encrypted_private_key=$2, wallet_salt=$3, encryption_iv=$4 WHERE id=$5",
-                 pubkey, enc_key_bytes, salt_bytes, iv_bytes, user_id
+            // Fetch user keys and decrypt with master fallback (Legacy)
+            let db_user = sqlx::query!(
+                "SELECT wallet_address, encrypted_private_key, wallet_salt, encryption_iv FROM users WHERE id = $1",
+                user_id
             )
-            .execute(&self.db)
-            .await?;
+            .fetch_optional(&self.db)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("User not found"))?;
 
-            // Request Airdrop and wait for confirmation
-            match self.wallet_service.request_airdrop(&new_keypair.pubkey(), 2.0).await {
-                Ok(sig) => {
-                    info!("✅ Lazy wallet airdrop confirmed for user {}: {}", user_id, sig);
-                }
-                Err(e) => {
-                    error!("⚠️ Airdrop failed for user {}: {}", user_id, e);
-                }
+            if let (Some(enc_key), Some(iv), Some(salt)) = (
+                db_user.encrypted_private_key,
+                db_user.encryption_iv,
+                db_user.wallet_salt,
+            ) {
+                let master_secret = &self.config.encryption_secret;
+                let enc_key_b64 = general_purpose::STANDARD.encode(enc_key);
+                let iv_b64 = general_purpose::STANDARD.encode(iv);
+                let salt_b64 = general_purpose::STANDARD.encode(salt);
+
+                let pk_bytes = WalletService::decrypt_private_key(
+                    master_secret,
+                    &enc_key_b64,
+                    &salt_b64,
+                    &iv_b64,
+                )?;
+                Keypair::try_from(pk_bytes.as_slice())
+                    .map_err(|e| anyhow::anyhow!("Invalid decrypted key: {}", e))?
+            } else {
+                // Lazy wallet generation (only if session and master decryption fail)
+                info!("User {} missing keys, generating new wallet...", user_id);
+                let master_secret = &self.config.encryption_secret;
+                let new_keypair = Keypair::new();
+                let pubkey = new_keypair.pubkey().to_string();
+
+                let (enc_key_b64, salt_b64, iv_b64) =
+                    WalletService::encrypt_private_key(master_secret, &new_keypair.to_bytes())?;
+
+                let enc_key_bytes = general_purpose::STANDARD.decode(&enc_key_b64)?;
+                let salt_bytes = general_purpose::STANDARD.decode(&salt_b64)?;
+                let iv_bytes = general_purpose::STANDARD.decode(&iv_b64)?;
+
+                sqlx::query(
+                    "UPDATE users SET wallet_address=$1, encrypted_private_key=$2, wallet_salt=$3, encryption_iv=$4 WHERE id=$5",
+                )
+                .bind(pubkey)
+                .bind(enc_key_bytes)
+                .bind(salt_bytes)
+                .bind(iv_bytes)
+                .bind(user_id)
+                .execute(&self.db)
+                .await?;
+                
+                new_keypair
             }
-            new_keypair
         };
 
         // On-chain tx
@@ -124,20 +129,20 @@ impl MarketClearingService {
 
         // Update DB with signature and PDA
         if let Some(pda) = order_pda {
-            sqlx::query!(
+            sqlx::query(
                 "UPDATE trading_orders SET blockchain_tx_signature = $1, order_pda = $2 WHERE id = $3",
-                signature,
-                pda,
-                order_id
             )
+            .bind(signature)
+            .bind(pda)
+            .bind(order_id)
             .execute(&self.db)
             .await?;
         } else {
-            sqlx::query!(
+            sqlx::query(
                 "UPDATE trading_orders SET blockchain_tx_signature = $1 WHERE id = $2",
-                signature,
-                order_id
             )
+            .bind(signature)
+            .bind(order_id)
             .execute(&self.db)
             .await?;
         }
@@ -152,7 +157,7 @@ impl MarketClearingService {
 
         // Only lock if amount > 0
         if lock_amount > Decimal::ZERO {
-            match self.execute_escrow_lock(user_id, order_id, lock_amount, asset_type).await {
+            match self.execute_escrow_lock(user_id, order_id, lock_amount, asset_type, session_token).await {
                 Ok(sig) => {
                     info!("On-chain escrow lock executed for order {}: {}", order_id, sig);
                      // Optionally update DB with lock signature?
@@ -177,6 +182,7 @@ impl MarketClearingService {
         order_id: Uuid,
         amount: Decimal,
         asset_type: &str, // "currency" or "energy"
+        session_token: Option<&str>,
     ) -> Result<String> {
         if !self.config.tokenization.enable_real_blockchain {
              return Ok(format!("mock_escrow_lock_{}", order_id));
@@ -186,34 +192,43 @@ impl MarketClearingService {
         use solana_sdk::signature::{Keypair, Signer};
         use std::str::FromStr;
 
-        // 1. Fetch user keys
-        let db_user = sqlx::query!(
-            "SELECT wallet_address, encrypted_private_key, wallet_salt, encryption_iv FROM users WHERE id = $1",
-            user_id
-        )
-        .fetch_optional(&self.db)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("User not found"))?;
+        // Session cache disabled (Secure Passcode removed)
+        let private_key_bytes: Option<Vec<u8>> = None;
 
-        let keypair = if let (Some(enc_key), Some(iv), Some(salt)) = (
-            db_user.encrypted_private_key,
-            db_user.encryption_iv,
-            db_user.wallet_salt,
-        ) {
-            let master_secret = &self.config.encryption_secret;
-            let enc_key_b64 = general_purpose::STANDARD.encode(enc_key);
-            let iv_b64 = general_purpose::STANDARD.encode(iv);
-            let salt_b64 = general_purpose::STANDARD.encode(salt);
-
-            let private_key_bytes = WalletService::decrypt_private_key(
-                master_secret, 
-                &enc_key_b64,
-                &salt_b64,
-                &iv_b64,
-            )?;
-            Keypair::from_base58_string(&bs58::encode(&private_key_bytes).into_string())
+        let keypair = if let Some(key_bytes) = private_key_bytes {
+            Keypair::try_from(key_bytes.as_slice())
+                .map_err(|e| anyhow::anyhow!("Invalid session key for escrow: {}", e))?
         } else {
-            return Err(anyhow::anyhow!("User has no wallet keys"));
+            // 1. Fetch user keys
+            let db_user = sqlx::query!(
+                "SELECT wallet_address, encrypted_private_key, wallet_salt, encryption_iv FROM users WHERE id = $1",
+                user_id
+            )
+            .fetch_optional(&self.db)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("User not found"))?;
+
+            if let (Some(enc_key), Some(iv), Some(salt)) = (
+                db_user.encrypted_private_key,
+                db_user.encryption_iv,
+                db_user.wallet_salt,
+            ) {
+                let master_secret = &self.config.encryption_secret;
+                let enc_key_b64 = general_purpose::STANDARD.encode(enc_key);
+                let iv_b64 = general_purpose::STANDARD.encode(iv);
+                let salt_b64 = general_purpose::STANDARD.encode(salt);
+
+                let pk_bytes = WalletService::decrypt_private_key(
+                    master_secret, 
+                    &enc_key_b64,
+                    &salt_b64,
+                    &iv_b64,
+                )?;
+                Keypair::try_from(pk_bytes.as_slice())
+                    .map_err(|e| anyhow::anyhow!("Invalid decrypted key for escrow: {}", e))?
+            } else {
+                return Err(anyhow::anyhow!("User has no wallet keys"));
+            }
         };
 
         // 2. Select Mint based on asset_type
@@ -298,16 +313,17 @@ impl MarketClearingService {
         //
         // For now, let's update `execute_escrow_release` to assume it transfers FROM Escrow TO `target_user_id`.
         
-        let db_user = sqlx::query!(
+        let db_user = sqlx::query(
             "SELECT wallet_address FROM users WHERE id = $1",
-            seller_id
         )
+        .bind(seller_id)
         .fetch_optional(&self.db)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Receiver (Seller) not found"))?;
 
-        let receiver_wallet = if let Some(addr) = db_user.wallet_address {
-             Pubkey::from_str(&addr)?
+        let receiver_wallet_addr: Option<String> = db_user.get("wallet_address");
+        let receiver_wallet = if let Some(addr) = receiver_wallet_addr.as_deref() {
+            Pubkey::from_str(addr)?
         } else {
              return Err(anyhow::anyhow!("Receiver has no wallet address"));
         };
@@ -371,16 +387,17 @@ impl MarketClearingService {
         use std::str::FromStr;
 
         // 1. Fetch User Wallet (Buyer)
-        let db_user = sqlx::query!(
+        let db_user = sqlx::query(
             "SELECT wallet_address FROM users WHERE id = $1",
-            buyer_id
         )
+        .bind(buyer_id)
         .fetch_optional(&self.db)
         .await?
         .ok_or_else(|| anyhow::anyhow!("User (Buyer) not found"))?;
 
-        let user_wallet = if let Some(addr) = db_user.wallet_address {
-             Pubkey::from_str(&addr)?
+        let user_wallet_addr: Option<String> = db_user.get("wallet_address");
+        let user_wallet = if let Some(addr) = user_wallet_addr.as_deref() {
+             Pubkey::from_str(addr)?
         } else {
              return Err(anyhow::anyhow!("User has no wallet address"));
         };

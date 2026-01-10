@@ -1,5 +1,5 @@
 use axum::{
-    extract::{ws::{WebSocketUpgrade, Message, WebSocket}, Query, State},
+    extract::{ws::{WebSocketUpgrade, Message, WebSocket}, Query, State, Path},
     response::{IntoResponse, Response},
     Json,
 };
@@ -13,15 +13,6 @@ use super::types::WsParams;
 use super::get_connection_manager;
 use crate::AppState;
 
-/// Authenticated WebSocket endpoint for trading
-///
-/// Provides real-time updates for authenticated users:
-/// - Order updates
-/// - Match notifications
-/// - Epoch transitions
-/// - Personal trading events
-///
-/// Requires token authentication via query parameter
 #[utoipa::path(
     get,
     path = "/ws",
@@ -40,6 +31,43 @@ pub async fn websocket_handler(
     State(state): State<AppState>,
     Query(params): Query<WsParams>,
 ) -> Result<Response, Response> {
+    websocket_handler_internal(ws, state, None, params).await
+}
+
+/// Channel-specific WebSocket endpoint
+#[utoipa::path(
+    get,
+    path = "/ws/{channel}",
+    tag = "websocket",
+    params(
+        ("channel" = String, Path, description = "Channel name"),
+        ("token" = String, Query, description = "JWT authentication token")
+    ),
+    responses(
+        (status = 101, description = "WebSocket connection upgraded"),
+        (status = 401, description = "Unauthorized - Invalid or missing token"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn websocket_channel_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    Path(channel): Path<String>,
+    Query(params): Query<WsParams>,
+) -> Result<Response, Response> {
+    websocket_handler_internal(ws, state, Some(channel), params).await
+}
+
+/// Internal WebSocket handler logic
+async fn websocket_handler_internal(
+    ws: WebSocketUpgrade,
+    state: AppState,
+    channel: Option<String>,
+    params: WsParams,
+) -> Result<Response, Response> {
+    let channel_name = channel.unwrap_or_else(|| "default".to_string());
+    info!("📡 WebSocket connection attempt for channel: {}", channel_name);
+
     // Validate token if provided
     if let Some(token) = &params.token {
         // Decode and validate JWT token using the JWT service from state
@@ -47,8 +75,8 @@ pub async fn websocket_handler(
             Ok(claims) => {
                 let user_id = claims.sub;
                 info!(
-                    "📡 Authenticated WebSocket connection for user: {}",
-                    user_id
+                    "📡 Authenticated WebSocket connection for user: {} (channel: {})",
+                    user_id, channel_name
                 );
 
                 // Upgrade to WebSocket with user context

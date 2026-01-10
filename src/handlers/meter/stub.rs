@@ -4,7 +4,7 @@
 //! by storing readings in memory and triggering blockchain operations directly.
 
 use axum::{
-    extract::State,
+    extract::{State, Path, Query},
     Json,
 };
 use chrono::{DateTime, Utc};
@@ -13,23 +13,14 @@ use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use uuid::Uuid;
+use serde_json;
 
 use crate::{
     error::{ApiError, Result},
-    services::BlockchainService,
+    services::{BlockchainService, meter_analyzer::{check_alerts, calculate_health_score}},
+    handlers::meter::types::SubmitReadingRequest,
     AppState,
 };
-
-/// Request to submit a meter reading
-#[derive(Debug, Deserialize, Serialize)]
-pub struct SubmitReadingRequest {
-    pub wallet_address: Option<String>,
-    pub kwh_amount: Decimal,
-    pub reading_timestamp: DateTime<Utc>,
-    pub meter_signature: Option<String>,
-    pub meter_serial: Option<String>,
-    pub meter_id: Option<Uuid>,
-}
 
 /// Response after submitting a reading
 #[derive(Debug, Serialize)]
@@ -42,6 +33,320 @@ pub struct MeterReadingResponse {
     pub minted: bool,
     pub mint_tx_signature: Option<String>,
     pub message: String,
+}
+
+/// Query parameters for getting meter readings
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub struct GetReadingsQuery {
+    pub from: Option<DateTime<Utc>>,
+    pub to: Option<DateTime<Utc>>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+/// Single reading record for query response
+#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct ReadingRecord {
+    pub id: Uuid,
+    pub meter_serial: String,
+    pub timestamp: DateTime<Utc>,
+    pub kwh_amount: f64,
+    pub energy_generated: Option<f64>,
+    pub energy_consumed: Option<f64>,
+    pub voltage: Option<f64>,
+    pub current_amps: Option<f64>,
+    pub power_factor: Option<f64>,
+    pub frequency: Option<f64>,
+    pub temperature: Option<f64>,
+    pub thd_voltage: Option<f64>,
+    pub thd_current: Option<f64>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub battery_level: Option<f64>,
+    pub health_score: Option<f64>,
+    pub minted: bool,
+}
+
+/// Response for readings query
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ReadingsResponse {
+    pub readings: Vec<ReadingRecord>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+/// Get meter readings with filters
+#[utoipa::path(
+    get,
+    path = "/api/v1/meters/{serial}/readings",
+    params(
+        ("serial" = String, Path, description = "Meter serial number"),
+        GetReadingsQuery
+    ),
+    responses(
+        (status = 200, description = "List of meter readings", body = ReadingsResponse),
+        (status = 404, description = "Meter not found")
+    ),
+    tag = "meters"
+)]
+pub async fn get_meter_readings(
+    State(state): State<AppState>,
+    Path(serial): Path<String>,
+    Query(params): Query<GetReadingsQuery>,
+) -> Result<Json<ReadingsResponse>> {
+    let limit = params.limit.unwrap_or(100).min(1000);
+    let offset = params.offset.unwrap_or(0);
+
+    // Build query with optional date filters
+    let readings = if let (Some(from), Some(to)) = (params.from, params.to) {
+        sqlx::query_as::<_, ReadingRecord>(
+            r#"SELECT id, meter_serial, timestamp, kwh_amount, 
+                      energy_generated, energy_consumed, voltage, current_amps,
+                      power_factor, frequency, temperature, thd_voltage, thd_current,
+                      latitude, longitude, battery_level, health_score, minted
+               FROM meter_readings 
+               WHERE meter_serial = $1 AND timestamp >= $2 AND timestamp <= $3
+               ORDER BY timestamp DESC
+               LIMIT $4 OFFSET $5"#
+        )
+        .bind(&serial)
+        .bind(from)
+        .bind(to)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&state.db)
+        .await
+        .map_err(ApiError::Database)?
+    } else if let Some(from) = params.from {
+        sqlx::query_as::<_, ReadingRecord>(
+            r#"SELECT id, meter_serial, timestamp, kwh_amount, 
+                      energy_generated, energy_consumed, voltage, current_amps,
+                      power_factor, frequency, temperature, thd_voltage, thd_current,
+                      latitude, longitude, battery_level, health_score, minted
+               FROM meter_readings 
+               WHERE meter_serial = $1 AND timestamp >= $2
+               ORDER BY timestamp DESC
+               LIMIT $3 OFFSET $4"#
+        )
+        .bind(&serial)
+        .bind(from)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&state.db)
+        .await
+        .map_err(ApiError::Database)?
+    } else {
+        sqlx::query_as::<_, ReadingRecord>(
+            r#"SELECT id, meter_serial, timestamp, kwh_amount, 
+                      energy_generated, energy_consumed, voltage, current_amps,
+                      power_factor, frequency, temperature, thd_voltage, thd_current,
+                      latitude, longitude, battery_level, health_score, minted
+               FROM meter_readings 
+               WHERE meter_serial = $1
+               ORDER BY timestamp DESC
+               LIMIT $2 OFFSET $3"#
+        )
+        .bind(&serial)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&state.db)
+        .await
+        .map_err(ApiError::Database)?
+    };
+
+    // Get total count
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM meter_readings WHERE meter_serial = $1"
+    )
+    .bind(&serial)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
+    Ok(Json(ReadingsResponse {
+        readings,
+        total,
+        limit,
+        offset,
+    }))
+}
+
+/// Query parameters for historical trends
+pub type GetTrendsQuery = crate::handlers::auth::types::GetTrendsQuery;
+
+/// Record for trend aggregation
+pub type TrendRecord = crate::handlers::auth::types::TrendRecord;
+
+/// Response for historical trends
+pub type TrendResponse = crate::handlers::auth::types::TrendResponse;
+
+/// Get aggregated energy trends for a meter
+#[utoipa::path(
+    get,
+    path = "/api/v1/meters/{serial}/trends",
+    params(
+        ("serial" = String, Path, description = "Meter serial number"),
+        GetTrendsQuery
+    ),
+    responses(
+        (status = 200, description = "Aggregated energy trends", body = TrendResponse),
+        (status = 404, description = "Meter not found")
+    ),
+    tag = "meters"
+)]
+pub async fn get_meter_trends(
+    State(state): State<AppState>,
+    Path(serial): Path<String>,
+    Query(params): Query<GetTrendsQuery>,
+) -> Result<Json<TrendResponse>> {
+    let period = params.period.unwrap_or_else(|| "day".to_string());
+    let now = Utc::now();
+    let from = params.from.unwrap_or_else(|| now - chrono::Duration::days(30));
+    let to = params.to.unwrap_or_else(|| now);
+
+    let interval = match period.as_str() {
+        "hour" => "hour",
+        "month" => "month",
+        _ => "day",
+    };
+
+    let data = sqlx::query_as::<_, TrendRecord>(
+        r#"SELECT 
+            DATE_TRUNC($1, timestamp) as time_bucket,
+            SUM(energy_generated) as production,
+            SUM(energy_consumed) as consumption,
+            SUM(kwh_amount) as net_energy,
+            AVG(health_score) as avg_health
+           FROM meter_readings
+           WHERE meter_serial = $2 AND timestamp >= $3 AND timestamp <= $4
+           GROUP BY time_bucket
+           ORDER BY time_bucket ASC"#
+    )
+    .bind(interval)
+    .bind(&serial)
+    .bind(from)
+    .bind(to)
+    .fetch_all(&state.db)
+    .await
+    .map_err(ApiError::Database)?;
+
+    Ok(Json(TrendResponse {
+        meter_serial: serial,
+        period: interval.to_string(),
+        data,
+    }))
+}
+
+// ============================================================================
+// ALERTS AND HEALTH SCORING
+// ============================================================================
+
+/// Health response for a meter
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct MeterHealthResponse {
+    pub meter_serial: String,
+    pub health_score: f64,
+    pub status: String,
+    pub last_reading: Option<DateTime<Utc>>,
+    pub components: HealthComponents,
+}
+
+/// Individual health component scores
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct HealthComponents {
+    pub voltage_stability: Option<f64>,
+    pub power_factor: Option<f64>,
+    pub thd_quality: Option<f64>,
+    pub battery_level: Option<f64>,
+}
+
+/// Get meter health status
+#[utoipa::path(
+    get,
+    path = "/api/v1/meters/{serial}/health",
+    params(
+        ("serial" = String, Path, description = "Meter serial number")
+    ),
+    responses(
+        (status = 200, description = "Meter health status", body = MeterHealthResponse),
+        (status = 404, description = "Meter not found")
+    ),
+    tag = "meters"
+)]
+pub async fn get_meter_health(
+    State(state): State<AppState>,
+    Path(serial): Path<String>,
+) -> Result<Json<MeterHealthResponse>> {
+    // Get latest reading for health calculation
+    let latest = sqlx::query_as::<_, (Option<f64>, Option<f64>, Option<f64>, Option<f64>, Option<f64>, DateTime<Utc>)>(
+        r#"SELECT voltage, power_factor, thd_voltage, thd_current, battery_level, timestamp
+           FROM meter_readings WHERE meter_serial = $1 
+           ORDER BY timestamp DESC LIMIT 1"#
+    )
+    .bind(&serial)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(ApiError::Database)?;
+
+    match latest {
+        Some((voltage, power_factor, thd_v, thd_i, battery, timestamp)) => {
+            // Calculate component scores
+            let voltage_score = voltage.map(|v| {
+                if v >= 220.0 && v <= 240.0 { 100.0 }
+                else if v >= 200.0 && v <= 260.0 { 75.0 }
+                else { 25.0 }
+            });
+            let pf_score = power_factor.map(|pf| pf * 100.0);
+            let thd_score = match (thd_v, thd_i) {
+                (Some(v), Some(i)) => Some((100.0 - (v + i) * 5.0).max(0.0)),
+                (Some(v), None) => Some((100.0 - v * 10.0).max(0.0)),
+                _ => None,
+            };
+
+            // Calculate overall score
+            let mut total = 0.0;
+            let mut count = 0;
+            if let Some(s) = voltage_score { total += s; count += 1; }
+            if let Some(s) = pf_score { total += s; count += 1; }
+            if let Some(s) = thd_score { total += s; count += 1; }
+            if let Some(s) = battery { total += s; count += 1; }
+
+            let health_score = if count > 0 { total / count as f64 } else { 50.0 };
+
+            let status = if health_score >= 80.0 { "Good" }
+                else if health_score >= 60.0 { "Fair" }
+                else if health_score >= 40.0 { "Poor" }
+                else { "Critical" };
+
+            Ok(Json(MeterHealthResponse {
+                meter_serial: serial,
+                health_score,
+                status: status.to_string(),
+                last_reading: Some(timestamp),
+                components: HealthComponents {
+                    voltage_stability: voltage_score,
+                    power_factor: pf_score,
+                    thd_quality: thd_score,
+                    battery_level: battery,
+                },
+            }))
+        }
+        None => {
+            Ok(Json(MeterHealthResponse {
+                meter_serial: serial,
+                health_score: 0.0,
+                status: "Unknown".to_string(),
+                last_reading: None,
+                components: HealthComponents {
+                    voltage_stability: None,
+                    power_factor: None,
+                    thd_quality: None,
+                    battery_level: None,
+                },
+            }))
+        }
+    }
 }
 
 /// Submit a new meter reading (simplified, no database)
@@ -73,8 +378,51 @@ pub async fn submit_reading(
 
     info!("✅ Reading validated. ID: {}, Amount: {} kWh", reading_id, kwh_f64);
 
+    // Validate meter is registered (if meter_serial provided)
+    let mut zone_id = None;
+    if let Some(ref meter_serial) = request.meter_serial {
+        let meter_info = sqlx::query_as::<_, (i64, Option<i32>)>(
+            "SELECT count(*), zone_id FROM meters WHERE serial_number = $1 GROUP BY zone_id"
+        )
+        .bind(meter_serial)
+        .fetch_optional(&state.db)
+        .await
+        .unwrap_or(None);
+
+        match meter_info {
+            Some((count, zid)) if count > 0 => {
+                info!("✅ Meter {} is registered in Zone {:?}", meter_serial, zid);
+                zone_id = zid;
+            },
+            _ => {
+                warn!("⚠️ Meter {} not registered, rejecting reading", meter_serial);
+                return Err(ApiError::NotFound(format!("Meter {} is not registered. Please register the meter first.", meter_serial)));
+            }
+        }
+    }
+
     // Update aggregate grid status in dashboard service immediately after validation
-    let _ = state.dashboard_service.handle_meter_reading(kwh_f64, request.meter_serial.as_deref().unwrap_or("unknown")).await;
+    let _ = state.dashboard_service.handle_meter_reading(kwh_f64, request.meter_serial.as_deref().unwrap_or("unknown"), zone_id).await;
+
+    // Check for alerts and broadcast via WebSocket
+    let meter_id = request.meter_serial.clone().unwrap_or_else(|| "unknown".to_string());
+    let alerts = check_alerts(&meter_id, &request);
+    if !alerts.is_empty() {
+        for alert in &alerts {
+            warn!("⚠️ Alert: {} - {}", alert.alert_type, alert.message);
+            // Broadcast alert via WebSocket
+            let alert_json = serde_json::json!({
+                "type": "meter_alert",
+                "data": alert
+            });
+            state.websocket_service.broadcast_to_channel("alerts", alert_json).await;
+        }
+        info!("📢 Broadcast {} alerts for meter {}", alerts.len(), meter_id);
+    }
+
+    // Calculate health score
+    let health_score = calculate_health_score(&request);
+    info!("📊 Health score for {}: {:.1}", meter_id, health_score);
 
     // Track minting result
     let mut minted = false;
@@ -159,6 +507,7 @@ pub async fn submit_reading(
                                         message = format!("Reading received and {} kWh minted. TX: {}", kwh_f64, sig_str);
                                         
                                         // Broadcast meter reading received via WebSocket
+                                        let power = request.energy_generated.unwrap_or(0.0) - request.energy_consumed.unwrap_or(0.0);
                                         let _ = state
                                             .websocket_service
                                             .broadcast_meter_reading_received(
@@ -166,9 +515,9 @@ pub async fn submit_reading(
                                                 &wallet_address,
                                                 request.meter_serial.as_deref().unwrap_or("unknown"),
                                                 kwh_f64,
-                                                None, // power
-                                                None, // voltage
-                                                None, // current
+                                                Some(power),
+                                                request.voltage,
+                                                request.current,
                                             )
                                             .await;
                                         
@@ -292,9 +641,9 @@ pub async fn submit_reading(
                                                 &wallet_address,
                                                 request.meter_serial.as_deref().unwrap_or("unknown"),
                                                 -burn_amount, // Negative to indicate consumption
-                                                None, // power
-                                                None, // voltage
-                                                None, // current
+                                                Some(-burn_amount), // power (negative for consumption)
+                                                request.voltage,
+                                                request.current,
                                             )
                                             .await;
                                     }
@@ -323,6 +672,74 @@ pub async fn submit_reading(
         }
     }
 
+    // Store reading to database with all telemetry data
+    let meter_serial = request.meter_serial.clone().unwrap_or_else(|| "unknown".to_string());
+    
+    // Get meter_id and user_id from database
+    let meter_info = sqlx::query_as::<_, (Uuid, Uuid)>(
+        "SELECT id, user_id FROM meters WHERE serial_number = $1"
+    )
+    .bind(&meter_serial)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+
+    if let Some((meter_uuid, user_uuid)) = meter_info {
+        let insert_result = sqlx::query(
+            "INSERT INTO meter_readings (
+                id, meter_serial, meter_id, user_id, wallet_address, 
+                timestamp, reading_timestamp, kwh_amount,
+                energy_generated, energy_consumed, surplus_energy, deficit_energy,
+                voltage, current_amps, power_factor, frequency, temperature,
+                thd_voltage, thd_current,
+                latitude, longitude, battery_level, health_score,
+                minted, mint_tx_signature, created_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9, $10, $11, 
+                       $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, NOW())"
+        )
+        .bind(reading_id)
+        .bind(&meter_serial)
+        .bind(meter_uuid)
+        .bind(user_uuid)
+        .bind(&wallet_address)
+        .bind(request.reading_timestamp)
+        .bind(kwh_f64)
+        // Energy data
+        .bind(request.energy_generated)
+        .bind(request.energy_consumed)
+        .bind(request.surplus_energy)
+        .bind(request.deficit_energy)
+        // Electrical parameters
+        .bind(request.voltage)
+        .bind(request.current)
+        .bind(request.power_factor)
+        .bind(request.frequency)
+        .bind(request.temperature)
+        // THD (Total Harmonic Distortion)
+        .bind(request.thd_voltage)
+        .bind(request.thd_current)
+        // GPS
+        .bind(request.latitude)
+        .bind(request.longitude)
+        // Battery
+        .bind(request.battery_level)
+        // Health score
+        .bind(health_score)
+        // Minting status
+        .bind(minted)
+        .bind(&mint_tx_signature)
+        .execute(&state.db)
+        .await;
+
+        match insert_result {
+            Ok(_) => info!("✅ Reading {} saved to database", reading_id),
+            Err(e) => error!("❌ Failed to save reading to database: {}", e),
+        }
+    } else {
+        warn!("⚠️ Meter info not found for {}, reading not persisted", meter_serial);
+    }
+
     Ok(Json(MeterReadingResponse {
         id: reading_id,
         wallet_address,
@@ -340,3 +757,180 @@ pub async fn meter_health() -> &'static str {
     "Meter stub service is running"
 }
 
+// ============================================================================
+// Simple Meter Registration (for Simulator)
+// ============================================================================
+
+/// Request to register a meter by ID (no auth required, for simulator)
+#[derive(Debug, Deserialize, Serialize)]
+pub struct RegisterMeterByIdRequest {
+    /// Unique meter identifier (serial number)
+    pub meter_id: String,
+    /// Owner's wallet address
+    pub wallet_address: String,
+    /// Meter type (e.g., "solar", "consumer")
+    pub meter_type: Option<String>,
+    /// Location description
+    pub location: Option<String>,
+    /// GPS latitude
+    pub latitude: Option<f64>,
+    /// GPS longitude
+    pub longitude: Option<f64>,
+    /// Zone ID for grid topology
+    pub zone_id: Option<i32>,
+}
+
+/// Response for meter registration
+#[derive(Debug, Serialize)]
+pub struct RegisterMeterByIdResponse {
+    pub success: bool,
+    pub message: String,
+    pub meter_id: String,
+}
+
+/// Register a meter by ID (simplified, for simulator use)
+/// POST /api/v1/simulator/meters/register
+pub async fn register_meter_by_id(
+    State(state): State<AppState>,
+    Json(request): Json<RegisterMeterByIdRequest>,
+) -> Result<Json<RegisterMeterByIdResponse>> {
+    info!("📝 Register meter by ID: {}", request.meter_id);
+
+    // Check if meter already exists
+    let existing = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM meters WHERE serial_number = $1"
+    )
+    .bind(&request.meter_id)
+    .fetch_one(&state.db)
+    .await;
+
+    if let Ok(count) = existing {
+        if count > 0 {
+            info!("✅ Meter {} already registered", request.meter_id);
+            return Ok(Json(RegisterMeterByIdResponse {
+                success: true,
+                message: format!("Meter {} is already registered", request.meter_id),
+                meter_id: request.meter_id,
+            }));
+        }
+    }
+
+    // Find or create a system user for simulator meters
+    let system_user_id = get_or_create_simulator_user(&state, &request.wallet_address).await?;
+
+    let meter_id = Uuid::new_v4();
+    let meter_type = request.meter_type.unwrap_or_else(|| "solar".to_string());
+    let location = request.location.unwrap_or_else(|| "Simulator".to_string());
+
+    // Insert into meters table
+    let insert_result = sqlx::query(
+        "INSERT INTO meters (id, user_id, serial_number, meter_type, location, latitude, longitude, zone_id, is_verified, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, NOW(), NOW())"
+    )
+    .bind(meter_id)
+    .bind(system_user_id)
+    .bind(&request.meter_id)
+    .bind(&meter_type)
+    .bind(&location)
+    .bind(request.latitude)
+    .bind(request.longitude)
+    .bind(request.zone_id)
+    .execute(&state.db)
+    .await;
+
+    match insert_result {
+        Ok(_) => {
+            info!("✅ Meter {} registered successfully", request.meter_id);
+            
+            // Also insert into meter_registry for FK constraints
+            let _ = sqlx::query(
+                "INSERT INTO meter_registry (id, user_id, meter_serial, meter_type, location_address, meter_key_hash, verification_method, verification_status, zone_id)
+                 VALUES ($1, $2, $3, $4, $5, 'simulator_hash', 'auto', 'verified', $6)
+                 ON CONFLICT (meter_serial) DO NOTHING"
+            )
+            .bind(meter_id)
+            .bind(system_user_id)
+            .bind(&request.meter_id)
+            .bind(&meter_type)
+            .bind(&location)
+            .bind(request.zone_id)
+            .execute(&state.db)
+            .await;
+
+            Ok(Json(RegisterMeterByIdResponse {
+                success: true,
+                message: format!("Meter {} registered and verified", request.meter_id),
+                meter_id: request.meter_id,
+            }))
+        }
+        Err(e) => {
+            error!("Failed to register meter: {}", e);
+            Err(ApiError::Internal(format!("Failed to register meter: {}", e)))
+        }
+    }
+}
+
+/// Get or create a user for simulator meters
+async fn get_or_create_simulator_user(state: &AppState, wallet_address: &str) -> Result<Uuid> {
+    // Try to find user by wallet address
+    let existing = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM users WHERE wallet_address = $1"
+    )
+    .bind(wallet_address)
+    .fetch_optional(&state.db)
+    .await;
+
+    if let Ok(Some(user_id)) = existing {
+        return Ok(user_id);
+    }
+
+    // Create a new simulator user
+    let user_id = Uuid::new_v4();
+    let email = format!("simulator_{}@gridtokenx.local", &wallet_address[..8.min(wallet_address.len())]);
+    
+    let insert_result = sqlx::query(
+        "INSERT INTO users (id, email, username, password_hash, wallet_address, role, email_verified, created_at)
+         VALUES ($1, $2, $3, 'simulator_no_password', $4, 'prosumer', true, NOW())
+         ON CONFLICT (email) DO UPDATE SET wallet_address = $4
+         RETURNING id"
+    )
+    .bind(user_id)
+    .bind(&email)
+    .bind(&email)
+    .bind(wallet_address)
+    .execute(&state.db)
+    .await;
+
+    match insert_result {
+        Ok(_) => {
+            info!("✅ Created simulator user for wallet {}", wallet_address);
+            Ok(user_id)
+        }
+        Err(e) => {
+            // If insert failed due to conflict, try to fetch again
+            if let Ok(Some(uid)) = sqlx::query_scalar::<_, Uuid>(
+                "SELECT id FROM users WHERE wallet_address = $1"
+            )
+            .bind(wallet_address)
+            .fetch_optional(&state.db)
+            .await {
+                return Ok(uid);
+            }
+            
+            error!("Failed to create simulator user: {}", e);
+            Err(ApiError::Internal("Failed to create simulator user".to_string()))
+        }
+    }
+}
+
+/// Check if a meter is registered
+pub async fn is_meter_registered(state: &AppState, meter_serial: &str) -> bool {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM meters WHERE serial_number = $1"
+    )
+    .bind(meter_serial)
+    .fetch_one(&state.db)
+    .await
+    .map(|c| c > 0)
+    .unwrap_or(false)
+}

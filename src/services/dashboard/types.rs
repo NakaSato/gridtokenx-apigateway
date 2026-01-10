@@ -11,7 +11,21 @@ pub struct GridStatus {
     pub net_balance: f64,
     pub active_meters: i64,
     pub co2_saved_kg: f64,
+    #[sqlx(skip)]
+    pub zones: HashMap<i32, ZoneGridStatus>,
+    #[serde(skip)]
+    #[sqlx(default)]
+    pub zones_data: Option<serde_json::Value>,
     pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ZoneGridStatus {
+    pub zone_id: i32,
+    pub generation: f64,
+    pub consumption: f64,
+    pub net_balance: f64,
+    pub active_meters: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

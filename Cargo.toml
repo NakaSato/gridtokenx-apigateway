@@ -148,6 +148,7 @@ hmac = "0.12.1"
 hex = "0.4.3"
 base64 = { workspace = true }
 bincode = { workspace = true }
+rustc-hash = "1.1"
 
 [dev-dependencies]
 tokio-test = "0.4"

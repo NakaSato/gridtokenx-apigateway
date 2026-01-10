@@ -68,7 +68,7 @@ impl BlockchainService {
                     "Failed to load authority keypair: {}. Using placeholder.",
                     e
                 );
-                "11111111111111111111111111111112".parse().expect("Failed to parse valid System Program ID")
+                "11111111111111111111111111111112".parse().unwrap_or_else(|_| Pubkey::default())
             }
         };
 

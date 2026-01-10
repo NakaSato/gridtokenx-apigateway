@@ -3,12 +3,10 @@ use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signature};
 use std::str::FromStr;
 use std::time::Duration; // Added Duration
-// Removed tracing as it was unused
 
 use crate::services::blockchain::account_management::AccountManager; // Dependency
 use crate::services::blockchain::transactions::TransactionHandler;
 use crate::services::blockchain::utils::BlockchainUtils;
-// use crate::services::priority_fee::TransactionType; // DISABLED
 
 /// Manages Token operations (mint, burn, transfer)
 #[derive(Clone, Debug)]
@@ -59,7 +57,7 @@ impl TokenManager {
                 let token_2022_id = solana_sdk::pubkey::Pubkey::from_str(
                     "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
                 )
-                .expect("hardcoded Token-2022 program ID is invalid");
+                .map_err(|e| anyhow!("Invalid hardcoded Token-2022 program ID: {}", e))?;
                 if account.owner == token_2022_id || account.owner == spl_token::id() {
                     return Ok(ata_address);
                 }

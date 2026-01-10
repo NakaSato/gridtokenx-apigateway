@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load Engineering Authority
     let authority_path = "../keypairs/dev-wallet.json";
     let authority = BlockchainService::load_keypair_from_file(authority_path)
-        .expect("Failed to load engineering authority");
+        .map_err(|e| format!("Failed to load engineering authority from {}: {}", authority_path, e))?;
         
     println!("Authority: {}", authority.pubkey());
     

@@ -53,8 +53,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let encrypted_pk = seller_row.encrypted_private_key.ok_or("No private key")?;
     let encrypted_b64 = general_purpose::STANDARD.encode(&encrypted_pk);
-    let salt_b64 = general_purpose::STANDARD.encode(&seller_row.wallet_salt.unwrap());
-    let iv_b64 = general_purpose::STANDARD.encode(&seller_row.encryption_iv.unwrap());
+    let salt_b64 = general_purpose::STANDARD.encode(&seller_row.wallet_salt.ok_or("Missing wallet salt")?);
+    let iv_b64 = general_purpose::STANDARD.encode(&seller_row.encryption_iv.ok_or("Missing encryption IV")?);
     
     let decrypted = WalletService::decrypt_private_key(
         &encryption_secret,
@@ -64,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     
     let seller_keypair = if decrypted.len() == 32 {
-        Keypair::new_from_array(decrypted[..32].try_into().unwrap())
+        Keypair::new_from_array(decrypted[..32].try_into().map_err(|_| "Invalid key length")?)
     } else if decrypted.len() == 64 {
         let seed: [u8; 32] = decrypted[..32].try_into().unwrap();
         Keypair::new_from_array(seed)
@@ -73,14 +73,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     
     println!("Seller Pubkey: {}", seller_keypair.pubkey());
-    if seller_row.wallet_address.unwrap() != seller_keypair.pubkey().to_string() {
-        panic!("Mismatch!");
+    if seller_row.wallet_address.ok_or("Missing wallet address")? != seller_keypair.pubkey().to_string() {
+        return Err("Wallet address mismatch!".into());
     }
     
     // Buyer Wallet
     let buyer_row = sqlx::query!("SELECT wallet_address FROM users WHERE id = $1", settlement.buyer_id)
         .fetch_one(&pool).await?;
-    let buyer_wallet = Pubkey::from_str(&buyer_row.wallet_address.unwrap())?;
+    let buyer_wallet = Pubkey::from_str(&buyer_row.wallet_address.ok_or("Missing buyer wallet address")?)?;
     
     // Mint
     let mint_str = env::var("ENERGY_TOKEN_MINT").expect("ENERGY_TOKEN_MINT missing");

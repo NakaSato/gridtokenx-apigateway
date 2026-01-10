@@ -4,14 +4,14 @@
 //! (stop-loss, take-profit, trailing stop) when conditions are met.
 
 use rust_decimal::Decimal;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use std::sync::Arc;
 use tokio::time::{interval, Duration};
-use tracing::{info, warn, error};
+use tracing::{info, error};
 use chrono::Utc;
 use uuid::Uuid;
 
-use crate::models::trading::{TriggerType, TriggerStatus};
+use crate::models::trading::TriggerType;
 use crate::database::schema::types::{OrderSide, OrderType, OrderStatus};
 
 /// Price monitor configuration
@@ -65,7 +65,7 @@ impl PriceMonitor {
     }
 
     /// Check pending conditional orders and trigger if conditions are met
-    async fn check_and_trigger_orders(&self) -> anyhow::Result<()> {
+    pub(crate) async fn check_and_trigger_orders(&self) -> anyhow::Result<()> {
         // Get current market price (average of recent trades)
         let current_price = self.get_current_market_price().await?;
         
@@ -75,11 +75,13 @@ impl PriceMonitor {
         }
 
         // Get pending conditional orders
-        let pending_orders = sqlx::query!(
+        let pending_orders_rows = sqlx::query(
             r#"
-            SELECT id, user_id, side as "side: OrderSide", energy_amount, trigger_price, 
-                   trigger_type as "trigger_type: TriggerType", price_per_kwh as limit_price,
-                   trailing_offset
+            SELECT id, user_id, order_type, side, 
+                   energy_amount, price_per_kwh, filled_amount, status,
+                   expires_at, created_at, filled_at, epoch_id, zone_id, meter_id, refund_tx_signature, order_pda,
+                   trigger_price, trigger_type, trigger_status,
+                   trailing_offset, session_token, triggered_at
             FROM trading_orders
             WHERE trigger_type IS NOT NULL 
               AND trigger_status = 'pending'
@@ -91,6 +93,33 @@ impl PriceMonitor {
         .fetch_all(&self.db)
         .await?;
 
+        let pending_orders: Vec<crate::models::trading::TradingOrderDb> = pending_orders_rows.into_iter().map(|row| {
+             crate::models::trading::TradingOrderDb {
+                id: row.get("id"),
+                user_id: row.get("user_id"),
+                order_type: row.get("order_type"),
+                side: row.get("side"),
+                energy_amount: row.get("energy_amount"),
+                price_per_kwh: row.get("price_per_kwh"),
+                filled_amount: row.get("filled_amount"),
+                status: row.get("status"),
+                expires_at: row.get("expires_at"),
+                created_at: row.get("created_at"),
+                filled_at: row.get("filled_at"),
+                epoch_id: row.get("epoch_id"),
+                zone_id: row.get("zone_id"),
+                meter_id: row.get("meter_id"),
+                refund_tx_signature: row.get("refund_tx_signature"),
+                order_pda: row.get("order_pda"),
+                session_token: row.get("session_token"),
+                trigger_price: row.get("trigger_price"),
+                trigger_type: row.get("trigger_type"),
+                trigger_status: row.get("trigger_status"),
+                trailing_offset: row.get("trailing_offset"),
+                triggered_at: row.get("triggered_at"),
+             }
+        }).collect();
+
         if pending_orders.is_empty() {
             return Ok(());
         }
@@ -100,7 +129,7 @@ impl PriceMonitor {
         for order in pending_orders {
             // Skip orders with missing required fields
             let Some(trigger_type) = order.trigger_type else { continue };
-            let Some(side) = order.side else { continue };
+            let side = order.side;
             
             let should_trigger = self.check_trigger_condition(
                 &trigger_type,
@@ -116,9 +145,10 @@ impl PriceMonitor {
                 if let Err(e) = self.trigger_order(
                     order.id,
                     order.user_id,
-                    side,
+                    order.side,
                     order.energy_amount,
-                    Some(order.limit_price),
+                    Some(order.price_per_kwh),
+                    order.session_token.clone(),
                 ).await {
                     error!("Failed to trigger order {}: {}", order.id, e);
                 }
@@ -132,16 +162,16 @@ impl PriceMonitor {
     async fn get_current_market_price(&self) -> anyhow::Result<Decimal> {
         let result = sqlx::query!(
             r#"
-            SELECT AVG(price_per_kwh) as "avg_price!"
+            SELECT COALESCE(AVG(price_per_kwh), 0) as "avg_price!"
             FROM trading_orders
             WHERE status = 'filled' 
               AND filled_at > NOW() - INTERVAL '1 hour'
             "#
         )
-        .fetch_optional(&self.db)
+        .fetch_one(&self.db)
         .await?;
 
-        Ok(result.map(|r| r.avg_price).unwrap_or(Decimal::ZERO))
+        Ok(result.avg_price)
     }
 
     /// Check if a trigger condition is met
@@ -180,6 +210,7 @@ impl PriceMonitor {
         side: OrderSide,
         energy_amount: Decimal,
         limit_price: Option<Decimal>,
+        session_token: Option<String>,
     ) -> anyhow::Result<()> {
         let now = Utc::now();
         
@@ -207,24 +238,25 @@ impl PriceMonitor {
             OrderType::Market
         };
 
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO trading_orders (
                 id, user_id, order_type, side, energy_amount, price_per_kwh,
-                filled_amount, status, created_at, expires_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                filled_amount, status, created_at, expires_at, session_token
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             "#,
-            new_order_id,
-            user_id,
-            order_type as OrderType,
-            side as OrderSide,
-            energy_amount,
-            limit_price.unwrap_or(Decimal::ZERO),
-            Decimal::ZERO,
-            OrderStatus::Pending as OrderStatus,
-            now,
-            now + chrono::Duration::hours(24)
         )
+        .bind(new_order_id)
+        .bind(user_id)
+        .bind(order_type)
+        .bind(side)
+        .bind(energy_amount)
+        .bind(limit_price.unwrap_or(Decimal::ZERO))
+        .bind(Decimal::ZERO)
+        .bind(OrderStatus::Pending)
+        .bind(now)
+        .bind(now + chrono::Duration::hours(24))
+        .bind(session_token)
         .execute(&mut *tx)
         .await?;
 

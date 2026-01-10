@@ -107,6 +107,7 @@ pub async fn create_order(
             payload.expiry_time,
             zone_id,
             payload.meter_id,
+            payload.session_token.as_deref(),
         )
         .await
         .map_err(|e| {

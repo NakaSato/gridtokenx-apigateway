@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use sqlx::Row;
 use uuid::Uuid;
 use tracing::{info, error};
 
@@ -81,6 +82,7 @@ impl MarketClearingService {
         expiry_time: Option<DateTime<Utc>>,
         zone_id: Option<i32>,
         meter_id: Option<Uuid>,
+        session_token: Option<&str>,
     ) -> Result<Uuid> {
         info!("Creating order in MarketClearingService for user: {}, meter: {:?}", user_id, meter_id);
 
@@ -232,7 +234,7 @@ impl MarketClearingService {
         });
 
         // 3. On-Chain Order Creation
-        self.execute_on_chain_order_creation(user_id, order_id, side, energy_amount, price_per_kwh_val).await?;
+        self.execute_on_chain_order_creation(user_id, order_id, side, energy_amount, price_per_kwh_val, session_token).await?;
 
         Ok(order_id)
     }
@@ -435,29 +437,50 @@ impl MarketClearingService {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Settlement>> {
-        let settlements = sqlx::query_as!(
-            Settlement,
+        let settlements = sqlx::query(
             r#"
             SELECT 
-                id as "id!", epoch_id as "epoch_id!", buyer_id as "buyer_id!", seller_id as "seller_id!", 
-                energy_amount as "energy_amount!", price_per_kwh as "price_per_kwh!", 
-                total_amount as "total_amount!", fee_amount as "fee_amount!", 
-                wheeling_charge as "wheeling_charge!", loss_factor as "loss_factor!", 
-                loss_cost as "loss_cost!", effective_energy as "effective_energy!", 
-                buyer_zone_id as "buyer_zone_id", seller_zone_id as "seller_zone_id", 
-                net_amount as "net_amount!", status as "status!"
+                id, epoch_id, buyer_id, seller_id, 
+                energy_amount, price_per_kwh, 
+                total_amount, fee_amount, 
+                wheeling_charge, loss_factor, 
+                loss_cost, effective_energy, 
+                buyer_zone_id, seller_zone_id, 
+                net_amount, status,
+                buyer_session_token, seller_session_token
             FROM settlements 
             WHERE buyer_id = $1 OR seller_id = $1
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3
-            "#,
-            user_id,
-            limit,
-            offset
+            "#
         )
+        .bind(user_id)
+        .bind(limit)
+        .bind(offset)
         .fetch_all(&self.db)
         .await?;
 
-        Ok(settlements)
+        let result = settlements.into_iter().map(|row| Settlement {
+            id: row.get("id"),
+            epoch_id: row.get("epoch_id"),
+            buyer_id: row.get("buyer_id"),
+            seller_id: row.get("seller_id"),
+            energy_amount: row.get("energy_amount"),
+            price_per_kwh: row.get("price_per_kwh"),
+            total_amount: row.get("total_amount"),
+            fee_amount: row.get("fee_amount"),
+            wheeling_charge: row.get("wheeling_charge"),
+            loss_factor: row.get("loss_factor"),
+            loss_cost: row.get("loss_cost"),
+            effective_energy: row.get("effective_energy"),
+            buyer_zone_id: row.get("buyer_zone_id"),
+            seller_zone_id: row.get("seller_zone_id"),
+            net_amount: row.get("net_amount"),
+            status: row.get("status"),
+            buyer_session_token: row.get("buyer_session_token"),
+            seller_session_token: row.get("seller_session_token"),
+        }).collect();
+
+        Ok(result)
     }
 }

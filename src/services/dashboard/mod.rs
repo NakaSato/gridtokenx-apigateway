@@ -7,7 +7,9 @@ use crate::services::websocket::WebSocketService;
 use crate::services::event_processor::EventProcessorService;
 use crate::services::health_check::HealthChecker;
 use crate::services::transaction::metrics::MetricsExporter;
-pub use types::{DashboardMetrics, GridStatus};
+use std::collections::HashMap;
+pub use types::{DashboardMetrics, GridStatus, ZoneGridStatus};
+use crate::services::websocket::types::ZoneStatus as WsZoneStatus;
 
 #[derive(Clone)]
 pub struct DashboardService {
@@ -36,13 +38,15 @@ impl DashboardService {
                 net_balance: 0.0,
                 active_meters: 0,
                 co2_saved_kg: 0.0,
+                zones: HashMap::new(),
+                zones_data: None,
                 timestamp: Utc::now(),
             })),
         }
     }
 
     /// Handle a new meter reading to update aggregate grid status and broadcast
-    pub async fn handle_meter_reading(&self, kwh: f64, _meter_serial: &str) -> anyhow::Result<()> {
+    pub async fn handle_meter_reading(&self, kwh: f64, _meter_serial: &str, zone_id: Option<i32>) -> anyhow::Result<()> {
         let mut metrics = self.metrics.write().await;
         
         // Update aggregate totals
@@ -52,9 +56,31 @@ impl DashboardService {
             metrics.total_consumption += kwh.abs();
         }
 
+        // Update zone-specific totals if zone_id is provided
+        if let Some(zid) = zone_id {
+            let zone_status = metrics.zones.entry(zid).or_insert(ZoneGridStatus {
+                zone_id: zid,
+                generation: 0.0,
+                consumption: 0.0,
+                net_balance: 0.0,
+                active_meters: 0,
+            });
+
+            if kwh > 0.0 {
+                zone_status.generation += kwh;
+            } else {
+                zone_status.consumption += kwh.abs();
+            }
+            zone_status.net_balance = zone_status.generation - zone_status.consumption;
+            
+            // Simple increment for now, similar to global logic
+            if zone_status.active_meters < 10 {
+                zone_status.active_meters += 1;
+            }
+        }
+
         // Increment active meters if it was 0 or just maintain (simple logic for now)
-        // In a real scenario, we'd track specific meter serials
-        if metrics.active_meters < 30 { // Cap for simulation realism
+        if metrics.active_meters < 30 { 
              metrics.active_meters += 1;
         }
 
@@ -69,9 +95,20 @@ impl DashboardService {
         let bal = metrics.net_balance;
         let active = metrics.active_meters;
         let co2 = metrics.co2_saved_kg;
+        
+        // Map Dashboard zone status to WebSocket zone status
+        let ws_zones: HashMap<i32, WsZoneStatus> = metrics.zones.iter().map(|(id, z)| {
+            (*id, WsZoneStatus {
+                zone_id: z.zone_id,
+                generation: z.generation,
+                consumption: z.consumption,
+                net_balance: z.net_balance,
+                active_meters: z.active_meters,
+            })
+        }).collect();
 
         tokio::spawn(async move {
-            ws.broadcast_grid_status_updated(gen, cons, bal, active, co2)
+            ws.broadcast_grid_status_updated(gen, cons, bal, active, co2, ws_zones)
                 .await;
         });
 
@@ -86,7 +123,7 @@ impl DashboardService {
     /// Retrieve historical grid status snapshots
     pub async fn get_grid_history(&self, limit: i64) -> anyhow::Result<Vec<GridStatus>> {
         let history = sqlx::query_as::<_, GridStatus>(
-            "SELECT total_generation, total_consumption, net_balance, active_meters, co2_saved_kg, timestamp 
+            "SELECT total_generation, total_consumption, net_balance, active_meters, co2_saved_kg, timestamp, zones_data
              FROM grid_status_history 
              ORDER BY timestamp DESC 
              LIMIT $1"
@@ -95,7 +132,17 @@ impl DashboardService {
         .fetch_all(&self.db)
         .await?;
 
-        Ok(history)
+        // Populate zones from zones_data JSONB
+        let mapped_history = history.into_iter().map(|mut gs| {
+            if let Some(zd) = gs.zones_data.take() {
+                if let Ok(zones) = serde_json::from_value::<HashMap<i32, ZoneGridStatus>>(zd) {
+                    gs.zones = zones;
+                }
+            }
+            gs
+        }).collect();
+
+        Ok(mapped_history)
     }
 
     /// Start a background task to record grid status snapshots periodically
@@ -115,11 +162,12 @@ impl DashboardService {
                 
                 let current = self_clone.get_grid_status().await;
                 let snapshot_time = Utc::now();
+                let zones_json = serde_json::to_value(&current.zones).unwrap_or(serde_json::Value::Null);
                 
                 // Only record if there's some activity or regularly
                 let result = sqlx::query(
-                    "INSERT INTO grid_status_history (total_generation, total_consumption, net_balance, active_meters, co2_saved_kg, timestamp)
-                     VALUES ($1, $2, $3, $4, $5, $6)"
+                    "INSERT INTO grid_status_history (total_generation, total_consumption, net_balance, active_meters, co2_saved_kg, timestamp, zones_data)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)"
                 )
                 .bind(current.total_generation)
                 .bind(current.total_consumption)
@@ -127,6 +175,7 @@ impl DashboardService {
                 .bind(current.active_meters)
                 .bind(current.co2_saved_kg)
                 .bind(snapshot_time)
+                .bind(zones_json)
                 .execute(&self_clone.db)
                 .await;
 

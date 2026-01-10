@@ -146,6 +146,34 @@ pub fn decimal_to_f64(d: Decimal) -> f64 {
     d.to_f64().unwrap_or(0.0)
 }
 
+// ==================== ZONE ANALYTICS TYPES ====================
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ZoneTradeStats {
+    pub timeframe: String,
+    pub total_volume_kwh: f64,
+    pub intra_zone_volume_kwh: f64,
+    pub inter_zone_volume_kwh: f64,
+    pub intra_zone_percent: f64,
+    pub inter_zone_percent: f64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ZoneRevenueBreakdown {
+    pub zone_id: i32,
+    pub total_transaction_value: f64,
+    pub total_platform_fees: f64,
+    pub total_wheeling_charges: f64,
+    pub avg_price_per_kwh: f64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ZoneEconomicInsights {
+    pub timeframe: String,
+    pub trade_stats: ZoneTradeStats,
+    pub revenue_breakdown: Vec<ZoneRevenueBreakdown>,
+}
+
 // ==================== TRANSACTION TYPES ====================
 
 #[derive(Debug, Serialize, ToSchema, sqlx::FromRow)]

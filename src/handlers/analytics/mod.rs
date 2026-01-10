@@ -16,4 +16,5 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/stats", get(admin::get_admin_stats).layer(from_fn(require_admin_role)))
         .route("/admin/activity", get(admin::get_admin_activity).layer(from_fn(require_admin_role)))
         .route("/admin/health", get(admin::get_system_health).layer(from_fn(require_admin_role)))
+        .route("/admin/zones/economic", get(admin::get_zone_economic_insights).layer(from_fn(require_admin_role)))
 }

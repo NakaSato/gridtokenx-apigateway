@@ -11,6 +11,8 @@ pub struct FaucetRequest {
     pub wallet_address: String,
     pub amount_sol: Option<f64>,
     pub mint_tokens_kwh: Option<f64>,
+    pub deposit_fiat: Option<f64>,
+    pub promote_to_role: Option<String>,
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -89,6 +91,76 @@ pub async fn request_faucet(
                      return Err(ApiError::Internal(format!("Failed to mint tokens: {}", e)));
                 }
             }
+        }
+    }
+
+    // 3. Deposit Fiat (Cash) - Only for dev testing
+    if let Some(fiat_amount) = payload.deposit_fiat {
+        if fiat_amount > 0.0 {
+            // Find user by wallet address in user_wallets or users table
+            let user_info = sqlx::query!(
+                r#"
+                SELECT user_id FROM user_wallets WHERE wallet_address = $1
+                UNION
+                SELECT id as user_id FROM users WHERE wallet_address = $1
+                LIMIT 1
+                "#,
+                payload.wallet_address
+            )
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Internal(format!("DB error: {}", e)))?;
+
+            if let Some(u) = user_info {
+                use rust_decimal::prelude::FromPrimitive;
+                let amount_dec = rust_decimal::Decimal::from_f64(fiat_amount)
+                    .ok_or(ApiError::BadRequest("Invalid amount".to_string()))?;
+
+                sqlx::query!(
+                    "UPDATE users SET balance = balance + $1 WHERE id = $2",
+                    amount_dec,
+                    u.user_id
+                )
+                .execute(&state.db)
+                .await
+                .map_err(|e| ApiError::Internal(format!("Failed to deposit funds: {}", e)))?;
+                
+                messages.push(format!("Deposited {} THB", fiat_amount));
+            } else {
+                 messages.push(format!("Wallet {} not linked to user, skipped fiat deposit", payload.wallet_address));
+            }
+        }
+    }
+
+    // 4. Promote to Role - Only for dev testing
+    if let Some(role) = &payload.promote_to_role {
+        // Find user by wallet address
+        let user_info = sqlx::query!(
+             r#"
+            SELECT user_id FROM user_wallets WHERE wallet_address = $1
+            UNION
+            SELECT id as user_id FROM users WHERE wallet_address = $1
+            LIMIT 1
+            "#,
+            payload.wallet_address
+        )
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(format!("DB error: {}", e)))?;
+
+        if let Some(u) = user_info {
+             sqlx::query!(
+                "UPDATE users SET role = $1::text::user_role WHERE id = $2",
+                role,
+                u.user_id
+            )
+            .execute(&state.db)
+            .await
+             .map_err(|e| ApiError::Internal(format!("Failed to update role: {}", e)))?;
+             
+             messages.push(format!("Promoted user to role: {}", role));
+        } else {
+             messages.push(format!("Wallet {} not linked to user, skipped role promotion", payload.wallet_address));
         }
     }
 

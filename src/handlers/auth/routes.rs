@@ -20,7 +20,6 @@ use super::{
     },
     wallets::token_balance,
     status::{system_status, meter_status, readiness_probe, liveness_probe},
-    wallet_session::{unlock_wallet, lock_wallet, get_wallet_session, lock_all_sessions},
 };
 
 // ============================================================================
@@ -46,10 +45,6 @@ pub fn v1_users_routes() -> Router<AppState> {
         .route("/wallet", post(update_wallet)) // POST /api/v1/users/wallet
         .route("/wallet/generate", post(generate_wallet)) // POST /api/v1/users/wallet/generate
         // Wallet session routes (secure auto-trading)
-        .route("/wallet/unlock", post(unlock_wallet)) // POST /api/v1/users/wallet/unlock
-        .route("/wallet/lock", post(lock_wallet)) // POST /api/v1/users/wallet/lock
-        .route("/wallet/lock-all", post(lock_all_sessions)) // POST /api/v1/users/wallet/lock-all
-        .route("/wallet/session", get(get_wallet_session)) // GET /api/v1/users/wallet/session
 }
 
 
@@ -60,10 +55,14 @@ pub fn v1_meters_routes() -> Router<AppState> {
         .route("/", get(get_registered_meters_filtered))  // GET /api/v1/meters?status=verified
         .route("/stats", get(get_meter_stats)) // GET /api/v1/meters/stats
         .route("/{serial}", axum::routing::patch(update_meter_status))  // PATCH /api/v1/meters/{serial}
+        .route("/{serial}/health", get(crate::handlers::meter::stub::get_meter_health))  // GET /api/v1/meters/{serial}/health
         .route("/readings", get(get_my_readings))  // GET /api/v1/meters/readings
         .route("/batch/readings", post(create_batch_readings)) // POST /api/v1/meters/batch/readings
-        .route("/{serial}/readings", post(create_reading))  // POST /api/v1/meters/{serial}/readings
+        .route("/{serial}/readings", post(create_reading).get(crate::handlers::meter::stub::get_meter_readings))  // POST/GET /api/v1/meters/{serial}/readings
+        .route("/{serial}/trends", get(crate::handlers::meter::stub::get_meter_trends)) // GET /api/v1/meters/{serial}/trends
         .route("/readings/{reading_id}/mint", post(crate::handlers::meter::mint_user_reading))  // POST /api/v1/meters/readings/{reading_id}/mint
+        .route("/zones", get(crate::handlers::meter::get_zones)) // GET /api/v1/meters/zones
+        .route("/zones/{zone_id}/stats", get(crate::handlers::meter::get_zone_stats)) // GET /api/v1/meters/zones/{zone_id}/stats
 }
 
 /// Build V1 wallets routes

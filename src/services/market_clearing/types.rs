@@ -47,6 +47,8 @@ pub struct TradeMatch {
     pub buyer_zone_id: Option<i32>,
     pub seller_zone_id: Option<i32>,
     pub matched_at: DateTime<Utc>,
+    pub buyer_session_token: Option<String>,
+    pub seller_session_token: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +69,8 @@ pub struct Settlement {
     pub seller_zone_id: Option<i32>,
     pub net_amount: Decimal,
     pub status: String,
+    pub buyer_session_token: Option<String>,
+    pub seller_session_token: Option<String>,
 }
 
 #[derive(Debug)]

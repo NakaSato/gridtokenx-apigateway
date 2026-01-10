@@ -1,10 +1,13 @@
-use axum::{extract::State, Json};
+use axum::{extract::{State, Query}, Json};
+use sqlx::Row;
 use serde::Serialize;
 use utoipa::ToSchema;
 use tracing::info;
+use chrono::Utc;
 use crate::AppState;
 use crate::auth::middleware::AuthenticatedUser;
 use crate::error::Result;
+use super::types::*;
 use crate::services::audit_logger::AuditEventRecord;
 use crate::services::health_check::DetailedHealthStatus;
 
@@ -43,7 +46,7 @@ pub async fn get_admin_stats(
 
     // 2. Meters Stats
     let meter_stats = sqlx::query_as::<_, (i64, i64)>(
-        "SELECT COUNT(*), COUNT(*) FILTER (WHERE status = 'active') FROM smartmeters"
+        "SELECT COUNT(*), COUNT(*) FILTER (WHERE is_verified = true) FROM meters"
     )
     .fetch_one(&state.db)
     .await
@@ -123,4 +126,90 @@ pub async fn get_system_health(
     };
     
     Ok(Json(health))
+}
+
+/// Get economic insights broken down by zones (Admin only)
+#[utoipa::path(
+    get,
+    path = "/api/v1/analytics/admin/zones/economic",
+    params(AnalyticsTimeframe),
+    responses(
+        (status = 200, description = "Zone economic insights retrieved", body = ZoneEconomicInsights),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden - Admin only")
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_zone_economic_insights(
+    State(state): State<AppState>,
+    _user: AuthenticatedUser,
+    Query(params): Query<AnalyticsTimeframe>,
+) -> Result<Json<ZoneEconomicInsights>> {
+    info!("📊 Admin: Fetching zone economic insights for timeframe: {}", params.timeframe);
+
+    let duration = parse_timeframe(&params.timeframe)?;
+    let start_time = Utc::now() - duration;
+
+    // 1. Cross-Zone Trade Stats
+    let trade_row = sqlx::query(
+        r#"
+        SELECT 
+            COALESCE(SUM(energy_amount), 0) as total_vol,
+            COALESCE(SUM(CASE WHEN buyer_zone_id = seller_zone_id THEN energy_amount ELSE 0 END), 0) as intra_vol,
+            COALESCE(SUM(CASE WHEN buyer_zone_id != seller_zone_id THEN energy_amount ELSE 0 END), 0) as inter_vol
+        FROM settlements
+        WHERE processed_at >= $1 AND status = 'completed'
+        "#
+    )
+    .bind(start_time)
+    .fetch_one(&state.db)
+    .await?;
+
+    let total_vol = decimal_to_f64(trade_row.get("total_vol"));
+    let intra_vol = decimal_to_f64(trade_row.get("intra_vol"));
+    let inter_vol = decimal_to_f64(trade_row.get("inter_vol"));
+
+    let trade_stats = ZoneTradeStats {
+        timeframe: params.timeframe.clone(),
+        total_volume_kwh: total_vol,
+        intra_zone_volume_kwh: intra_vol,
+        inter_zone_volume_kwh: inter_vol,
+        intra_zone_percent: if total_vol > 0.0 { (intra_vol / total_vol) * 100.0 } else { 0.0 },
+        inter_zone_percent: if total_vol > 0.0 { (inter_vol / total_vol) * 100.0 } else { 0.0 },
+    };
+
+    // 2. Zone Revenue Breakdown
+    let revenue_rows = sqlx::query(
+        r#"
+        SELECT 
+            buyer_zone_id as zone_id,
+            SUM(total_amount) as total_val,
+            SUM(fee_amount) as total_fees,
+            SUM(wheeling_charge) as total_wheeling,
+            AVG(price_per_kwh) as avg_price
+        FROM settlements
+        WHERE processed_at >= $1 AND status = 'completed' AND buyer_zone_id IS NOT NULL
+        GROUP BY buyer_zone_id
+        ORDER BY buyer_zone_id
+        "#
+    )
+    .bind(start_time)
+    .fetch_all(&state.db)
+    .await?;
+
+    let revenue_breakdown = revenue_rows.iter().map(|row| {
+        ZoneRevenueBreakdown {
+            zone_id: row.get::<i32, _>("zone_id"),
+            total_transaction_value: decimal_to_f64(row.get("total_val")),
+            total_platform_fees: decimal_to_f64(row.get("total_fees")),
+            total_wheeling_charges: decimal_to_f64(row.get("total_wheeling")),
+            avg_price_per_kwh: decimal_to_f64(row.get("avg_price")),
+        }
+    }).collect();
+
+    Ok(Json(ZoneEconomicInsights {
+        timeframe: params.timeframe,
+        trade_stats,
+        revenue_breakdown,
+    }))
 }

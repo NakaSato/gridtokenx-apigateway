@@ -28,6 +28,7 @@ pub mod notification;
 pub mod price_monitor;
 pub mod recurring_scheduler;
 pub mod notification_dispatcher;
+pub mod meter_analyzer;
 
 // Re-exports
 pub use auth::AuthService;
@@ -36,7 +37,6 @@ pub use cache::CacheService;
 pub use email::EmailService;
 pub use health_check::HealthChecker;
 pub use wallet::WalletService;
-pub use wallet::WalletSessionService;
 pub use websocket::WebSocketService;
 
 pub use audit_logger::{AuditLogger, AuditEvent};

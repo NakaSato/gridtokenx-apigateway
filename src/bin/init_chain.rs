@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let authority_path = std::env::var("AUTHORITY_WALLET_PATH").unwrap_or("../keypairs/dev-wallet.json".to_string());
     println!("Loading authority from: {}", authority_path);
     let authority = BlockchainService::load_keypair_from_file(&authority_path)
-        .expect("Failed to load authority");
+        .map_err(|e| format!("Failed to load authority from {}: {}", authority_path, e))?;
         
     println!("Authority: {}", authority.pubkey());
     
@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Initialize Blockchain Service
     let blockchain = BlockchainService::new(rpc_url.clone(), "localnet".to_string(), program_config)
-        .expect("Failed to init blockchain service");
+        .map_err(|e| format!("Failed to init blockchain service: {}", e))?;
 
     println!("Initializing Blockchain on {}...", rpc_url);
 

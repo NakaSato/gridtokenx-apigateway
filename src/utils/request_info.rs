@@ -25,8 +25,8 @@ pub fn extract_ip_address(headers: &HeaderMap) -> String {
         }
     }
 
-    // Fallback to unknown if no IP headers found
-    "unknown".to_string()
+    // Fallback to localhost if no IP headers found (valid inet format for database)
+    "127.0.0.1".to_string()
 }
 
 /// Extract User-Agent from request headers
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn test_extract_ip_unknown() {
         let headers = HeaderMap::new();
-        assert_eq!(extract_ip_address(&headers), "unknown");
+        assert_eq!(extract_ip_address(&headers), "127.0.0.1");
     }
 
     #[test]

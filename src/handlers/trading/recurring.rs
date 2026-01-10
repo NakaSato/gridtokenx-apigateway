@@ -11,7 +11,7 @@ use tracing::{info, error};
 use crate::auth::middleware::AuthenticatedUser;
 use crate::error::{ApiError, Result};
 use crate::models::trading::{
-    CreateRecurringOrderRequest, UpdateRecurringOrderRequest,
+    CreateRecurringOrderRequest,
     RecurringOrderResponse, RecurringOrder,
     IntervalType, RecurringStatus,
 };
@@ -58,31 +58,34 @@ pub async fn create_recurring_order(
     let order_id = Uuid::new_v4();
     let now = Utc::now();
     let interval_value = payload.interval_value.unwrap_or(1);
-    let next_execution = calculate_next_execution(payload.interval_type, interval_value);
+    let next_execution_at = calculate_next_execution(payload.interval_type, interval_value);
 
-    let result = sqlx::query!(
+    let result = sqlx::query(
         r#"
         INSERT INTO recurring_orders (
             id, user_id, side, energy_amount, max_price_per_kwh, min_price_per_kwh,
-            interval_type, interval_value, next_execution_at, status,
-            max_executions, name, description, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)
+            interval_type, interval_value, next_execution_at, status, total_executions,
+            max_executions, name, description, created_at, updated_at, session_token
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         "#,
-        order_id,
-        user.0.sub,
-        payload.side as OrderSide,
-        payload.energy_amount,
-        payload.max_price_per_kwh,
-        payload.min_price_per_kwh,
-        payload.interval_type as IntervalType,
-        interval_value,
-        next_execution,
-        RecurringStatus::Active as RecurringStatus,
-        payload.max_executions,
-        payload.name,
-        payload.description,
-        now
     )
+    .bind(order_id)
+    .bind(user.0.sub)
+    .bind(payload.side as OrderSide)
+    .bind(payload.energy_amount)
+    .bind(payload.max_price_per_kwh)
+    .bind(payload.min_price_per_kwh)
+    .bind(payload.interval_type as IntervalType)
+    .bind(payload.interval_value.unwrap_or(1))
+    .bind(next_execution_at)
+    .bind(RecurringStatus::Active as RecurringStatus)
+    .bind(0) // total_executions starts at 0
+    .bind(payload.max_executions)
+    .bind(payload.name)
+    .bind(payload.description)
+    .bind(now) // created_at
+    .bind(now) // updated_at
+    .bind(payload.session_token)
     .execute(&state.db)
     .await
     .map_err(|e| {
@@ -99,11 +102,11 @@ pub async fn create_recurring_order(
     Ok(Json(RecurringOrderResponse {
         id: order_id,
         status: RecurringStatus::Active,
-        next_execution_at: next_execution,
+        next_execution_at: next_execution_at,
         created_at: now,
         message: format!(
             "Recurring {} order created. First execution at {}",
-            payload.side, next_execution.format("%Y-%m-%d %H:%M UTC")
+            payload.side, next_execution_at.format("%Y-%m-%d %H:%M UTC")
         ),
     }))
 }

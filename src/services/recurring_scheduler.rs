@@ -6,7 +6,7 @@ use rust_decimal::Decimal;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio::time::{interval, Duration};
-use tracing::{info, warn, error};
+use tracing::{info, error};
 use chrono::{Utc, Duration as ChronoDuration};
 use uuid::Uuid;
 
@@ -64,52 +64,66 @@ impl RecurringScheduler {
     }
 
     /// Process orders that are due for execution
-    async fn process_due_orders(&self) -> anyhow::Result<()> {
+    pub(crate) async fn process_due_orders(&self) -> anyhow::Result<()> {
         let now = Utc::now();
 
         // Get orders due for execution
-        let due_orders = sqlx::query!(
+        let due_rows = sqlx::query(
             r#"
-            SELECT id, user_id, side as "side!: OrderSide", energy_amount,
+            SELECT id, user_id, side, energy_amount,
                    max_price_per_kwh, min_price_per_kwh,
-                   interval_type as "interval_type!: IntervalType",
-                   interval_value as "interval_value!",
-                   total_executions as "total_executions!",
-                   max_executions
+                   interval_type,
+                   interval_value,
+                   total_executions,
+                   max_executions, session_token
             FROM recurring_orders
             WHERE status = 'active' 
               AND next_execution_at <= $1
             ORDER BY next_execution_at ASC
             LIMIT 50
             "#,
-            now
         )
+        .bind(now)
         .fetch_all(&self.db)
         .await?;
 
-        if due_orders.is_empty() {
+        if due_rows.is_empty() {
             return Ok(());
         }
 
-        info!("Processing {} due recurring orders", due_orders.len());
+        info!("Processing {} due recurring orders", due_rows.len());
 
-        for order in due_orders {
+        for row in due_rows {
+            use sqlx::Row;
+            let id: Uuid = row.get("id");
+            let user_id: Uuid = row.get("user_id");
+            let side: OrderSide = row.get("side");
+            let energy_amount: Decimal = row.get("energy_amount");
+            let max_price: Option<Decimal> = row.get("max_price_per_kwh");
+            let min_price: Option<Decimal> = row.get("min_price_per_kwh");
+            let interval_type: IntervalType = row.get("interval_type");
+            let interval_value: i32 = row.get("interval_value");
+            let total_executions: i32 = row.get("total_executions");
+            let max_executions: Option<i32> = row.get("max_executions");
+            let session_token: Option<String> = row.get("session_token");
+
             if let Err(e) = self.execute_order(
-                order.id,
-                order.user_id,
-                order.side,
-                order.energy_amount,
-                order.max_price_per_kwh,
-                order.min_price_per_kwh,
-                order.interval_type,
-                order.interval_value,
-                order.total_executions,
-                order.max_executions,
+                id,
+                user_id,
+                side,
+                energy_amount,
+                max_price,
+                min_price,
+                interval_type,
+                interval_value,
+                total_executions,
+                max_executions,
+                session_token,
             ).await {
-                error!("Failed to execute recurring order {}: {}", order.id, e);
+                error!("Failed to execute recurring order {}: {}", id, e);
                 
                 // Record failed execution
-                let _ = self.record_execution(order.id, None, "failed", Some(&e.to_string())).await;
+                let _ = self.record_execution(id, None, "failed", Some(&e.to_string())).await;
             }
         }
 
@@ -129,6 +143,7 @@ impl RecurringScheduler {
         interval_value: i32,
         total_executions: i32,
         max_executions: Option<i32>,
+        session_token: Option<String>,
     ) -> anyhow::Result<()> {
         let now = Utc::now();
         
@@ -148,24 +163,25 @@ impl RecurringScheduler {
             OrderType::Market
         };
 
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO trading_orders (
                 id, user_id, order_type, side, energy_amount, price_per_kwh,
-                filled_amount, status, created_at, expires_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                filled_amount, status, created_at, expires_at, session_token
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             "#,
-            order_id,
-            user_id,
-            order_type as OrderType,
-            side as OrderSide,
-            energy_amount,
-            price,
-            Decimal::ZERO,
-            OrderStatus::Pending as OrderStatus,
-            now,
-            now + ChronoDuration::hours(24)
         )
+        .bind(order_id)
+        .bind(user_id)
+        .bind(order_type)
+        .bind(side)
+        .bind(energy_amount)
+        .bind(price)
+        .bind(Decimal::ZERO)
+        .bind(OrderStatus::Pending)
+        .bind(now)
+        .bind(now + ChronoDuration::hours(24))
+        .bind(session_token)
         .execute(&mut *tx)
         .await?;
 

@@ -50,6 +50,8 @@ pub struct Settlement {
     pub loss_cost: Option<Decimal>,
     pub loss_factor: Option<Decimal>,
     pub effective_energy: Option<Decimal>,
+    pub buyer_session_token: Option<String>,
+    pub seller_session_token: Option<String>,
 }
 
 /// Settlement transaction result
@@ -74,7 +76,7 @@ pub struct SettlementConfig {
 impl Default for SettlementConfig {
     fn default() -> Self {
         Self {
-            fee_rate: Decimal::from_str("0.01").unwrap(), // 1% platform fee
+            fee_rate: Decimal::from_str("0.01").expect("valid hardcoded decimal 0.01"), // 1% platform fee
             min_confirmation_blocks: 32,                  // ~13 seconds on Solana
             retry_attempts: 3,
             retry_delay_secs: 5,

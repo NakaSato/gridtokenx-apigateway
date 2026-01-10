@@ -3,6 +3,7 @@ use chrono::Utc;
 use rust_decimal::prelude::{ToPrimitive, FromPrimitive};
 use rust_decimal::Decimal;
 
+use sqlx::Row;
 use uuid::Uuid;
 use std::str::FromStr;
 use tracing::{error, info};
@@ -279,17 +280,17 @@ impl MarketClearingService {
     /// Create settlement for an order match
     pub(super) async fn create_settlement(&self, order_match: &OrderMatch) -> Result<Settlement> {
         // Get buyer and seller information from orders
-        let buy_order = sqlx::query!(
-            "SELECT user_id, zone_id FROM trading_orders WHERE id = $1",
-            order_match.buy_order_id
+        let buy_order = sqlx::query(
+            "SELECT user_id, zone_id, session_token FROM trading_orders WHERE id = $1",
         )
+        .bind(order_match.buy_order_id)
         .fetch_one(&self.db)
         .await?;
 
-        let sell_order = sqlx::query!(
-            "SELECT user_id, zone_id, meter_id FROM trading_orders WHERE id = $1",
-            order_match.sell_order_id
+        let sell_order = sqlx::query(
+            "SELECT user_id, zone_id, meter_id, session_token FROM trading_orders WHERE id = $1",
         )
+        .bind(order_match.sell_order_id)
         .fetch_one(&self.db)
         .await?;
 
@@ -299,7 +300,7 @@ impl MarketClearingService {
         let mut loss_cost = Decimal::ZERO;
         let mut effective_energy = order_match.matched_amount;
 
-        if let (Some(b_zone), Some(s_zone)) = (buy_order.zone_id, sell_order.zone_id) {
+        if let (Some(b_zone), Some(s_zone)) = (buy_order.get::<Option<i32>, _>("zone_id"), sell_order.get::<Option<i32>, _>("zone_id")) {
             info!("Calculating P2P costs between zones {} and {}", b_zone, s_zone);
             
             let simulator_url = std::env::var("SIMULATOR_URL").unwrap_or_else(|_| "http://localhost:8000".to_string());
@@ -342,14 +343,14 @@ impl MarketClearingService {
         let net_amount = total_amount - fee_amount - wheeling_charge;
 
         // Fetch Seller Wallet for REC issuance (and potential future use)
-        let seller_wallet_row = sqlx::query!(
+        let seller_wallet_row = sqlx::query(
             "SELECT wallet_address FROM users WHERE id = $1",
-            sell_order.user_id
         )
+        .bind(sell_order.get::<Uuid, _>("user_id"))
         .fetch_one(&self.db)
         .await
         .map_err(|e| ApiError::Database(e))?;
-        let seller_wallet_addr: Option<String> = seller_wallet_row.wallet_address;
+        let seller_wallet_addr: Option<String> = seller_wallet_row.get("wallet_address");
 
 
 
@@ -366,35 +367,35 @@ impl MarketClearingService {
         // Transfer USDC from Escrow -> Seller
         match self
             .execute_escrow_release(
-                sell_order.user_id, 
+                sell_order.get("user_id"), 
                 net_amount, 
                 "currency"
             )
             .await
         {
-            Ok(_sig) => info!("Settlement Payment Release triggered: {} -> Seller {}", net_amount, sell_order.user_id),
+            Ok(_sig) => info!("Settlement Payment Release triggered: {} -> Seller {}", net_amount, sell_order.get::<Uuid, _>("user_id")),
             Err(e) => error!("Failed to release payment escrow: {}", e),
         }
 
         // Transfer Energy from Escrow -> Buyer
         match self
             .execute_escrow_release(
-                buy_order.user_id, 
+                buy_order.get("user_id"), 
                 effective_energy, 
                 "energy"
             )
             .await
         {
-            Ok(_sig) => info!("Settlement Energy Release triggered: {} -> Buyer {}", effective_energy, buy_order.user_id),
-            Err(e) => error!("Failed to release energy escrow for {}: {}", buy_order.user_id, e),
+            Ok(_sig) => info!("Settlement Energy Release triggered: {} -> Buyer {}", effective_energy, buy_order.get::<Uuid, _>("user_id")),
+            Err(e) => error!("Failed to release energy escrow for {}: {}", buy_order.get::<Uuid, _>("user_id"), e),
         }
 
 
         let settlement = Settlement {
             id: Uuid::new_v4(),
             epoch_id: order_match.epoch_id,
-            buyer_id: buy_order.user_id,
-            seller_id: sell_order.user_id,
+            buyer_id: buy_order.get("user_id"),
+            seller_id: sell_order.get("user_id"),
             energy_amount: order_match.matched_amount.clone(),
             price_per_kwh: order_match.match_price.clone(),
             total_amount: total_amount.clone(),
@@ -403,71 +404,79 @@ impl MarketClearingService {
             loss_factor: loss_factor.clone(),
             loss_cost: loss_cost.clone(),
             effective_energy: effective_energy.clone(),
-            buyer_zone_id: buy_order.zone_id,
-            seller_zone_id: sell_order.zone_id,
+            buyer_zone_id: buy_order.get("zone_id"),
+            seller_zone_id: sell_order.get("zone_id"),
             net_amount: net_amount.clone(),
             status: "pending".to_string(),
+            buyer_session_token: buy_order.get("session_token"),
+            seller_session_token: sell_order.get("session_token"),
         };
 
         // Save settlement
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO settlements (
                 id, epoch_id, buyer_id, seller_id, energy_amount, 
                 price_per_kwh, total_amount, fee_amount, wheeling_charge,
                 loss_factor, loss_cost, effective_energy, buyer_zone_id,
-                seller_zone_id, net_amount, status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                seller_zone_id, net_amount, status, buyer_session_token, seller_session_token
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             "#,
-            settlement.id,
-            settlement.epoch_id,
-            settlement.buyer_id,
-            settlement.seller_id,
-            settlement.energy_amount,
-            settlement.price_per_kwh,
-            settlement.total_amount,
-            settlement.fee_amount,
-            settlement.wheeling_charge,
-            settlement.loss_factor,
-            settlement.loss_cost,
-            settlement.effective_energy,
-            settlement.buyer_zone_id,
-            settlement.seller_zone_id,
-            settlement.net_amount,
-            settlement.status
         )
+        .bind(&settlement.id)
+        .bind(&settlement.epoch_id)
+        .bind(&settlement.buyer_id)
+        .bind(&settlement.seller_id)
+        .bind(&settlement.energy_amount)
+        .bind(&settlement.price_per_kwh)
+        .bind(&settlement.total_amount)
+        .bind(&settlement.fee_amount)
+        .bind(&settlement.wheeling_charge)
+        .bind(&settlement.loss_factor)
+        .bind(&settlement.loss_cost)
+        .bind(&settlement.effective_energy)
+        .bind(settlement.buyer_zone_id)
+        .bind(settlement.seller_zone_id)
+        .bind(&settlement.net_amount)
+        .bind(&settlement.status)
+        .bind(&settlement.buyer_session_token)
+        .bind(&settlement.seller_session_token)
         .execute(&self.db)
         .await?;
 
         // Update order match with settlement ID
-        sqlx::query!(
+        sqlx::query(
             "UPDATE order_matches SET settlement_id = $1 WHERE id = $2",
-            settlement.id,
-            order_match.id
         )
+        .bind(settlement.id)
+        .bind(order_match.id)
         .execute(&self.db)
         .await?;
 
         // =================================================================
         // NEW: Automated REC Issuance
         // =================================================================
-        if let Some(meter_id) = sell_order.meter_id {
-            info!("🌿 Triggering automated REC issuance for settlement {} (Meter: {})", settlement.id, meter_id);
+        let sell_order_meter_id: Option<Uuid> = sell_order.get("meter_id");
+        let sell_order_user_id: Uuid = sell_order.get("user_id");
+
+        if let Some(m_id) = sell_order_meter_id {
+            info!("🌿 Triggering automated REC issuance for settlement {} (Meter: {:?})", settlement.id, m_id);
             
             let erc_service = self.erc_service.clone();
-            let seller_id = sell_order.user_id;
+            let seller_id = sell_order_user_id;
             let seller_wallet_str = seller_wallet_addr.clone().unwrap_or_default();
             let energy_amount = settlement.energy_amount;
             let settlement_id = settlement.id;
             
             // Fetch meter serial for REC metadata
-            let meter_serial = sqlx::query!("SELECT serial_number FROM meters WHERE id = $1", meter_id)
+            let meter_serial = sqlx::query("SELECT serial_number FROM meters WHERE id = $1")
+                .bind(m_id)
                 .fetch_optional(&self.db)
                 .await
                 .ok()
                 .flatten()
-                .map(|r| r.serial_number)
-                .unwrap_or_else(|| meter_id.to_string());
+                .map(|r| r.get::<String, _>("serial_number"))
+                .unwrap_or_else(|| format!("{:?}", m_id));
 
             tokio::spawn(async move {
                 let cert_request = crate::services::erc::IssueErcRequest {

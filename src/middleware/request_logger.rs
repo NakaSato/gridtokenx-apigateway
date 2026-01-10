@@ -1,6 +1,6 @@
 use axum::{
     extract::Request,
-    http::{HeaderMap, Method, StatusCode},
+    http::{HeaderMap, Method, StatusCode, HeaderValue},
     middleware::Next,
     response::Response,
 };
@@ -95,7 +95,7 @@ pub async fn request_logger_middleware(request: Request, next: Next) -> Response
     let (mut parts, body) = response.into_parts();
     parts
         .headers
-        .insert("X-Request-ID", request_id.parse().unwrap());
+        .insert("X-Request-ID", request_id.parse().unwrap_or(HeaderValue::from_static("unknown")));
 
     Response::from_parts(parts, body)
 }

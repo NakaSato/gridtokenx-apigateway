@@ -145,8 +145,28 @@ pub enum MarketEvent {
         net_balance: f64,
         active_meters: i64,
         co2_saved_kg: f64,
+        #[serde(skip_serializing_if = "std::collections::HashMap::is_empty")]
+        zones: std::collections::HashMap<i32, ZoneStatus>,
         timestamp: chrono::DateTime<chrono::Utc>,
     },
+
+    /// Meter alert event
+    MeterAlert {
+        meter_id: String,
+        alert_type: String,
+        severity: String,
+        message: String,
+        timestamp: chrono::DateTime<chrono::Utc>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZoneStatus {
+    pub zone_id: i32,
+    pub generation: f64,
+    pub consumption: f64,
+    pub net_balance: f64,
+    pub active_meters: i32,
 }
 
 /// Price level for order book updates

@@ -2,7 +2,10 @@
 //!
 //! Manage multiple wallet addresses linked to a user account
 
-use axum::{extract::{State, Path}, response::Json};
+use axum::{
+    extract::{Path, State},
+    Json,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -351,3 +354,4 @@ pub async fn set_primary_wallet(
         }
     }
 }
+

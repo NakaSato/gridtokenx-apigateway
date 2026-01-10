@@ -7,7 +7,7 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::error::ApiError;
@@ -181,6 +181,8 @@ impl SettlementService {
             effective_energy: Some(effective_energy),
             buyer_zone_id: trade.buyer_zone_id,
             seller_zone_id: trade.seller_zone_id,
+            buyer_session_token: trade.buyer_session_token.clone(),
+            seller_session_token: trade.seller_session_token.clone(),
             
             status: SettlementStatus::Pending,
             blockchain_tx: None,
@@ -193,9 +195,10 @@ impl SettlementService {
             INSERT INTO settlements (
                 id, buyer_id, seller_id, buy_order_id, sell_order_id,
                 energy_amount, price_per_kwh, total_amount, fee_amount, net_amount, status, created_at,
-                wheeling_charge, loss_factor, loss_cost, effective_energy, buyer_zone_id, seller_zone_id, epoch_id
+                wheeling_charge, loss_factor, loss_cost, effective_energy, buyer_zone_id, seller_zone_id, epoch_id,
+                buyer_session_token, seller_session_token
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
             "#,
         )
         .bind(settlement.id)
@@ -217,6 +220,8 @@ impl SettlementService {
         .bind(settlement.buyer_zone_id)
         .bind(settlement.seller_zone_id)
         .bind(trade.epoch_id)
+        .bind(&settlement.buyer_session_token)
+        .bind(&settlement.seller_session_token)
         .execute(&self.db)
         .await?;
 
@@ -348,7 +353,7 @@ impl SettlementService {
             .map_err(|e| ApiError::Internal(format!("Failed to get authority: {}", e)))?;
 
         // 5. Decrypt Seller Keypair (CRITICAL FIX: Seller must sign transfer)
-        let seller_keypair = self.get_user_keypair(&settlement.seller_id).await?;
+        let seller_keypair = self.get_user_keypair(&settlement.seller_id, settlement.seller_session_token.as_deref()).await?;
         let seller_decrypted_pubkey = seller_keypair.pubkey();
         
         // High visibility debug logs
@@ -549,7 +554,8 @@ impl SettlementService {
                 id, buyer_id, seller_id, buy_order_id, sell_order_id, energy_amount,
                 price_per_kwh, total_amount, fee_amount, net_amount,
                 status, transaction_hash, created_at, processed_at,
-                wheeling_charge, loss_factor, loss_cost, effective_energy, buyer_zone_id, seller_zone_id
+                wheeling_charge, loss_factor, loss_cost, effective_energy, buyer_zone_id, seller_zone_id,
+                buyer_session_token, seller_session_token
             FROM settlements
             WHERE id = $1
             "#,
@@ -591,6 +597,8 @@ impl SettlementService {
             effective_energy: row.get("effective_energy"),
             buyer_zone_id: row.get("buyer_zone_id"),
             seller_zone_id: row.get("seller_zone_id"),
+            buyer_session_token: row.get("buyer_session_token"),
+            seller_session_token: row.get("seller_session_token"),
         })
     }
 
@@ -845,10 +853,52 @@ impl SettlementService {
     async fn get_user_keypair(
         &self,
         user_id: &Uuid,
+        session_token: Option<&str>,
     ) -> Result<solana_sdk::signature::Keypair, ApiError> {
         use solana_sdk::signature::Keypair;
 
-        // Fetch encrypted_private_key from users table
+        if let Some(token) = session_token {
+
+            // Note: In this minimal build, we might not have session service directly 
+            // but we can query the session table.
+            
+            let session = sqlx::query(
+                "SELECT encrypted_private_key, encryption_salt, encryption_iv FROM wallet_sessions WHERE session_token = $1 AND user_id = $2 AND revoked_at IS NULL AND expires_at > NOW()"
+            )
+            .bind(token)
+            .bind(user_id)
+            .fetch_optional(&self.db)
+            .await
+            .map_err(ApiError::Database)?;
+            
+            if let Some(s) = session {
+                use sqlx::Row;
+                info!("Using session-cached key for user {}", user_id);
+                
+                use base64::{engine::general_purpose, Engine as _};
+                let encrypted_pk_raw: Vec<u8> = s.get("encrypted_private_key");
+                let salt_raw: Vec<u8> = s.get("encryption_salt");
+                let iv_raw: Vec<u8> = s.get("encryption_iv");
+
+                let encrypted_b64 = general_purpose::STANDARD.encode(&encrypted_pk_raw);
+                let salt_b64 = general_purpose::STANDARD.encode(&salt_raw);
+                let iv_b64 = general_purpose::STANDARD.encode(&iv_raw);
+                
+                use crate::services::WalletService;
+                let decrypted = WalletService::decrypt_private_key(
+                    &self.encryption_secret,
+                    &encrypted_b64,
+                    &salt_b64,
+                    &iv_b64
+                ).map_err(|e| ApiError::Internal(format!("Failed to decrypt session key: {}", e)))?;
+                
+                return Ok(Keypair::try_from(decrypted.as_slice()).map_err(|e| ApiError::Internal(format!("Invalid session key: {}", e)))?);
+            } else {
+                warn!("Session token provided but session not found or expired for user {}", user_id);
+            }
+        }
+
+        // Fetch encrypted_private_key from users table (Legacy/Fallback)
         let row = sqlx::query!(
             "SELECT wallet_address, encrypted_private_key, wallet_salt, encryption_iv FROM users WHERE id = $1",
             user_id
@@ -1165,6 +1215,8 @@ mod tests {
             loss_cost: Some(Decimal::ZERO),
             effective_energy: Some(Decimal::from(100)),
             confirmed_at: None,
+            buyer_session_token: None,
+            seller_session_token: None,
         };
 
         assert_eq!(settlement.status, SettlementStatus::Pending);

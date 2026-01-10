@@ -285,7 +285,10 @@ pub struct MeterFilterParams {
 /// Update meter status request
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateMeterStatusRequest {
-    pub status: String,  // "verified", "pending", "inactive"
+    pub status: Option<String>,  // "verified", "pending", "inactive"
+    pub zone_id: Option<i32>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 /// Create reading request for v1 API with full telemetry support
@@ -314,6 +317,8 @@ pub struct CreateReadingRequest {
     pub power_factor: Option<f64>,
     pub frequency: Option<f64>,
     pub temperature: Option<f64>,
+    pub thd_voltage: Option<f64>,
+    pub thd_current: Option<f64>,
     
     // Location (GPS)
     pub latitude: Option<f64>,
@@ -331,6 +336,15 @@ pub struct CreateReadingRequest {
     
     // Security
     pub meter_signature: Option<String>,
+}
+
+impl crate::handlers::meter::types::ReadingData for CreateReadingRequest {
+    fn voltage(&self) -> Option<f64> { self.voltage }
+    fn frequency(&self) -> Option<f64> { self.frequency }
+    fn battery_level(&self) -> Option<f64> { self.battery_level }
+    fn power_factor(&self) -> Option<f64> { self.power_factor }
+    fn thd_voltage(&self) -> Option<f64> { self.thd_voltage }
+    fn thd_current(&self) -> Option<f64> { self.thd_current }
 }
 
 /// Create reading response
@@ -402,6 +416,32 @@ pub struct CreateReadingParams {
     pub timeout_secs: Option<u64>,
 }
 
+/// Query parameters for historical trends
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct GetTrendsQuery {
+    pub period: Option<String>, // hour, day, month
+    pub from: Option<chrono::DateTime<chrono::Utc>>,
+    pub to: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Record for trend aggregation
+#[derive(Debug, Serialize, sqlx::FromRow, ToSchema)]
+pub struct TrendRecord {
+    pub time_bucket: chrono::DateTime<chrono::Utc>,
+    pub production: Option<f64>,
+    pub consumption: Option<f64>,
+    pub net_energy: Option<f64>,
+    pub avg_health: Option<f64>,
+}
+
+/// Response for historical trends
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TrendResponse {
+    pub meter_serial: String,
+    pub period: String,
+    pub data: Vec<TrendRecord>,
+}
+
 // ============================================================================
 // Token/Wallet Types
 // ============================================================================
@@ -428,78 +468,4 @@ pub struct StatusResponse {
     pub status: String,
     pub version: String,
     pub uptime: String,
-}
-
-// ============================================================================
-// Wallet Session Types (Session-Based Security)
-// ============================================================================
-
-/// Request to generate wallet with user password
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct GenerateWalletRequest {
-    /// User's wallet password (used to encrypt private key)
-    /// Must be at least 8 characters
-    pub wallet_password: String,
-}
-
-/// Request to unlock wallet for trading session
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct UnlockWalletRequest {
-    /// User's wallet password
-    pub wallet_password: String,
-    /// Device fingerprint from frontend (used for device tracking)
-    pub device_fingerprint: String,
-    /// Optional device name for display (e.g., "iPhone 15", "Chrome on MacOS")
-    pub device_name: Option<String>,
-}
-
-/// Response for wallet unlock
-#[derive(Debug, Serialize, ToSchema)]
-pub struct UnlockWalletResponse {
-    pub success: bool,
-    pub message: String,
-    /// Session token for auto-trading (store in localStorage)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_token: Option<String>,
-    /// Session expiration time
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
-    /// Number of other device sessions that were revoked
-    pub revoked_sessions: i64,
-}
-
-/// Wallet session info
-#[derive(Debug, Serialize, ToSchema)]
-pub struct WalletSessionInfo {
-    /// Whether wallet is currently unlocked
-    pub is_unlocked: bool,
-    /// Whether user needs to set wallet password (legacy migration)
-    pub needs_password_setup: bool,
-    /// Session expiration time
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
-    /// Device name of current session
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub device_name: Option<String>,
-    /// When session was created
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
-    /// Encryption version (1=legacy master secret, 2=user password)
-    pub encryption_version: i32,
-}
-
-/// Request to set wallet password (for migrating legacy users)
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct SetWalletPasswordRequest {
-    /// New wallet password
-    pub wallet_password: String,
-    /// Confirm wallet password
-    pub confirm_password: String,
-}
-
-/// Response for lock wallet
-#[derive(Debug, Serialize, ToSchema)]
-pub struct LockWalletResponse {
-    pub success: bool,
-    pub message: String,
 }

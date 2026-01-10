@@ -29,8 +29,6 @@ pub struct AppState {
     pub blockchain_service: services::BlockchainService,
     /// Wallet management service
     pub wallet_service: services::WalletService,
-    /// Wallet session service (for secure auto-trading)
-    pub wallet_session: services::WalletSessionService,
     /// WebSocket service for real-time updates
     pub websocket_service: services::WebSocketService,
     /// Redis cache service
@@ -46,6 +44,8 @@ pub struct AppState {
     pub futures_service: services::FuturesService,
     pub dashboard_service: services::DashboardService,
     pub event_processor: services::EventProcessorService,
+    pub price_monitor: services::PriceMonitor,
+    pub recurring_scheduler: services::RecurringScheduler,
     pub webhook_service: services::WebhookService,
     pub erc_service: services::ErcService,
     

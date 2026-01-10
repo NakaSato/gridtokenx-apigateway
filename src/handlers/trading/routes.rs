@@ -22,14 +22,14 @@ pub fn v1_trading_routes() -> Router<AppState> {
         .route("/orders/{id}", delete(cancel_order).put(update_order))
         
         // Conditional Orders (Stop-Loss/Take-Profit)
-        .route("/conditional-orders", post(create_conditional_order).get(list_conditional_orders))
-        .route("/conditional-orders/{id}", delete(cancel_conditional_order))
+        .route("/conditional", post(create_conditional_order).get(list_conditional_orders))
+        .route("/conditional/{id}", delete(cancel_conditional_order))
         
         // Recurring Orders (DCA)
-        .route("/recurring-orders", post(create_recurring_order).get(list_recurring_orders))
-        .route("/recurring-orders/{id}", get(get_recurring_order).delete(cancel_recurring_order))
-        .route("/recurring-orders/{id}/pause", post(pause_recurring_order))
-        .route("/recurring-orders/{id}/resume", post(resume_recurring_order))
+        .route("/recurring", post(create_recurring_order).get(list_recurring_orders))
+        .route("/recurring/{id}", get(get_recurring_order).delete(cancel_recurring_order))
+        .route("/recurring/{id}/pause", post(pause_recurring_order))
+        .route("/recurring/{id}/resume", post(resume_recurring_order))
         
         // Price Alerts
         .route("/price-alerts", post(create_price_alert).get(list_price_alerts))

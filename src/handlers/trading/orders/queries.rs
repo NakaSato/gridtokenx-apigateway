@@ -83,7 +83,7 @@ pub async fn get_user_orders(
 
     // Build data query with sorting
     let query = format!(
-        "SELECT id, user_id, order_type, side, energy_amount, price_per_kwh, filled_amount, status, expires_at, created_at, filled_at, epoch_id, zone_id 
+        "SELECT id, user_id, order_type, side, energy_amount, price_per_kwh, filled_amount, status, expires_at, created_at, filled_at, epoch_id, zone_id, meter_id, refund_tx_signature, order_pda, session_token, trigger_price, trigger_type, trigger_status, trailing_offset, triggered_at 
          FROM trading_orders 
          WHERE {} 
          ORDER BY {} {}
@@ -207,7 +207,7 @@ pub async fn get_order_book(
 
     // Build data query
     let query = format!(
-        "SELECT id, user_id, order_type, side, energy_amount, price_per_kwh, filled_amount, status, expires_at, created_at, epoch_id, filled_at 
+        "SELECT id, user_id, order_type, side, energy_amount, price_per_kwh, filled_amount, status, expires_at, created_at, filled_at, epoch_id, zone_id, meter_id, refund_tx_signature, order_pda, session_token, trigger_price, trigger_type, trigger_status, trailing_offset, triggered_at 
          FROM trading_orders 
          WHERE {} 
          ORDER BY {} {}

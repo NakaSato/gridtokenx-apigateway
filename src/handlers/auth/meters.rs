@@ -7,9 +7,11 @@ use axum::{
     http::HeaderMap,
     Json,
 };
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use uuid::Uuid;
 use crate::auth::middleware::AuthenticatedUser;
+use serde_json;
+use crate::services::meter_analyzer::{check_alerts, calculate_health_score};
 
 use crate::AppState;
 use super::types::{
@@ -223,44 +225,6 @@ pub async fn public_get_meters(
             Json(vec![])
         }
     }
-}
-
-/// Internal helper to fetch aggregate grid status
-async fn get_aggregate_stats(db: &sqlx::PgPool) -> (f64, f64, i64, f64, f64) {
-    let stats_result = sqlx::query_as::<_, (Option<f64>, Option<f64>, Option<i64>)>(
-        r#"
-        SELECT 
-            SUM(lr.current_generation) as total_gen,
-            SUM(lr.current_consumption) as total_cons,
-            COUNT(m.id) FILTER (WHERE lr.current_generation > 0 OR lr.current_consumption > 0) as active_count
-        FROM meters m
-        LEFT JOIN LATERAL (
-            SELECT 
-                energy_generated::FLOAT8 as current_generation, 
-                energy_consumed::FLOAT8 as current_consumption
-            FROM meter_readings
-            WHERE meter_serial = m.serial_number
-            ORDER BY reading_timestamp DESC
-            LIMIT 1
-        ) lr ON true
-        WHERE m.is_verified = true
-        "#
-    )
-    .fetch_one(db)
-    .await;
-
-    let (total_gen, total_cons, active_meters) = match stats_result {
-        Ok((gen, cons, count)) => (gen.unwrap_or(0.0), cons.unwrap_or(0.0), count.unwrap_or(0)),
-        Err(e) => {
-            error!("❌ Grid status aggregation error: {}", e);
-            (0.0, 0.0, 0)
-        }
-    };
-
-    let net_balance = total_gen - total_cons;
-    let co2_saved = total_gen * 0.431;
-
-    (total_gen, total_cons, active_meters, net_balance, co2_saved)
 }
 
 /// Get aggregate grid status - PUBLIC endpoint (no auth required)
@@ -607,30 +571,59 @@ pub async fn update_meter_status(
     axum::extract::Path(serial): axum::extract::Path<String>,
     Json(request): Json<UpdateMeterStatusRequest>,
 ) -> Json<RegisterMeterResponse> {
-    info!("🔧 Update meter {} status to: {}", serial, request.status);
+    info!("🔧 Update meter {} request: {:?}", serial, request);
 
-    let is_verified = request.status == "verified" || request.status == "active";
+    // Build dynamic query
+    let mut query_builder = sqlx::QueryBuilder::<sqlx::Postgres>::new("UPDATE meters SET updated_at = NOW()");
     
-    let update_result = sqlx::query(
-        "UPDATE meters SET is_verified = $1, updated_at = NOW() WHERE serial_number = $2"
-    )
-    .bind(is_verified)
-    .bind(&serial)
-    .execute(&state.db)
-    .await;
+    if let Some(status) = &request.status {
+        let is_verified = status == "verified" || status == "active";
+        query_builder.push(", is_verified = ");
+        query_builder.push_bind(is_verified);
+    }
+    
+    if let Some(zone_id) = request.zone_id {
+        query_builder.push(", zone_id = ");
+        query_builder.push_bind(zone_id);
+    }
+    
+    if let Some(lat) = request.latitude {
+        query_builder.push(", latitude = ");
+        query_builder.push_bind(lat);
+    }
+    
+    if let Some(lng) = request.longitude {
+        query_builder.push(", longitude = ");
+        query_builder.push_bind(lng);
+    }
+    
+    query_builder.push(" WHERE serial_number = ");
+    query_builder.push_bind(&serial);
+
+    let query = query_builder.build();
+    let update_result = query.execute(&state.db).await;
 
     match update_result {
         Ok(result) if result.rows_affected() > 0 => {
+            // Also sync to meter_registry if zone_id updated
+            if let Some(zone_id) = request.zone_id {
+                let _ = sqlx::query("UPDATE meter_registry SET zone_id = $1 WHERE meter_serial = $2")
+                    .bind(zone_id)
+                    .bind(&serial)
+                    .execute(&state.db)
+                    .await;
+            }
+
             Json(RegisterMeterResponse {
                 success: true,
-                message: format!("Meter {} status updated to '{}'", serial, request.status),
+                message: format!("Meter {} updated successfully", serial),
                 meter: None,
             })
         }
         _ => {
             Json(RegisterMeterResponse {
                 success: false,
-                message: format!("Meter {} not found", serial),
+                message: format!("Meter {} not found or no changes made", serial),
                 meter: None,
             })
         }
@@ -680,8 +673,8 @@ async fn internal_create_reading(
         serial, request.kwh, auto_mint, timeout_secs
     );
 
-    // 1. Resolve Meter Context (ID, User, Wallet)
-    let (meter_id, user_id, wallet_address) = match resolve_meter_context(state, &serial, &request.wallet_address).await {
+    // 1. Resolve Meter Context (ID, User, Wallet, Zone)
+    let (meter_id, user_id, wallet_address, zone_id) = match resolve_meter_context(state, &serial, &request.wallet_address).await {
         Ok(ctx) => ctx,
         Err(err_msg) => return CreateReadingResponse {
             id: Uuid::new_v4(),
@@ -701,6 +694,21 @@ async fn internal_create_reading(
         (false, None, "Reading recorded (auto_mint disabled)".to_string())
     };
 
+    // 2.5 Check for alerts and calculate health score
+    let alerts = check_alerts(&serial, &request);
+    if !alerts.is_empty() {
+        for alert in &alerts {
+            warn!("⚠️ Meter Alert: {} - {}", alert.alert_type, alert.message);
+            let alert_json = serde_json::json!({
+                "type": "meter_alert",
+                "data": alert
+            });
+            state.websocket_service.broadcast_to_channel("alerts", alert_json).await;
+        }
+    }
+    
+    let health_score = calculate_health_score(&request);
+
     // 3. Persist Reading to Database
     let reading_id = Uuid::new_v4();
     let timestamp = request.timestamp.unwrap_or_else(chrono::Utc::now);
@@ -715,7 +723,8 @@ async fn internal_create_reading(
         timestamp, 
         &request, 
         minted, 
-        &tx_signature
+        &tx_signature,
+        health_score,
     ).await {
         error!("❌ CRITICAL: Failed to save reading {} to DB: {}", reading_id, e);
         message = format!("{}. Database error: {}", message, e);
@@ -732,7 +741,7 @@ async fn internal_create_reading(
         });
 
         // Update aggregate grid status in dashboard service
-        let _ = state.dashboard_service.handle_meter_reading(request.kwh, &serial).await;
+        let _ = state.dashboard_service.handle_meter_reading(request.kwh, &serial, zone_id).await;
 
         trigger_post_processing(
             state.clone(),
@@ -768,20 +777,20 @@ async fn resolve_meter_context(
     state: &AppState,
     serial: &str,
     request_wallet: &Option<String>
-) -> Result<(Uuid, Uuid, String), String> {
-    let meter_info = sqlx::query_as::<_, (Uuid, Uuid, Option<String>)>(
-        "SELECT m.id, m.user_id, u.wallet_address FROM meter_registry m JOIN users u ON m.user_id = u.id WHERE m.meter_serial = $1"
+) -> Result<(Uuid, Uuid, String, Option<i32>), String> {
+    let meter_info = sqlx::query_as::<_, (Uuid, Uuid, Option<String>, Option<i32>)>(
+        "SELECT m.id, m.user_id, u.wallet_address, m.zone_id FROM meter_registry m JOIN users u ON m.user_id = u.id WHERE m.meter_serial = $1"
     )
     .bind(serial)
     .fetch_optional(&state.db)
     .await
     .map_err(|e| format!("Database lookup error: {}", e))?;
-
+ 
     match meter_info {
-        Some((mid, uid, Some(w))) => Ok((mid, uid, w)),
-        Some((mid, uid, None)) => {
+        Some((mid, uid, Some(w), zid)) => Ok((mid, uid, w, zid)),
+        Some((mid, uid, None, zid)) => {
             if let Some(req_w) = request_wallet {
-                Ok((mid, uid, req_w.clone()))
+                Ok((mid, uid, req_w.clone(), zid))
             } else {
                 Err("Wallet address required (not found on user profile)".to_string())
             }
@@ -861,7 +870,8 @@ async fn persist_reading_to_db(
     timestamp: chrono::DateTime<chrono::Utc>,
     request: &CreateReadingRequest,
     minted: bool,
-    tx_signature: &Option<String>
+    tx_signature: &Option<String>,
+    health_score: f64,
 ) -> Result<(), sqlx::Error> {
     // Calculate derived energy values if not provided
     let (def_gen, def_cons) = if request.kwh > 0.0 { (request.kwh, 0.0) } else { (0.0, request.kwh.abs()) };
@@ -877,13 +887,15 @@ async fn persist_reading_to_db(
             timestamp, reading_timestamp, kwh_amount,
             energy_generated, energy_consumed, surplus_energy, deficit_energy,
             voltage, current_amps, power_factor, frequency, temperature,
-            latitude, longitude, battery_level, weather_condition,
+            thd_voltage, thd_current,
+            latitude, longitude, battery_level, weather_condition, health_score,
             rec_eligible, carbon_offset, max_sell_price, max_buy_price,
             meter_signature, meter_type,
             minted, mint_tx_signature, created_at
          ) VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9, $10, $11, 
-                   $12, $13, $14, $15, $16, $17, $18, $19, $20,
-                   $21, $22, $23, $24, $25, $26, $27, $28, NOW())"
+                   $12, $13, $14, $15, $16, $17, $18, 
+                   $19, $20, $21, $22, $23,
+                   $24, $25, $26, $27, $28, $29, $30, $31, NOW())"
     )
     .bind(reading_id)
     .bind(serial)
@@ -902,12 +914,17 @@ async fn persist_reading_to_db(
     .bind(request.power_factor)
     .bind(request.frequency)
     .bind(request.temperature)
+    // THD
+    .bind(request.thd_voltage)
+    .bind(request.thd_current)
     // GPS
     .bind(request.latitude)
     .bind(request.longitude)
     // Battery & Environmental
     .bind(request.battery_level)
     .bind(&request.weather_condition)
+    // Health
+    .bind(health_score)
     // Trading
     .bind(request.rec_eligible.unwrap_or(false))
     .bind(request.carbon_offset)
@@ -955,9 +972,6 @@ async fn trigger_post_processing(
             voltage,
             current
         ).await;
-
-        let (gen, cons, count, balance, co2) = get_aggregate_stats(&db).await;
-        websocket.broadcast_grid_status_updated(gen, cons, balance, count, co2).await;
     });
 
     // P2P Auto-Order Generation
@@ -982,7 +996,8 @@ async fn trigger_post_processing(
                         Some(price),
                         None,
                         None,
-                        Some(meter_id)
+                        Some(meter_id),
+                        None,
                     ).await;
                     if let Err(e) = res {
                         error!("❌ [Auto-P2P] Failed to create Sell order for {}: {}", serial, e);
@@ -1005,7 +1020,8 @@ async fn trigger_post_processing(
                         Some(price),
                         None,
                         None,
-                        Some(meter_id)
+                        Some(meter_id),
+                        None,
                     ).await;
                     if let Err(e) = res {
                         error!("❌ [Auto-P2P] Failed to create Buy order for {}: {}", serial, e);

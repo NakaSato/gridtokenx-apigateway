@@ -3,18 +3,17 @@ pub mod types;
 use anyhow::Result;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
-use solana_sdk::pubkey::Pubkey; // Added for Pubkey utilities
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
+use tracing::{info, warn, error, debug};
+use uuid::Uuid;
+use solana_sdk::pubkey::Pubkey;
 
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tokio::time::sleep;
-use tracing::{debug, error, info, warn};
-use uuid::Uuid;
 
 use crate::{
-    database::schema::types::{OrderStatus, OrderSide, OrderType},
+    database::schema::types::{OrderStatus, OrderSide},
     services::{market_clearing::{TradeMatch, MarketClearingService}, SettlementService, WebSocketService, GridTopologyService, BlockchainService},
     middleware::metrics::{track_order_matched, track_trading_operation},
 };
@@ -116,21 +115,48 @@ impl OrderMatchingEngine {
         let now = chrono::Utc::now();
         
         // Fetch stale orders that need expiry
-        let stale_orders = sqlx::query_as!(
-            crate::models::trading::TradingOrderDb,
+        let stale_orders_rows = sqlx::query(
             r#"
             SELECT 
-                id, user_id, order_type as "order_type!: OrderType", side as "side!: OrderSide", 
-                energy_amount, price_per_kwh, filled_amount, status as "status!: OrderStatus", 
-                expires_at, created_at, filled_at, epoch_id, zone_id, meter_id, refund_tx_signature, order_pda
+                id, user_id, order_type, side, 
+                energy_amount, price_per_kwh, filled_amount, status, 
+                expires_at, created_at, filled_at, epoch_id, zone_id, meter_id, refund_tx_signature, order_pda,
+                trigger_price, trigger_type, trigger_status, trailing_offset, session_token, triggered_at
             FROM trading_orders 
             WHERE status IN ('active', 'pending', 'partially_filled') 
             AND expires_at < $1
             "#,
-            now
         )
+        .bind(now)
         .fetch_all(&self.db)
         .await?;
+
+        let stale_orders: Vec<crate::models::trading::TradingOrderDb> = stale_orders_rows.into_iter().map(|row| {
+             crate::models::trading::TradingOrderDb {
+                id: row.get("id"),
+                user_id: row.get("user_id"),
+                order_type: row.get("order_type"),
+                side: row.get("side"),
+                energy_amount: row.get("energy_amount"),
+                price_per_kwh: row.get("price_per_kwh"),
+                filled_amount: row.get("filled_amount"),
+                status: row.get("status"),
+                expires_at: row.get("expires_at"),
+                created_at: row.get("created_at"),
+                filled_at: row.get("filled_at"),
+                epoch_id: row.get("epoch_id"),
+                zone_id: row.get("zone_id"),
+                meter_id: row.get("meter_id"),
+                refund_tx_signature: row.get("refund_tx_signature"),
+                order_pda: row.get("order_pda"),
+                session_token: row.get("session_token"),
+                trigger_price: row.get("trigger_price"),
+                trigger_type: row.get("trigger_type"),
+                trigger_status: row.get("trigger_status"),
+                trailing_offset: row.get("trailing_offset"),
+                triggered_at: row.get("triggered_at"),
+             }
+        }).collect();
 
         let mut expired_count = 0;
         for order in stale_orders {
@@ -153,6 +179,8 @@ impl OrderMatchingEngine {
                     match order.side {
                         OrderSide::Buy => {
                             let refund_value = remaining_amount * order.price_per_kwh;
+                            // The provided snippet for `receiver_wallet_addr` and `receiver_wallet` is incomplete and refers to an undefined `db_user`.
+                            // Assuming it was meant to be part of a larger, separate change or a placeholder, it's omitted to maintain syntactic correctness.
                             if let Err(e) = market_clearing.unlock_funds(order.user_id, order.id, refund_value, "Order Expired").await {
                                 error!("Failed to refund funds for expired order {}: {}", order.id, e);
                             } else {
@@ -214,7 +242,7 @@ impl OrderMatchingEngine {
             }
 
             // Sleep before next cycle
-            sleep(Duration::from_secs(self.match_interval_secs)).await;
+            tokio::time::sleep(Duration::from_secs(self.match_interval_secs)).await;
         }
 
         info!("Order matching loop terminated");
@@ -225,65 +253,97 @@ impl OrderMatchingEngine {
         use crate::models::trading::TradingOrderDb;
 
         // Get all pending buy orders
-        let buy_orders_db: Vec<TradingOrderDb> = sqlx::query_as(
+        let buy_orders_rows = sqlx::query(
             r#"
             SELECT 
-                id, 
-                user_id, 
-                energy_amount, 
-                price_per_kwh,
-                filled_amount,
-                epoch_id,
-                zone_id,
-                order_type,
-                side,
-                status,
-                expires_at,
-                created_at,
-                filled_at,
-                meter_id,
-                refund_tx_signature,
-                order_pda
+                id, user_id, energy_amount, price_per_kwh, filled_amount,
+                epoch_id, zone_id, order_type, side, status,
+                expires_at, created_at, filled_at, meter_id,
+                refund_tx_signature, order_pda, session_token,
+                trigger_price, trigger_type, trigger_status,
+                trailing_offset, triggered_at
             FROM trading_orders
             WHERE side = 'buy'::order_side AND status IN ('pending', 'active', 'partially_filled')
             ORDER BY created_at ASC
             "#,
         )
-        //.bind(OrderStatus::Pending) - No longer binding single status
         .fetch_all(&self.db)
         .await?;
+
+        let buy_orders_db: Vec<TradingOrderDb> = buy_orders_rows.into_iter().map(|row| {
+            TradingOrderDb {
+                id: row.get("id"),
+                user_id: row.get("user_id"),
+                energy_amount: row.get("energy_amount"),
+                price_per_kwh: row.get("price_per_kwh"),
+                filled_amount: row.get("filled_amount"),
+                epoch_id: row.get("epoch_id"),
+                zone_id: row.get("zone_id"),
+                order_type: row.get("order_type"),
+                side: row.get("side"),
+                status: row.get("status"),
+                expires_at: row.get("expires_at"),
+                created_at: row.get("created_at"),
+                filled_at: row.get("filled_at"),
+                meter_id: row.get("meter_id"),
+                refund_tx_signature: row.get("refund_tx_signature"),
+                order_pda: row.get("order_pda"),
+                session_token: row.get("session_token"),
+                trigger_price: row.get("trigger_price"),
+                trigger_type: row.get("trigger_type"),
+                trigger_status: row.get("trigger_status"),
+                trailing_offset: row.get("trailing_offset"),
+                triggered_at: row.get("triggered_at"),
+            }
+        }).collect();
 
         info!("Fetched {} buy orders", buy_orders_db.len());
 
         // Get all pending sell orders
         // We load them into a mutable vector to track fills during this cycle
-        let mut sell_orders_db: Vec<TradingOrderDb> = sqlx::query_as(
+        let sell_orders_rows = sqlx::query(
             r#"
             SELECT 
-                id, 
-                user_id, 
-                energy_amount, 
-                price_per_kwh,
-                filled_amount,
-                epoch_id,
-                zone_id,
-                order_type,
-                side,
-                status,
-                expires_at,
-                created_at,
-                filled_at,
-                meter_id,
-                refund_tx_signature,
-                order_pda
+                id, user_id, energy_amount, price_per_kwh, filled_amount,
+                epoch_id, zone_id, order_type, side, status,
+                expires_at, created_at, filled_at, meter_id,
+                refund_tx_signature, order_pda, session_token,
+                trigger_price, trigger_type, trigger_status,
+                trailing_offset, triggered_at
             FROM trading_orders
             WHERE side = 'sell'::order_side AND status IN ('pending', 'active', 'partially_filled')
             ORDER BY price_per_kwh ASC, created_at ASC
             "#,
         )
-        //.bind(OrderStatus::Pending) - No longer binding single status
         .fetch_all(&self.db)
         .await?;
+
+        let mut sell_orders_db: Vec<TradingOrderDb> = sell_orders_rows.into_iter().map(|row| {
+            TradingOrderDb {
+                id: row.get("id"),
+                user_id: row.get("user_id"),
+                energy_amount: row.get("energy_amount"),
+                price_per_kwh: row.get("price_per_kwh"),
+                filled_amount: row.get("filled_amount"),
+                epoch_id: row.get("epoch_id"),
+                zone_id: row.get("zone_id"),
+                order_type: row.get("order_type"),
+                side: row.get("side"),
+                status: row.get("status"),
+                expires_at: row.get("expires_at"),
+                created_at: row.get("created_at"),
+                filled_at: row.get("filled_at"),
+                meter_id: row.get("meter_id"),
+                refund_tx_signature: row.get("refund_tx_signature"),
+                order_pda: row.get("order_pda"),
+                session_token: row.get("session_token"),
+                trigger_price: row.get("trigger_price"),
+                trigger_type: row.get("trigger_type"),
+                trigger_status: row.get("trigger_status"),
+                trailing_offset: row.get("trailing_offset"),
+                triggered_at: row.get("triggered_at"),
+            }
+        }).collect();
 
         info!("Fetched {} sell orders", sell_orders_db.len());
 
@@ -410,7 +470,7 @@ impl OrderMatchingEngine {
                     candidate.match_price,
                     total_energy_cost,
                     buy_order.order_pda.as_deref(),
-                    sell_order.order_pda.as_deref()
+                    sell_order.order_pda.as_deref(),
                 ).await {
                     Ok(match_id) => {
                          matches_created += 1;
@@ -425,7 +485,8 @@ impl OrderMatchingEngine {
                             match_id, buy_order.id, sell_order.id, 
                             buy_order.user_id, sell_order.user_id, 
                             match_amount, candidate.match_price, total_energy_cost, epoch_id,
-                            (total_wheeling, candidate.loss_factor, total_loss_cost, buy_order.zone_id, sell_order.zone_id)
+                            (total_wheeling, candidate.loss_factor, total_loss_cost, buy_order.zone_id, sell_order.zone_id),
+                            buy_order.session_token.clone(), sell_order.session_token.clone()
                          ).await;
 
                          // Update In-Memory State
@@ -434,7 +495,7 @@ impl OrderMatchingEngine {
                          remaining_buy_amount -= match_amount;
 
                          // Update DB - Sell Order
-                         let new_sell_status = if sell_order.filled_amount.unwrap() >= sell_order.energy_amount {
+                         let new_sell_status = if sell_order.filled_amount.unwrap_or_default() >= sell_order.energy_amount {
                              OrderStatus::Filled
                          } else {
                              OrderStatus::PartiallyFilled
@@ -588,6 +649,8 @@ impl OrderMatchingEngine {
         total_price: Decimal,
         epoch_id: Uuid,
         matches_costs: (Decimal, Decimal, Decimal, Option<i32>, Option<i32>), // wheeling, loss_factor, loss_cost, b_zone, s_zone
+        buyer_session_token: Option<String>,
+        seller_session_token: Option<String>,
     ) {
         if let Some(settlement) = &self.settlement {
             let (wheeling_charge, loss_factor, loss_cost, buyer_zone_id, seller_zone_id) = matches_costs;
@@ -610,6 +673,8 @@ impl OrderMatchingEngine {
                 seller_zone_id,
                 matched_at: chrono::Utc::now(),
                 epoch_id,
+                buyer_session_token,
+                seller_session_token,
             };
 
             // We create a temporary vector with one trade to reuse the existing method

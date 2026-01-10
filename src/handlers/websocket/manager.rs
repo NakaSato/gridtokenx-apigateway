@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
@@ -9,7 +9,7 @@ use super::types::WsMessage;
 #[derive(Debug, Clone)]
 pub struct ConnectionManager {
     /// Active connections by user
-    connections: Arc<RwLock<HashMap<Uuid, broadcast::Sender<WsMessage>>>>,
+    connections: Arc<RwLock<FxHashMap<Uuid, broadcast::Sender<WsMessage>>>>,
     /// Global message broadcaster
     broadcaster: broadcast::Sender<WsMessage>,
 }
@@ -18,7 +18,7 @@ impl ConnectionManager {
     pub fn new() -> Self {
         let (broadcaster, _) = broadcast::channel(1000);
         Self {
-            connections: Arc::new(RwLock::new(HashMap::new())),
+            connections: Arc::new(RwLock::new(FxHashMap::default())),
             broadcaster,
         }
     }

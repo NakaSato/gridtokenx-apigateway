@@ -68,11 +68,11 @@ pub async fn export_csv(
 
     // Build query with filters
     let start_date = params.start_date
-        .map(|d| d.and_hms_opt(0, 0, 0).unwrap())
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
         .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
     
     let end_date = params.end_date
-        .map(|d| d.and_hms_opt(23, 59, 59).unwrap())
+        .and_then(|d| d.and_hms_opt(23, 59, 59))
         .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
 
     // Query orders with filters
@@ -219,11 +219,11 @@ pub async fn export_json(
     info!("Exporting trade history (JSON) for user: {}", user.0.sub);
 
     let start_date = params.start_date
-        .map(|d| d.and_hms_opt(0, 0, 0).unwrap())
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
         .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
     
     let end_date = params.end_date
-        .map(|d| d.and_hms_opt(23, 59, 59).unwrap())
+        .and_then(|d| d.and_hms_opt(23, 59, 59))
         .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
 
     let orders = match fetch_orders(&state, user.0.sub, start_date, end_date, &params.side, &params.status).await {

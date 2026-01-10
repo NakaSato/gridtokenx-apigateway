@@ -46,14 +46,14 @@ impl EmailService {
                 config.smtp_password.clone(),
             );
 
-            Some(SmtpTransport::relay(&config.smtp_host)
+            SmtpTransport::relay(&config.smtp_host)
                 .ok()
                 .map(|builder| builder.port(config.smtp_port).credentials(creds).build())
-                .unwrap_or_else(|| {
+                .or_else(|| {
                     SmtpTransport::relay(&config.smtp_host)
-                        .unwrap()
-                        .build()
-                }))
+                        .map(|b| b.build())
+                        .ok()
+                })
         } else {
             None
         };

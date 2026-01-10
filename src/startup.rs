@@ -67,9 +67,6 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
     };
     initialize_wallet(&wallet_service).await;
 
-    // Initialize wallet session service (for secure auto-trading)
-    let wallet_session = services::WalletSessionService::new(db_pool.clone());
-    info!("✅ Wallet session service initialized");
 
     // Initialize WebSocket service
     let websocket_service = services::WebSocketService::new();
@@ -141,6 +138,20 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
         config.event_processor.webhook_secret.clone(),
     );
 
+    // Initialize price monitor service
+    let price_monitor = services::PriceMonitor::new(
+        db_pool.clone(),
+        services::price_monitor::PriceMonitorConfig::default(),
+    );
+    info!("✅ Price monitor service initialized");
+
+    // Initialize recurring scheduler service
+    let recurring_scheduler = services::RecurringScheduler::new(
+        db_pool.clone(),
+        services::recurring_scheduler::RecurringSchedulerConfig::default(),
+    );
+    info!("✅ Recurring scheduler service initialized");
+
     // Initialize event processor service
     let event_processor = services::EventProcessorService::new(
         std::sync::Arc::new(db_pool.clone()),
@@ -177,7 +188,6 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
         email_service,
         blockchain_service,
         wallet_service,
-        wallet_session,
         websocket_service,
         cache_service,
         health_checker,
@@ -188,6 +198,8 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
         futures_service,
         dashboard_service,
         event_processor: event_processor.clone(),
+        price_monitor,
+        recurring_scheduler,
         webhook_service,
         erc_service,
         metrics_handle,
@@ -298,6 +310,32 @@ pub async fn spawn_background_tasks(app_state: &AppState, _config: &Config) {
     // Start Grid History Recorder
     app_state.dashboard_service.start_history_recorder().await;
     info!("✅ Grid History Recorder started");
+
+    // Start Price Monitor Loop
+    let price_monitor = app_state.price_monitor.clone();
+    tokio::spawn(async move {
+        info!("🚀 Starting price monitor (interval: 10s)");
+        loop {
+            if let Err(e) = price_monitor.check_and_trigger_orders().await {
+                error!("❌ Error in price monitor: {}", e);
+            }
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        }
+    });
+    info!("✅ Price Monitor started");
+
+    // Start Recurring Scheduler Loop
+    let recurring_scheduler = app_state.recurring_scheduler.clone();
+    tokio::spawn(async move {
+        info!("🚀 Starting recurring scheduler (interval: 60s)");
+        loop {
+            if let Err(e) = recurring_scheduler.process_due_orders().await {
+                error!("❌ Error in recurring scheduler: {}", e);
+            }
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        }
+    });
+    info!("✅ Recurring Scheduler started");
 }
 
 /// Wait for shutdown signal.

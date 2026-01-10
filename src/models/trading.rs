@@ -29,6 +29,7 @@ pub struct TradingOrder {
     pub meter_id: Option<Uuid>,
     pub refund_tx_signature: Option<String>,
     pub order_pda: Option<String>,
+    pub session_token: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -49,6 +50,13 @@ pub struct TradingOrderDb {
     pub meter_id: Option<Uuid>,
     pub refund_tx_signature: Option<String>,
     pub order_pda: Option<String>,
+    pub session_token: Option<String>,
+    // Conditional order fields
+    pub trigger_price: Option<Decimal>,
+    pub trigger_type: Option<TriggerType>,
+    pub trigger_status: Option<TriggerStatus>,
+    pub trailing_offset: Option<Decimal>,
+    pub triggered_at: Option<DateTime<Utc>>,
 }
 
 impl From<TradingOrderDb> for TradingOrder {
@@ -70,6 +78,7 @@ impl From<TradingOrderDb> for TradingOrder {
             meter_id: db.meter_id,
             refund_tx_signature: db.refund_tx_signature,
             order_pda: db.order_pda,
+            session_token: db.session_token,
         }
     }
 }
@@ -112,6 +121,9 @@ pub struct CreateOrderRequest {
     
     /// Timestamp of when the signature was created
     pub timestamp: Option<i64>,
+
+    /// Session token for wallet decryption (auto-trading)
+    pub session_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]
@@ -226,6 +238,9 @@ pub struct CreateConditionalOrderRequest {
     
     /// Optional expiry time for the conditional order
     pub expiry_time: Option<DateTime<Utc>>,
+
+    /// Session token for wallet decryption (auto-trading)
+    pub session_token: Option<String>,
 }
 
 /// Response for conditional order creation
@@ -339,6 +354,9 @@ pub struct CreateRecurringOrderRequest {
     
     /// Optional description
     pub description: Option<String>,
+
+    /// Session token for wallet decryption (auto-trading)
+    pub session_token: Option<String>,
 }
 
 /// Response for recurring order creation

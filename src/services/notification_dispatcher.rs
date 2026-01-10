@@ -3,13 +3,13 @@
 //! Handles creating, storing, and broadcasting notifications via WebSocket
 
 use sqlx::PgPool;
-use std::sync::Arc;
+
 use tokio::sync::broadcast;
 use tracing::{info, error, warn};
 use uuid::Uuid;
 
 use crate::models::notification::{
-    Notification, NotificationType, CreateNotificationRequest, WebSocketNotification,
+    Notification, NotificationType, CreateNotificationRequest,
 };
 
 /// Message sent via broadcast channel
