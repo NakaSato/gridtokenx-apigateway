@@ -106,7 +106,7 @@ pub fn verify_signature(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+    use ed25519_dalek::{Signer, SigningKey};
     use rand::rngs::OsRng;
     use rand::RngCore;
 

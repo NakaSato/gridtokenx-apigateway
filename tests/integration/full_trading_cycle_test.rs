@@ -13,7 +13,6 @@ use api_gateway::services::{
     market_clearing::types::OrderMatch,
     settlement::SettlementService,
 };
-use api_gateway::database::schema::types::OrderSide;
 use api_gateway::services::market_clearing::MarketClearingService;
 use solana_sdk::signature::Keypair;
 use chrono::Utc;
@@ -137,7 +136,7 @@ fn create_mock_trade_matches(
 
 #[tokio::test]
 async fn test_complete_trading_cycle() -> Result<()> {
-    let (db_pool, blockchain_service, erc_service, settlement_service, market_clearing_service): (PgPool, Arc<BlockchainService>, ErcService, SettlementService, api_gateway::services::market_clearing::MarketClearingService) =
+    let (db_pool, blockchain_service, _erc_service, settlement_service, _market_clearing_service): (PgPool, Arc<BlockchainService>, ErcService, SettlementService, api_gateway::services::market_clearing::MarketClearingService) =
         setup_trading_cycle_test().await?;
 
     println!("\n🔄 ============================================");
@@ -169,7 +168,7 @@ async fn test_complete_trading_cycle() -> Result<()> {
     // Here we mock the output of the matching engine to test the downstream flow.
     // But we need to insert the orders into DB first so foreign keys work.
     
-    let mut trades = create_mock_trade_matches(&buyers, &sellers);
+    let trades = create_mock_trade_matches(&buyers, &sellers);
     
     // Insert mock orders for FK constraints
     for (i, trade) in trades.iter().enumerate() {
@@ -340,7 +339,7 @@ async fn test_complete_trading_cycle() -> Result<()> {
 
 #[tokio::test]
 async fn test_trading_cycle_error_handling() -> Result<()> {
-    let (db_pool, blockchain_service, erc_service, settlement_service, _market_clearing_service): (PgPool, Arc<BlockchainService>, ErcService, SettlementService, api_gateway::services::market_clearing::MarketClearingService) =
+    let (db_pool, _blockchain_service, _erc_service, settlement_service, _market_clearing_service): (PgPool, Arc<BlockchainService>, ErcService, SettlementService, api_gateway::services::market_clearing::MarketClearingService) =
         setup_trading_cycle_test().await?;
 
     println!("\n⚠️ ============================================");

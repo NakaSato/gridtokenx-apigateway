@@ -1,7 +1,5 @@
 use anyhow::Result;
-use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
-use std::str::FromStr;
 use api_gateway::services::blockchain::instructions::InstructionBuilder;
 use api_gateway::services::blockchain::transactions::TransactionHandler;
 use std::sync::Arc;

@@ -9,12 +9,9 @@
 
 use anyhow::Result;
 use api_gateway::config::SolanaProgramsConfig;
-use api_gateway::database::schema::types::OrderSide;
-use api_gateway::error::ApiError;
-use rust_decimal::prelude::ToPrimitive;
 use api_gateway::services::{
     blockchain::BlockchainService,
-    market_clearing::types::{ClearingPrice, TradeMatch},
+    market_clearing::types::TradeMatch,
     settlement::{SettlementConfig, SettlementService, SettlementStatus},
 };
 use chrono::Utc;
@@ -141,7 +138,7 @@ fn create_mock_trade(
 
 #[tokio::test]
 async fn test_settlement_service_initialization() -> Result<()> {
-    let (_db_pool, _blockchain_service, settlement_service, _epoch_id) =
+    let (_db_pool, _blockchain_service, _settlement_service, _epoch_id) =
         setup_settlement_test().await?;
 
     println!("\n🏗️ ============================================");

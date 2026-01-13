@@ -3,7 +3,7 @@ use api_gateway::AppState;
 use api_gateway::config::Config;
 use api_gateway::startup::initialize_app;
 use api_gateway::handlers::auth::types::{CreateReadingRequest, CreateReadingParams};
-use api_gateway::services::reading_processor::{ReadingProcessorService, ReadingTask};
+use api_gateway::services::reading_processor::ReadingProcessorService;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
