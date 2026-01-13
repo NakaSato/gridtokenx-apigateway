@@ -17,7 +17,7 @@ async fn main() -> Result<()> {
     let wallet_path = "dev-wallet.json";
     let bytes = std::fs::read_to_string(wallet_path)?;
     let wallet_data: Vec<u8> = serde_json::from_str(&bytes)?;
-    let authority = Keypair::from_bytes(&wallet_data)?;
+    let authority = Keypair::try_from(&wallet_data[..]).map_err(|e| anyhow::anyhow!("Invalid keypair: {:?}", e))?;
     
     // Check balance with retry
     let mut balance = 0;
