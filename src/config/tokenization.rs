@@ -417,6 +417,11 @@ pub enum ConfigError {
 mod tests {
     use super::*;
     use std::env;
+    use std::sync::Mutex;
+    use once_cell::sync::Lazy;
+
+    static ENV_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
 
     #[test]
     fn test_default_config() {
@@ -487,6 +492,7 @@ mod tests {
 
     #[test]
     fn test_config_from_env() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         // Clear any existing env vars first to ensure clean test state
         unsafe {
             env::remove_var("TOKENIZATION_KWH_TO_TOKEN_RATIO");
@@ -524,6 +530,7 @@ mod tests {
 
     #[test]
     fn test_config_validation() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         // Clear any existing env vars first to ensure clean test state
         unsafe {
             env::remove_var("TOKENIZATION_POLLING_INTERVAL_SECS");
