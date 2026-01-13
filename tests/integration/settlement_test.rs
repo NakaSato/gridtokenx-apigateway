@@ -10,9 +10,11 @@
 use anyhow::Result;
 use api_gateway::config::SolanaProgramsConfig;
 use api_gateway::database::schema::types::OrderSide;
+use api_gateway::error::ApiError;
+use rust_decimal::prelude::ToPrimitive;
 use api_gateway::services::{
     blockchain::BlockchainService,
-    market_clearing::{ClearingPrice, TradeMatch},
+    market_clearing::types::{ClearingPrice, TradeMatch},
     settlement::{SettlementConfig, SettlementService, SettlementStatus},
 };
 use chrono::Utc;
@@ -116,6 +118,8 @@ fn create_mock_trade(
     let quantity = Decimal::from_str(&energy_amount.to_string()).unwrap();
     let price = Decimal::from_str(&price_per_kwh.to_string()).unwrap();
     TradeMatch {
+        id: Uuid::new_v4(),
+        match_id: Uuid::new_v4(),
         buy_order_id: Uuid::new_v4(),
         sell_order_id: Uuid::new_v4(),
         buyer_id,
@@ -123,8 +127,15 @@ fn create_mock_trade(
         price,
         quantity,
         total_value: quantity * price,
+        wheeling_charge: Decimal::ZERO,
+        loss_factor: Decimal::ONE,
+        loss_cost: Decimal::ZERO,
+        buyer_zone_id: None,
+        seller_zone_id: None,
         matched_at: Utc::now(),
         epoch_id,
+        buyer_session_token: None,
+        seller_session_token: None,
     }
 }
 
@@ -231,6 +242,7 @@ async fn test_settlement_fee_calculation() -> Result<()> {
             min_confirmation_blocks: 32,
             retry_attempts: 3,
             retry_delay_secs: 60,
+            enable_real_blockchain: false,
         };
 
         let encryption_secret = std::env::var("ENCRYPTION_SECRET")

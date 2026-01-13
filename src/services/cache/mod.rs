@@ -208,6 +208,71 @@ impl CacheService {
             }
         }
     }
+
+    /// Push a meter reading to the processing queue
+    pub async fn push_reading<T: Serialize>(&self, reading: &T) -> Result<()> {
+        self.push_to_queue("queue:meter_readings", reading).await
+    }
+
+    /// Push a serialized task to a specific queue
+    pub async fn push_to_queue<T: Serialize>(&self, key: &str, task: &T) -> Result<()> {
+        let serialized = serde_json::to_string(task)?;
+        let mut conn = self.connection_manager.clone();
+
+        let result: RedisResult<()> = conn.lpush(key, serialized).await;
+        
+        match result {
+            Ok(_) => {
+                debug!("Task pushed to queue: {}", key);
+                Ok(())
+            }
+            Err(e) => {
+                error!("Failed to push task to queue {}: {}", key, e);
+                Err(anyhow::anyhow!("Redis LPUSH failed: {}", e))
+            }
+        }
+    }
+
+    /// Push a task to the Dead Letter Queue
+    pub async fn push_to_dlq<T: Serialize>(&self, task: &T) -> Result<()> {
+        self.push_to_queue("queue:meter_readings:dlq", task).await
+    }
+
+    /// Get the depth (size) of a queue
+    pub async fn get_queue_depth(&self, queue_name: &str) -> Result<usize> {
+        let mut conn = self.connection_manager.clone();
+        let result: RedisResult<usize> = conn.llen(queue_name).await;
+        
+        match result {
+            Ok(size) => Ok(size),
+            Err(e) => {
+                error!("Failed to get queue depth for {}: {}", queue_name, e);
+                Err(anyhow::anyhow!("Redis LLEN failed: {}", e))
+            }
+        }
+    }
+
+    /// Pop a meter reading from the processing queue
+    pub async fn pop_reading<T: for<'de> Deserialize<'de>>(&self) -> Result<Option<T>> {
+        let key = "queue:meter_readings";
+        let mut conn = self.connection_manager.clone();
+
+        // Use BRPOP with a 1s timeout to avoid tight loops in workers
+        // redis-rs async BRPOP returns (key, value)
+        let result: RedisResult<Option<(String, String)>> = conn.brpop(key, 1.0).await;
+
+        match result {
+            Ok(Some((_, value))) => {
+                let deserialized: T = serde_json::from_str(&value)?;
+                Ok(Some(deserialized))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => {
+                error!("Failed to pop reading from queue {}: {}", key, e);
+                Err(anyhow::anyhow!("Redis BRPOP failed: {}", e))
+            }
+        }
+    }
 }
 
 /// Cache key builders for different data types

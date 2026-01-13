@@ -1,6 +1,4 @@
 //! Services module - Minimal build for testing Simulator → Gateway → Anchor flow
-//!
-//! Many services are disabled to avoid SQLx compile-time checking issues.
 
 // Core services that don't use SQLx macros heavily
 pub mod auth;
@@ -11,7 +9,7 @@ pub mod health_check;
 pub mod wallet;
 pub mod websocket;
 
-// Newly Enabled Services for P2P Trading
+// Enabled Services for P2P Trading
 pub mod audit_logger;
 pub mod market_clearing;
 pub mod settlement;
@@ -26,9 +24,12 @@ pub mod erc;
 pub mod grid_topology;
 pub mod notification;
 pub mod price_monitor;
+pub mod reading_processor;
 pub mod recurring_scheduler;
 pub mod notification_dispatcher;
+
 pub mod meter_analyzer;
+pub mod meter;
 
 // Re-exports
 pub use auth::AuthService;

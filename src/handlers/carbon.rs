@@ -124,13 +124,29 @@ pub async fn get_carbon_balance(
 ) -> Result<Json<CarbonBalanceResponse>> {
     let balance = sqlx::query!(
         r#"
+        WITH combined AS (
+            SELECT 
+                COALESCE(SUM(amount), 0) as total,
+                COALESCE(SUM(CASE WHEN status = 'active' THEN amount ELSE 0 END), 0) as active,
+                COALESCE(SUM(CASE WHEN status = 'retired' THEN amount ELSE 0 END), 0) as retired,
+                COALESCE(SUM(CASE WHEN status = 'transferred' THEN amount ELSE 0 END), 0) as transferred
+            FROM carbon_credits
+            WHERE user_id = $1
+            UNION ALL
+            SELECT 
+                COALESCE(SUM(kwh_amount), 0) as total,
+                COALESCE(SUM(CASE WHEN status = 'active' THEN kwh_amount ELSE 0 END), 0) as active,
+                COALESCE(SUM(CASE WHEN status = 'retired' THEN kwh_amount ELSE 0 END), 0) as retired,
+                0 as transferred
+            FROM erc_certificates
+            WHERE user_id = $1
+        )
         SELECT 
-            COALESCE(SUM(amount), 0) as "total!",
-            COALESCE(SUM(CASE WHEN status = 'active' THEN amount ELSE 0 END), 0) as "active!",
-            COALESCE(SUM(CASE WHEN status = 'retired' THEN amount ELSE 0 END), 0) as "retired!",
-            COALESCE(SUM(CASE WHEN status = 'transferred' THEN amount ELSE 0 END), 0) as "transferred!"
-        FROM carbon_credits
-        WHERE user_id = $1
+            SUM(total) as "total!",
+            SUM(active) as "active!",
+            SUM(retired) as "retired!",
+            SUM(transferred) as "transferred!"
+        FROM combined
         "#,
         user.0.sub
     )
@@ -178,21 +194,30 @@ pub async fn get_carbon_history(
     let limit = params.limit.unwrap_or(50).min(100);
     let offset = params.offset.unwrap_or(0);
 
-    let credits = sqlx::query_as!(
-        CarbonCredit,
+    let credits = sqlx::query_as::<_, CarbonCredit>(
         r#"
-        SELECT id, user_id, amount, source, source_reference_id,
-               status as "status!: CarbonStatus",
-               description, created_at as "created_at!"
-        FROM carbon_credits
-        WHERE user_id = $1
+        SELECT id, user_id, amount, source, source_reference_id, status as status, description, created_at
+        FROM (
+            SELECT id, user_id, amount, source, source_reference_id,
+                   status::text as status,
+                   description, created_at
+            FROM carbon_credits
+            WHERE user_id = $1
+            UNION ALL
+            SELECT id, user_id, kwh_amount as amount, 
+                   'REC' as source, settlement_id as source_reference_id,
+                   status::text as status,
+                   certificate_id as description, created_at
+            FROM erc_certificates
+            WHERE user_id = $1
+        ) combined
         ORDER BY created_at DESC
         LIMIT $2 OFFSET $3
-        "#,
-        user.0.sub,
-        limit,
-        offset
+        "#
     )
+    .bind(user.0.sub)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {

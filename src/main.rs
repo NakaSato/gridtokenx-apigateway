@@ -1,6 +1,6 @@
-//! GridTokenX API Gateway - Minimal Build
+//! GridTokenX API Gateway
 //!
-//! Reduced version for testing Simulator → Gateway → Anchor flow.
+//! testing Simulator → Gateway → Anchor flow.
 
 use anyhow::Result;
 use std::net::SocketAddr;
@@ -24,15 +24,13 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    info!("🚀 Starting GridTokenX API Gateway (MINIMAL BUILD)");
-    info!("📊 This build only supports: /health, /api/meters/submit-reading");
+    info!("🚀 Starting GridTokenX API Gateway");
+    info!("📊 Full-featured build with all endpoints enabled");
 
     // Validate secrets and security configuration
     if let Err(e) = utils::validate_secrets() {
         warn!("⚠️ Secret validation warning: {}", e);
     }
-
-
 
     // Load configuration
     let config = Config::from_env()?;

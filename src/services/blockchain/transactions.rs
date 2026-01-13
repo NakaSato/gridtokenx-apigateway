@@ -1,8 +1,8 @@
-// use crate::services::priority_fee::{PriorityFeeService, TransactionType};  // DISABLED
+use crate::services::blockchain::priority_fee::{PriorityFeeService, TransactionType};
 use anyhow::{anyhow, Result};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
-    // compute_budget::ComputeBudgetInstruction,
+    compute_budget::ComputeBudgetInstruction,
     pubkey::Pubkey,
     signature::{Keypair, Signature, Signer},
     transaction::Transaction,
@@ -164,11 +164,53 @@ impl TransactionHandler {
     /// Add priority fees to transaction based on type
     async fn add_priority_fees(
         &self,
-        _transaction: &mut Transaction,
+        transaction: &mut Transaction,
         tx_type: &'static str,
     ) -> Result<()> {
-        debug!("Adding priority fees for transaction type: {}", tx_type);
-        // DISABLED - priority_fee module not available
+        // Convert string type to TransactionType enum
+        let transaction_type = match tx_type {
+            "token_transfer" => TransactionType::TokenTransfer,
+            "minting" => TransactionType::Minting,
+            "trading" => TransactionType::Trading,
+            "settlement" => TransactionType::Settlement,
+            _ => TransactionType::Other,
+        };
+
+        // Get dynamic priority fee
+        let priority_fee_service = PriorityFeeService::new(self.rpc_client.clone());
+        let priority_fee = priority_fee_service.get_priority_fee(transaction_type).await?;
+
+        if priority_fee > 0 {
+            // Create compute budget instructions
+            let compute_unit_price_ix = ComputeBudgetInstruction::set_compute_unit_price(priority_fee);
+            let compute_units_ix = ComputeBudgetInstruction::set_compute_unit_limit(200_000); // Default limit
+
+            // Prepend instructions to transaction
+            let mut new_instructions = vec![compute_unit_price_ix, compute_units_ix];
+            new_instructions.extend(transaction.message.instructions.iter().map(|ix| {
+                solana_sdk::instruction::Instruction {
+                    program_id: transaction.message.account_keys[ix.program_id_index as usize],
+                    accounts: ix.accounts.iter().map(|&idx| {
+                        solana_sdk::instruction::AccountMeta {
+                            pubkey: transaction.message.account_keys[idx as usize],
+                            is_signer: transaction.message.is_signer(idx as usize),
+                            is_writable: transaction.message.is_maybe_writable(idx as usize, None),
+                        }
+                    }).collect(),
+                    data: ix.data.clone(),
+                }
+            }));
+
+            // Rebuild transaction with priority fee instructions
+            let payer = transaction.message.account_keys.first().cloned();
+            *transaction = Transaction::new_with_payer(&new_instructions, payer.as_ref());
+
+            debug!(
+                "Added priority fee {} micro-lamports for {:?} transaction",
+                priority_fee, transaction_type
+            );
+        }
+
         Ok(())
     }
 
@@ -270,15 +312,16 @@ impl TransactionHandler {
         Ok(())
     }
 
-    /// Submit transaction with retry logic and enhanced error handling
+    /// Submit transaction with exponential backoff retry logic
     async fn submit_with_retry(
         &self,
         mut transaction: Transaction,
         _initial_signature: Signature,
     ) -> Result<Signature> {
         let mut attempts = 0;
-        let max_retries = 3;
-        let base_delay = Duration::from_secs(1);
+        let max_retries = 5;
+        let base_delay_ms = 500u64;
+        let max_delay_ms = 30_000u64;
 
         loop {
             attempts += 1;
@@ -304,10 +347,23 @@ impl TransactionHandler {
                     return Ok(sig);
                 }
                 Err(e) => {
+                    let err_str = e.to_string();
                     error!(
                         "Transaction submission failed on attempt {}: {}",
-                        attempts, e
+                        attempts, err_str
                     );
+
+                    // Check for non-retryable errors
+                    let non_retryable = err_str.contains("insufficient funds")
+                        || err_str.contains("InvalidAccountData")
+                        || err_str.contains("AccountNotFound");
+
+                    if non_retryable {
+                        return Err(anyhow!(
+                            "Transaction failed with non-retryable error: {}",
+                            e
+                        ));
+                    }
 
                     if attempts >= max_retries {
                         return Err(anyhow!(
@@ -319,8 +375,17 @@ impl TransactionHandler {
                 }
             }
 
-            // Update transaction for next retry
-            tokio::time::sleep(base_delay * attempts).await;
+            // Calculate exponential backoff with jitter
+            let exp_delay = base_delay_ms.saturating_mul(1u64 << (attempts - 1));
+            let capped_delay = exp_delay.min(max_delay_ms);
+            let jitter = rand::random::<u64>() % (capped_delay / 4 + 1);
+            let total_delay = Duration::from_millis(capped_delay + jitter);
+            
+            debug!(
+                "Waiting {:?} before retry attempt {} (base: {}ms, jitter: {}ms)",
+                total_delay, attempts + 1, capped_delay, jitter
+            );
+            tokio::time::sleep(total_delay).await;
         }
     }
 
@@ -419,7 +484,7 @@ impl TransactionHandler {
         Ok(())
     }
 
-    /// Confirm transaction status
+    /// Confirm transaction status (basic check)
     pub async fn confirm_transaction(&self, signature: &str) -> Result<bool> {
         let sig =
             Signature::from_str(signature).map_err(|e| anyhow!("Invalid signature: {}", e))?;
@@ -430,6 +495,89 @@ impl TransactionHandler {
             .map_err(|e| anyhow!("Failed to get signature status: {}", e))?;
 
         Ok(status.is_some())
+    }
+
+    /// Confirm transaction with polling until confirmed/finalized or timeout
+    /// 
+    /// This method continuously polls the transaction status until:
+    /// - Transaction is confirmed/finalized
+    /// - Transaction fails
+    /// - Timeout is reached
+    pub async fn confirm_transaction_with_polling(
+        &self,
+        signature: &Signature,
+        timeout_secs: u64,
+        poll_interval_ms: u64,
+    ) -> Result<TransactionStatus> {
+        let start = std::time::Instant::now();
+        let timeout = Duration::from_secs(timeout_secs);
+        let poll_interval = Duration::from_millis(poll_interval_ms);
+        
+        info!(
+            "Starting confirmation polling for {} (timeout: {}s, interval: {}ms)",
+            signature, timeout_secs, poll_interval_ms
+        );
+
+        let mut last_status = TransactionStatus::Pending;
+        let mut polls = 0u32;
+
+        loop {
+            polls += 1;
+            
+            if start.elapsed() >= timeout {
+                warn!(
+                    "Transaction confirmation timeout after {}s ({} polls): {}",
+                    timeout_secs, polls, signature
+                );
+                return Ok(TransactionStatus::Pending);
+            }
+
+            match self.get_transaction_status(signature).await {
+                Ok(status) => {
+                    // Log status transitions
+                    if std::mem::discriminant(&status) != std::mem::discriminant(&last_status) {
+                        info!(
+                            "Transaction {} status: {:?} -> {:?} (poll #{})",
+                            signature, last_status, status, polls
+                        );
+                        last_status = status.clone();
+                    }
+
+                    match &status {
+                        TransactionStatus::Finalized => {
+                            info!(
+                                "Transaction {} finalized after {:?} ({} polls)",
+                                signature, start.elapsed(), polls
+                            );
+                            return Ok(status);
+                        }
+                        TransactionStatus::Confirmed(count) if *count >= 1 => {
+                            debug!(
+                                "Transaction {} confirmed with {} confirmations",
+                                signature, count
+                            );
+                            // Continue polling until finalized or user-defined threshold
+                            if *count >= 32 {
+                                return Ok(TransactionStatus::Finalized);
+                            }
+                        }
+                        TransactionStatus::Failed(err) => {
+                            error!("Transaction {} failed: {}", signature, err);
+                            return Ok(status);
+                        }
+                        _ => {
+                            // Still pending or processed, keep polling
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Error polling transaction status (poll #{}): {}", polls, e);
+                    // Don't fail immediately on transient errors
+                }
+            }
+
+            tokio::time::sleep(poll_interval).await;
+        }
     }
 
     /// Get trade record from blockchain - DISABLED

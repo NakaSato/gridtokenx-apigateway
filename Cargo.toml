@@ -168,6 +168,22 @@ path = "tests/integration/erc_lifecycle_test.rs"
 name = "token_minting_test"
 path = "tests/integration/token_minting_test.rs"
 
+[[test]]
+name = "settlement_test"
+path = "tests/integration/settlement_test.rs"
+
+[[test]]
+name = "async_processing_test"
+path = "tests/integration/async_processing_test.rs"
+
+[[test]]
+name = "full_trading_cycle_test"
+path = "tests/integration/full_trading_cycle_test.rs"
+
+[[test]]
+name = "priority5_integration_tests"
+path = "tests/integration/priority5_integration_tests.rs"
+
 
 [features]
 default = []

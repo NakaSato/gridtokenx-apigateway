@@ -43,15 +43,21 @@ pub struct NotificationDispatcher {
     db: PgPool,
     config: NotificationDispatcherConfig,
     broadcast_tx: broadcast::Sender<BroadcastNotification>,
+    email_service: Option<crate::services::EmailService>,
 }
 
 impl NotificationDispatcher {
-    pub fn new(db: PgPool, config: NotificationDispatcherConfig) -> Self {
+    pub fn new(
+        db: PgPool,
+        config: NotificationDispatcherConfig,
+        email_service: Option<crate::services::EmailService>,
+    ) -> Self {
         let (tx, _) = broadcast::channel(config.channel_capacity);
         Self {
             db,
             config,
             broadcast_tx: tx,
+            email_service,
         }
     }
 
@@ -62,17 +68,46 @@ impl NotificationDispatcher {
 
     /// Send a notification to a user
     pub async fn send(&self, request: CreateNotificationRequest) -> anyhow::Result<Notification> {
-        // Check user preferences if enabled
-        if self.config.respect_preferences {
-            let should_send = self.check_preferences(request.user_id, &request.notification_type).await?;
-            if !should_send {
-                info!("Notification suppressed by user preferences: {:?}", request.notification_type);
-                // Still create the notification but don't broadcast
-                return self.create_notification(request, false).await;
+        // Check user preferences
+        let (should_push, should_email) = self.check_preferences(request.user_id, &request.notification_type).await?;
+
+        if self.config.respect_preferences && !should_push {
+            info!("Notification suppressed by user preferences: {:?}", request.notification_type);
+            // Still create the notification but don't broadcast
+            return self.create_notification(request, false).await;
+        }
+
+        let notification = self.create_notification(request.clone(), true).await?;
+
+        // Send email if enabled in preferences and email service is available
+        if should_email {
+            if let Some(email_service) = &self.email_service {
+                // Get user email and username for the email
+                let user_info = sqlx::query!(
+                    "SELECT email, username FROM users WHERE id = $1",
+                    request.user_id
+                )
+                .fetch_optional(&self.db)
+                .await?;
+
+                if let Some(user) = user_info {
+                    let title = request.title.clone();
+                    let message = request.message.clone().unwrap_or_default();
+                    let email_service = email_service.clone();
+                    let email = user.email.clone();
+                    let username = user.username.clone();
+
+                    // Send email asynchronously
+                    tokio::spawn(async move {
+                        if let Err(e) = email_service.send_notification_email(&email, &username, &title, &message).await {
+                            error!("Failed to send notification email: {}", e);
+                        }
+                    });
+                }
             }
         }
 
-        self.create_notification(request, true).await
+        Ok(notification)
     }
 
     /// Send notification to multiple users
@@ -94,7 +129,7 @@ impl NotificationDispatcher {
         // Get all users with system_announcements enabled
         let users = sqlx::query!(
             r#"
-            SELECT u.id 
+            SELECT u.id as "id!"
             FROM users u
             LEFT JOIN user_notification_preferences p ON u.id = p.user_id
             WHERE COALESCE(p.system_announcements, true) = true
@@ -123,12 +158,12 @@ impl NotificationDispatcher {
     }
 
     /// Check if user wants to receive this notification type
-    async fn check_preferences(&self, user_id: Uuid, notification_type: &NotificationType) -> anyhow::Result<bool> {
+    async fn check_preferences(&self, user_id: Uuid, notification_type: &NotificationType) -> anyhow::Result<(bool, bool)> {
         let prefs = sqlx::query!(
             r#"
             SELECT order_filled, order_matched, conditional_triggered,
                    recurring_executed, price_alerts, escrow_events, 
-                   system_announcements, push_enabled
+                   system_announcements, push_enabled, email_enabled
             FROM user_notification_preferences
             WHERE user_id = $1
             "#,
@@ -137,18 +172,13 @@ impl NotificationDispatcher {
         .fetch_optional(&self.db)
         .await?;
 
-        // Default to true if no preferences set
+        // Default to (true, false) if no preferences set
         let Some(prefs) = prefs else {
-            return Ok(true);
+            return Ok((true, false));
         };
 
-        // Check if push is enabled
-        if !prefs.push_enabled.unwrap_or(true) {
-            return Ok(false);
-        }
-
-        // Check specific notification type
-        let enabled = match notification_type {
+        // Check specific notification type enabledness
+        let type_enabled = match notification_type {
             NotificationType::OrderFilled => prefs.order_filled.unwrap_or(true),
             NotificationType::OrderMatched => prefs.order_matched.unwrap_or(true),
             NotificationType::ConditionalTriggered => prefs.conditional_triggered.unwrap_or(true),
@@ -158,7 +188,10 @@ impl NotificationDispatcher {
             NotificationType::System => prefs.system_announcements.unwrap_or(true),
         };
 
-        Ok(enabled)
+        let push_enabled = type_enabled && prefs.push_enabled.unwrap_or(true);
+        let email_enabled = type_enabled && prefs.email_enabled.unwrap_or(false);
+
+        Ok((push_enabled, email_enabled))
     }
 
     /// Create notification in database and optionally broadcast

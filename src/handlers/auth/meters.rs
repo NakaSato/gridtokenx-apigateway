@@ -12,6 +12,8 @@ use uuid::Uuid;
 use crate::auth::middleware::AuthenticatedUser;
 use serde_json;
 use crate::services::meter_analyzer::{check_alerts, calculate_health_score};
+use rust_decimal::prelude::ToPrimitive;
+use tracing::debug;
 
 use crate::AppState;
 use super::types::{
@@ -154,7 +156,7 @@ pub async fn public_get_meters(
         String, String, bool, Option<f64>, Option<f64>, 
         Option<f64>, Option<f64>,
         Option<f64>, Option<f64>, Option<f64>, Option<f64>,
-        Option<f64>, Option<f64>
+        Option<f64>, Option<f64>, Option<i32>
     )>(
         r#"
         SELECT 
@@ -170,7 +172,8 @@ pub async fn public_get_meters(
             lr.frequency,
             lr.power_factor,
             lr.surplus_energy,
-            lr.deficit_energy
+            lr.deficit_energy,
+            m.zone_id
         FROM meters m
         LEFT JOIN LATERAL (
             SELECT 
@@ -198,7 +201,7 @@ pub async fn public_get_meters(
             let responses: Vec<PublicMeterResponse> = meters.iter().map(|(
                 mtype, loc, verified, lat, lng, gen, cons,
                 voltage, current, frequency, power_factor,
-                surplus, deficit
+                surplus, deficit, zone
             )| {
                 PublicMeterResponse {
                     meter_type: mtype.clone(),
@@ -214,6 +217,7 @@ pub async fn public_get_meters(
                     power_factor: *power_factor,
                     surplus_energy: *surplus,
                     deficit_energy: *deficit,
+                    zone_id: *zone,
                 }
             }).collect();
             
@@ -250,6 +254,7 @@ pub async fn public_grid_status(
         active_meters: metrics.active_meters,
         co2_saved_kg: metrics.co2_saved_kg,
         timestamp: metrics.timestamp,
+        zones: metrics.zones.clone(),
     })
 }
 
@@ -282,6 +287,7 @@ pub async fn public_grid_history(
                 active_meters: h.active_meters,
                 co2_saved_kg: h.co2_saved_kg,
                 timestamp: h.timestamp,
+                zones: h.zones.clone(),
             }).collect();
             Json(response)
         },
@@ -659,39 +665,152 @@ pub async fn create_reading(
 }
 
 /// Internal shared logic for creating a reading
-async fn internal_create_reading(
+pub async fn internal_create_reading(
     state: &AppState,
     serial: String,
     params: CreateReadingParams,
     request: CreateReadingRequest,
 ) -> CreateReadingResponse {
+    let reading_id = Uuid::new_v4();
+    let timestamp = request.timestamp.unwrap_or_else(chrono::Utc::now);
+
+    // 0. Oracle Validation (Sanity check before queuing)
+    if let Err(e) = crate::services::validation::OracleValidator::validate_reading(
+        &serial,
+        &request,
+        &crate::services::validation::ValidationConfig::default(),
+    )
+    .await
+    {
+        return CreateReadingResponse {
+            id: reading_id,
+            serial_number: serial,
+            kwh: request.kwh,
+            timestamp,
+            minted: false,
+            tx_signature: None,
+            message: format!("Oracle Validation Failed: {}", e),
+        };
+    }
+
+    // Push to Redis queue for asynchronous processing
+    let task = crate::services::reading_processor::ReadingTask {
+        serial: serial.clone(),
+        params,
+        request: request.clone(),
+        retry_count: 0,
+    };
+
+    let (_queued, message) = match state.cache_service.push_reading(&task).await {
+        Ok(_) => (true, "Reading queued for processing".to_string()),
+        Err(e) => {
+            error!("❌ Failed to queue reading for {}: {}", serial, e);
+            (false, format!("Failed to queue reading: {}", e))
+        }
+    };
+
+    CreateReadingResponse {
+        id: reading_id,
+        serial_number: serial,
+        kwh: request.kwh,
+        timestamp,
+        minted: false, // Will be processed asynchronously
+        tx_signature: None,
+        message,
+    }
+}
+
+/// Task logic for processing aqueued reading
+pub async fn process_reading_task(
+    state: &AppState,
+    task: crate::services::reading_processor::ReadingTask,
+) -> anyhow::Result<()> {
+    debug!(
+        "⚙️ Processing queued reading for meter {}: {} kWh",
+        task.serial, task.request.kwh
+    );
+
+    let serial = task.serial;
+    let params = task.params;
+    let request = task.request;
+    
     let auto_mint = params.auto_mint.unwrap_or(true);
     let timeout_secs = params.timeout_secs.unwrap_or(30);
-    
-    info!(
-        "📊 Create reading for meter {}: {} kWh (auto_mint={}, timeout={}s)",
-        serial, request.kwh, auto_mint, timeout_secs
-    );
+
+    // 0. Double-check Oracle Validation in background (Secondary defense)
+    if let Err(e) = crate::services::validation::OracleValidator::validate_reading(
+        &serial,
+        &request,
+        &crate::services::validation::ValidationConfig::default(),
+    )
+    .await
+    {
+        error!("❌ Background Oracle Validation failed for {}: {}", serial, e);
+        return Err(anyhow::anyhow!("Oracle Validation Failed: {}", e));
+    }
 
     // 1. Resolve Meter Context (ID, User, Wallet, Zone)
     let (meter_id, user_id, wallet_address, zone_id) = match resolve_meter_context(state, &serial, &request.wallet_address).await {
         Ok(ctx) => ctx,
-        Err(err_msg) => return CreateReadingResponse {
-            id: Uuid::new_v4(),
-            serial_number: serial,
-            kwh: request.kwh,
-            timestamp: request.timestamp.unwrap_or_else(chrono::Utc::now),
-            minted: false,
-            tx_signature: None,
-            message: err_msg,
-        },
+        Err(err_msg) => {
+            error!("❌ Failed to resolve context for {}: {}", serial, err_msg);
+            return Err(anyhow::anyhow!(err_msg));
+        }
     };
 
-    // 2. Process Blockchain Minting
-    let (minted, tx_signature, mut message) = if auto_mint && request.kwh > 0.0 {
-        process_minting(state, timeout_secs, &wallet_address, request.kwh, &serial).await
+    // 2. Process Blockchain Minting with Aggregation Threshold
+    let (minted, tx_signature, mut _message) = if auto_mint && request.kwh > 0.0 {
+        // Atomic Upsert and Increment
+        let threshold = state.config.tokenization.mint_threshold;
+        
+        let agg_result = sqlx::query!(
+            r#"
+            INSERT INTO meter_unminted_balances (meter_serial, accumulated_kwh, updated_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (meter_serial) 
+            DO UPDATE SET 
+                accumulated_kwh = meter_unminted_balances.accumulated_kwh + EXCLUDED.accumulated_kwh,
+                updated_at = NOW()
+            RETURNING accumulated_kwh
+            "#,
+            serial,
+            request.kwh as f64
+        )
+        .fetch_one(&state.db)
+        .await;
+
+        match agg_result {
+            Ok(row) => {
+                let current_total = row.accumulated_kwh.map(|d| d.to_f64().unwrap_or(0.0)).unwrap_or(0.0);
+                
+                if current_total >= threshold {
+                    info!("🚀 Threshold reached for {}: {} kWh >= {} kWh. Triggering mint.", serial, current_total, threshold);
+                    let (m, sig, msg) = process_minting(state, timeout_secs, &wallet_address, current_total, &serial).await;
+                    
+                    if m {
+                        // Reset balance on success
+                        let _ = sqlx::query!(
+                            "UPDATE meter_unminted_balances SET accumulated_kwh = 0, last_mint_at = NOW() WHERE meter_serial = $1",
+                            serial
+                        )
+                        .execute(&state.db)
+                        .await;
+                        (true, sig, msg)
+                    } else {
+                        (false, None, format!("Threshold reached but aggregation mint failed: {}", msg))
+                    }
+                } else {
+                    debug!("📊 Aggregating for {}: current total {} kWh (threshold: {} kWh)", serial, current_total, threshold);
+                    (false, None, format!("Energy aggregated. Current total: {:.3} kWh", current_total))
+                }
+            },
+            Err(e) => {
+                error!("❌ Aggregation DB error for {}: {}", serial, e);
+                (false, None, format!("Aggregation failed: {}", e))
+            }
+        }
     } else {
-        (false, None, "Reading recorded (auto_mint disabled)".to_string())
+        (false, None, "Reading recorded (auto_mint disabled or negative kwh)".to_string())
     };
 
     // 2.5 Check for alerts and calculate health score
@@ -727,21 +846,29 @@ async fn internal_create_reading(
         health_score,
     ).await {
         error!("❌ CRITICAL: Failed to save reading {} to DB: {}", reading_id, e);
-        message = format!("{}. Database error: {}", message, e);
+        return Err(anyhow::anyhow!("Database error: {}", e));
     } else {
-        info!("✅ Successfully saved reading {} to DB", reading_id);
+        info!("✅ Successfully processed queued reading {} for {}", reading_id, serial);
         
         // 4. Trigger Post-Processing (Async)
-        // We pass the raw values needed for logic
         let surplus = request.surplus_energy.unwrap_or(if request.kwh > 0.0 { request.kwh } else { 0.0 });
         let deficit = request.deficit_energy.unwrap_or(if request.kwh < 0.0 { request.kwh.abs() } else { 0.0 });
         
         let power_val = request.power.or_else(|| {
-             request.voltage.zip(request.current).map(|(v, i)| v * i * request.power_factor.unwrap_or(1.0) / 1000.0) // kW
+             // Net power = generated - consumed
+             match (request.power_generated, request.power_consumed) {
+                 (Some(gen), Some(cons)) => Some(gen - cons),
+                 _ => request.voltage.zip(request.current).map(|(v, i)| v * i * request.power_factor.unwrap_or(1.0) / 1000.0) // kW
+             }
         });
 
         // Update aggregate grid status in dashboard service
-        let _ = state.dashboard_service.handle_meter_reading(request.kwh, &serial, zone_id).await;
+        let power_gen = request.power_generated.unwrap_or(if request.kwh > 0.0 { power_val.unwrap_or(0.0) } else { 0.0 });
+        let power_cons = request.power_consumed.unwrap_or(if request.kwh < 0.0 { power_val.unwrap_or(0.0).abs() } else { 0.0 });
+
+        info!("📥 Processing power metrics for {}: gen={:.2}kW, cons={:.2}kW (raw kwh={:.4})", serial, power_gen, power_cons, request.kwh);
+
+        let _ = state.dashboard_service.handle_meter_reading(request.kwh, &serial, zone_id, power_gen, power_cons).await;
 
         trigger_post_processing(
             state.clone(),
@@ -760,15 +887,7 @@ async fn internal_create_reading(
         ).await;
     }
 
-    CreateReadingResponse {
-        id: reading_id,
-        serial_number: serial,
-        kwh: request.kwh,
-        timestamp,
-        minted,
-        tx_signature,
-        message,
-    }
+    Ok(())
 }
 
 // --- Helper Functions ---
@@ -956,7 +1075,7 @@ async fn trigger_post_processing(
     voltage: Option<f64>,
     current: Option<f64>
 ) {
-    let db = state.db.clone();
+    let _db = state.db.clone();
     let websocket = state.websocket_service.clone();
     
     // Broadcast real-time meter update
@@ -1167,19 +1286,29 @@ pub async fn create_batch_readings(
     
     info!("📊 Processing batch of {} readings", request.readings.len());
     
-    for reading in request.readings {
-        let serial = reading.meter_serial.clone().or_else(|| reading.meter_id.clone());
-        
-        if let Some(serial) = serial {
-            // Disable auto_mint for batch submissions to improve performance
-            let params = CreateReadingParams {
-                auto_mint: Some(false),
-                timeout_secs: Some(30),
-            };
-            let _ = internal_create_reading(&state, serial, params, reading).await;
-            success_count += 1;
-        } else {
-            failed_count += 1;
+    let futures = request.readings.into_iter().map(|reading| {
+        let state = state.clone();
+        async move {
+            let serial = reading.meter_serial.clone().or_else(|| reading.meter_id.clone());
+            if let Some(serial) = serial {
+                let params = CreateReadingParams {
+                    auto_mint: Some(true),
+                    timeout_secs: Some(30),
+                };
+                let _ = internal_create_reading(&state, serial, params, reading).await;
+                Ok::<_, ()>(true)
+            } else {
+                Ok::<_, ()>(false)
+            }
+        }
+    });
+
+    let results = futures::future::join_all(futures).await;
+    
+    for res in results {
+        match res {
+            Ok(true) => success_count += 1,
+            _ => failed_count += 1,
         }
     }
     

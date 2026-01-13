@@ -1,7 +1,7 @@
 use crate::services::event_processor::EventProcessorStats;
 use crate::services::health_check::DetailedHealthStatus;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use utoipa::ToSchema;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, sqlx::FromRow)]
@@ -17,6 +17,15 @@ pub struct GridStatus {
     #[sqlx(default)]
     pub zones_data: Option<serde_json::Value>,
     pub timestamp: chrono::DateTime<chrono::Utc>,
+    #[serde(skip)]
+    #[sqlx(skip)]
+    pub active_meter_ids: HashSet<String>,
+    #[serde(skip)]
+    #[sqlx(skip)]
+    pub meter_generation: HashMap<String, f64>,
+    #[serde(skip)]
+    #[sqlx(skip)]
+    pub meter_consumption: HashMap<String, f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -26,6 +35,12 @@ pub struct ZoneGridStatus {
     pub consumption: f64,
     pub net_balance: f64,
     pub active_meters: i32,
+    #[serde(skip)]
+    pub active_meter_ids: HashSet<String>,
+    #[serde(skip)]
+    pub meter_generation: HashMap<String, f64>,
+    #[serde(skip)]
+    pub meter_consumption: HashMap<String, f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

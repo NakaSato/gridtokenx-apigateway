@@ -102,10 +102,10 @@ impl ErcService {
             r#"
             INSERT INTO erc_certificates (
                 id, certificate_id, user_id, wallet_address,
-                kwh_amount, issue_date, expiry_date,
+                kwh_amount, energy_amount, certificate_type, issue_date, issuance_date, expiry_date,
                 issuer_wallet, status, metadata, settlement_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Active', $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'active', $12, $13)
             RETURNING
                 id, certificate_id,
                 user_id as "user_id?",
@@ -126,7 +126,10 @@ impl ErcService {
             user_id,
             request.wallet_address,
             request.kwh_amount,
-            Utc::now(),
+            request.kwh_amount, // energy_amount
+            "ERC",              // certificate_type
+            Utc::now(),         // issue_date
+            Utc::now(),         // issuance_date
             request.expiry_date,
             issuer_wallet,
             metadata_json,

@@ -157,21 +157,37 @@ pub async fn mint_from_reading(
         .to_f64()
         .ok_or_else(|| ApiError::Internal("Failed to convert amount".to_string()))?;
 
-    // Mint tokens using Energy Token program
-    let signature = state
-        .blockchain_service
-        .mint_energy_tokens(
-            &authority_keypair,
-            &_user_token_account, // create_ata_idempotent will handle this if needed, or we just pass it
-            &wallet_pubkey,
-            &token_mint,
-            amount_f64,
-        )
-        .await
-        .map_err(|e| {
-            error!("Failed to mint tokens: {}", e);
-            ApiError::Internal(format!("Blockchain minting failed: {}", e))
-        })?;
+    // Mint tokens using appropriate method based on config
+    let signature = if state.config.tokenization.enable_real_blockchain {
+        state
+            .blockchain_service
+            .mint_energy_tokens(
+                &authority_keypair,
+                &_user_token_account,
+                &wallet_pubkey,
+                &token_mint,
+                amount_f64,
+            )
+            .await
+            .map_err(|e| {
+                error!("Failed to mint tokens (Anchor): {}", e);
+                ApiError::Internal(format!("Blockchain minting failed: {}", e))
+            })?
+    } else {
+        state
+            .blockchain_service
+            .mint_spl_tokens(
+                &authority_keypair,
+                &wallet_pubkey,
+                &token_mint,
+                amount_f64,
+            )
+            .await
+            .map_err(|e| {
+                error!("Failed to mint tokens (CLI): {}", e);
+                ApiError::Internal(format!("Blockchain minting failed: {}", e))
+            })?
+    };
 
     let sig_str = signature.to_string();
     info!(
@@ -280,21 +296,37 @@ pub async fn mint_user_reading(
         .to_f64()
         .ok_or_else(|| ApiError::Internal("Failed to convert amount".to_string()))?;
 
-    // Mint tokens using Energy Token program
-    let signature = state
-        .blockchain_service
-        .mint_energy_tokens(
-            &authority_keypair,
-            &_user_token_account,
-            &wallet_pubkey,
-            &token_mint,
-            amount_f64,
-        )
-        .await
-        .map_err(|e| {
-            error!("Failed to mint tokens: {}", e);
-            ApiError::Internal(format!("Blockchain minting failed: {}", e))
-        })?;
+    // Mint tokens using appropriate method based on config
+    let signature = if state.config.tokenization.enable_real_blockchain {
+        state
+            .blockchain_service
+            .mint_energy_tokens(
+                &authority_keypair,
+                &_user_token_account,
+                &wallet_pubkey,
+                &token_mint,
+                amount_f64,
+            )
+            .await
+            .map_err(|e| {
+                error!("Failed to mint tokens (Anchor): {}", e);
+                ApiError::Internal(format!("Blockchain minting failed: {}", e))
+            })?
+    } else {
+        state
+            .blockchain_service
+            .mint_spl_tokens(
+                &authority_keypair,
+                &wallet_pubkey,
+                &token_mint,
+                amount_f64,
+            )
+            .await
+            .map_err(|e| {
+                error!("Failed to mint tokens (CLI): {}", e);
+                ApiError::Internal(format!("Blockchain minting failed: {}", e))
+            })?
+    };
 
     let sig_str = signature.to_string();
     info!(

@@ -365,6 +365,97 @@ This is an automated email. Please do not reply to this message.
             username, reset_url
         )
     }
+
+    /// HTML email template for generic notifications
+    pub fn notification_email(username: &str, title: &str, message: &str) -> String {
+        format!(
+            r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{} - GridTokenX</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f5f5f5;">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table role="presentation" style="width: 600px; max-width: 100%; border-collapse: collapse; background-color: #ffffff; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          <!-- Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 30px; text-align: center; border-radius: 8px 8px 0 0;">
+              <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600;">GridTokenX</h1>
+            </td>
+          </tr>
+          
+          <!-- Body -->
+          <tr>
+            <td style="padding: 40px 30px; background-color: #ffffff;">
+              <h2 style="color: #1f2937; margin: 0 0 20px 0; font-size: 20px; font-weight: 600;">{}</h2>
+              
+              <p style="color: #4b5563; line-height: 1.6; margin: 0 0 20px 0; font-size: 16px;">
+                Hello <strong>{}</strong>,
+              </p>
+              
+              <p style="color: #4b5563; line-height: 1.6; margin: 0 0 30px 0; font-size: 16px;">
+                {}
+              </p>
+              
+              <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td align="center" style="padding: 0 0 30px 0;">
+                    <a href="https://gridtokenx.com/dashboard" 
+                      style="display: inline-block; background-color: #10b981; 
+                          color: #ffffff; padding: 12px 30px; text-decoration: none; 
+                          border-radius: 5px; font-weight: 600; font-size: 16px;">
+                      View Dashboard
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              
+              <p style="color: #6b7280; margin: 0; font-size: 14px; line-height: 1.5;">
+                You are receiving this email because you enabled specific notifications in your profile settings.
+              </p>
+            </td>
+          </tr>
+          
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb;">
+              <p style="color: #9ca3af; margin: 0; font-size: 12px;">
+                © 2026 GridTokenX Platform. All rights reserved.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"#,
+            title, title, username, message
+        )
+    }
+
+    /// Plain text email template for generic notifications
+    pub fn notification_email_text(username: &str, title: &str, message: &str) -> String {
+        format!(
+            r#"GridTokenX Notification: {}
+
+Hello {},
+
+{}
+
+View your dashboard: https://gridtokenx.com/dashboard
+
+---
+You are receiving this email because you enabled specific notifications in your profile settings.
+© 2026 GridTokenX Platform. All rights reserved.
+"#,
+            title, username, message
+        )
+    }
 }
 
 #[cfg(test)]

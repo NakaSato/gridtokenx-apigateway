@@ -222,6 +222,9 @@ pub struct PublicMeterResponse {
     /// Energy: Deficit energy needed from grid (kWh)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deficit_energy: Option<f64>,
+    /// Zone ID for grid topology
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zone_id: Option<i32>,
 }
 
 /// Public Grid Status Response (aggregate statistics)
@@ -239,6 +242,8 @@ pub struct PublicGridStatusResponse {
     pub co2_saved_kg: f64,
     /// Timestamp of the status calculation
     pub timestamp: chrono::DateTime<chrono::Utc>,
+    /// Zone-specific breakdown
+    pub zones: std::collections::HashMap<i32, crate::services::dashboard::types::ZoneGridStatus>,
 }
 
 /// Parameters for grid history retrieval
@@ -292,7 +297,7 @@ pub struct UpdateMeterStatusRequest {
 }
 
 /// Create reading request for v1 API with full telemetry support
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
 pub struct CreateReadingRequest {
     // Required fields
     pub kwh: f64,
@@ -314,6 +319,8 @@ pub struct CreateReadingRequest {
     pub voltage: Option<f64>,
     pub current: Option<f64>,
     pub power: Option<f64>,
+    pub power_generated: Option<f64>,
+    pub power_consumed: Option<f64>,
     pub power_factor: Option<f64>,
     pub frequency: Option<f64>,
     pub temperature: Option<f64>,
@@ -407,8 +414,8 @@ pub struct MeterStats {
     pub pending_mint_count: i64,
 }
 
-/// Query Params for Create Reading endpoint
-#[derive(Debug, Deserialize, IntoParams, Default)]
+/// Query params for Create Reading endpoint
+#[derive(Debug, Clone, Serialize, Deserialize, IntoParams, Default)]
 pub struct CreateReadingParams {
     /// If false, skip auto-minting and just record the reading. Default: true
     pub auto_mint: Option<bool>,

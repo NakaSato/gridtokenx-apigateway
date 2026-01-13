@@ -48,8 +48,8 @@ impl CertificateRetiring {
             ErcCertificate,
             r#"
             UPDATE erc_certificates
-            SET status = 'Retired'
-            WHERE id = $1 AND status = 'Active'
+            SET status = 'retired'
+            WHERE id = $1 AND status IN ('active', 'transferred')
             RETURNING
                 id, certificate_id,
                 user_id as "user_id?",

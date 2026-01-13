@@ -156,9 +156,40 @@ pub fn track_token_mint(amount: f64, success: bool) {
     }
 }
 
+/// Track meter reading retries
+pub fn track_meter_reading_retry() {
+    counter!("meter_readings_retries_total").increment(1);
+}
+
 /// Track meter readings
 pub fn track_meter_reading(success: bool) {
     counter!("meter_readings_total", "success" => success.to_string()).increment(1);
+}
+
+/// Track market clearing duration
+pub fn track_market_clearing(duration_ms: f64, success: bool) {
+    histogram!(
+        "market_clearing_duration_ms",
+        "success" => success.to_string()
+    ).record(duration_ms);
+    counter!("market_clearing_runs_total", "success" => success.to_string()).increment(1);
+}
+
+/// Track matched trades
+pub fn track_trade_match(volume_kwh: f64, count: u64) {
+    counter!("trades_matched_total").increment(count);
+    counter!("trade_volume_kwh_total").increment(volume_kwh as u64);
+}
+
+/// Track settlement result
+pub fn track_settlement(success: bool) {
+    counter!("settlements_total", "success" => success.to_string()).increment(1);
+}
+
+/// Track platform revenue (fees and wheeling)
+pub fn track_revenue(fee_type: &str, amount_sol: f64) {
+    counter!("platform_revenue_total", "type" => fee_type.to_string()).increment(amount_sol as u64);
+    gauge!("platform_revenue_sol", "type" => fee_type.to_string()).increment(amount_sol);
 }
 
 #[cfg(test)]

@@ -46,8 +46,10 @@ pub struct AppState {
     pub event_processor: services::EventProcessorService,
     pub price_monitor: services::PriceMonitor,
     pub recurring_scheduler: services::RecurringScheduler,
+    pub reading_processor: services::reading_processor::ReadingProcessorService,
     pub webhook_service: services::WebhookService,
     pub erc_service: services::ErcService,
+    pub notification_dispatcher: services::NotificationDispatcher,
     
     /// Prometheus metrics handle
     pub metrics_handle: metrics_exporter_prometheus::PrometheusHandle,

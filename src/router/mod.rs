@@ -225,10 +225,9 @@ pub fn build_router(app_state: AppState) -> Router {
         .route("/grid-status/history", get(crate::handlers::auth::meters::public_grid_history))
         .route("/meters/batch/readings", post(crate::handlers::auth::meters::create_batch_readings));
 
-    // Simulator routes (auth required for meter registration)
+    // Simulator routes (no auth required for meter registration)
     let simulator_routes = Router::new()
-        .route("/meters/register", post(crate::handlers::meter::stub::register_meter_by_id))
-        .layer(middleware::from_fn_with_state(app_state.clone(), auth_middleware));
+        .route("/meters/register", post(crate::handlers::meter::stub::register_meter_by_id));
 
     // Notifications routes (auth required)
     let notifications_routes = Router::new()

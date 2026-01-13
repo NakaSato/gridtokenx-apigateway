@@ -51,6 +51,9 @@ pub struct TokenizationConfig {
     /// Whether to check on-chain token balance for buy order escrow (default: false)
     /// If true, checks blockchain token balance instead of users.balance DB column
     pub use_onchain_balance_for_escrow: bool,
+
+    /// Minimum energy (kWh) to accumulate before minting (default: 5.0)
+    pub mint_threshold: f64,
 }
 
 impl Default for TokenizationConfig {
@@ -71,6 +74,7 @@ impl Default for TokenizationConfig {
             max_transactions_per_batch: 20,
             enable_real_blockchain: true, // Default to true for integration
             use_onchain_balance_for_escrow: false, // Default to DB balance check for compatibility
+            mint_threshold: 5.0,
         }
     }
 }
@@ -291,6 +295,20 @@ impl TokenizationConfig {
                     "Failed to parse enable real blockchain: {}, using default",
                     val
                 ),
+            }
+        }
+
+        if let Ok(val) = env::var("TOKENIZATION_MINT_THRESHOLD") {
+            match val.parse::<f64>() {
+                Ok(threshold) if threshold >= 0.0 => {
+                    config.mint_threshold = threshold;
+                    info!("Using custom mint threshold: {} kWh", threshold);
+                }
+                Ok(_) => warn!(
+                    "Invalid mint threshold: {}, must be >= 0, using default",
+                    val
+                ),
+                Err(_) => warn!("Failed to parse mint threshold: {}, using default", val),
             }
         }
 

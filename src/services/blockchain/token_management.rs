@@ -481,4 +481,102 @@ impl TokenManager {
         Signature::from_str(signature_str.trim())
             .map_err(|e| anyhow!("Failed to parse signature '{}': {}", signature_str, e))
     }
+
+    /// Batch mint SPL tokens to multiple wallets
+    /// 
+    /// This method aggregates mints by wallet and executes them sequentially
+    /// to reduce the overall number of CLI invocations.
+    /// 
+    /// Returns a vector of (wallet, signature) tuples for successful mints
+    /// and a vector of (wallet, error) tuples for failed mints.
+    pub async fn batch_mint_spl_tokens(
+        &self,
+        _authority: &Keypair,
+        mint: &Pubkey,
+        mints: Vec<(Pubkey, f64)>, // (wallet, kwh_amount)
+    ) -> (Vec<(Pubkey, Signature)>, Vec<(Pubkey, String)>) {
+        use tracing::{info, error};
+
+        let wallet_path = std::env::var("AUTHORITY_WALLET_PATH")
+            .unwrap_or_else(|_| "dev-wallet.json".to_string());
+        let rpc_url =
+            std::env::var("SOLANA_RPC_URL").unwrap_or_else(|_| "http://localhost:8899".to_string());
+
+        // Aggregate amounts by wallet
+        let mut aggregated: std::collections::HashMap<Pubkey, f64> = std::collections::HashMap::new();
+        for (wallet, amount) in mints {
+            *aggregated.entry(wallet).or_insert(0.0) += amount;
+        }
+
+        info!(
+            "🚀 Batch minting {} aggregated entries ({} total wallets)",
+            aggregated.len(),
+            aggregated.len()
+        );
+
+        let mut successes = Vec::new();
+        let mut failures = Vec::new();
+
+        for (wallet, amount) in aggregated {
+            if amount <= 0.0 {
+                continue;
+            }
+
+            let output = std::process::Command::new("spl-token")
+                .arg("mint")
+                .arg(mint.to_string())
+                .arg(amount.to_string())
+                .arg("--recipient-owner")
+                .arg(wallet.to_string())
+                .arg("--fee-payer")
+                .arg(&wallet_path)
+                .arg("--mint-authority")
+                .arg(&wallet_path)
+                .arg("--program-2022")
+                .arg("--url")
+                .arg(&rpc_url)
+                .output();
+
+            match output {
+                Ok(result) => {
+                    if result.status.success() {
+                        let stdout_str = String::from_utf8_lossy(&result.stdout);
+                        if let Some(sig_str) = stdout_str
+                            .lines()
+                            .find(|line| line.contains("Signature:"))
+                            .and_then(|line| line.split_whitespace().last())
+                        {
+                            if let Ok(sig) = Signature::from_str(sig_str) {
+                                info!("✅ Batch mint {} kWh to {} - TX: {}", amount, wallet, sig);
+                                successes.push((wallet, sig));
+                            } else {
+                                failures.push((wallet, format!("Failed to parse signature: {}", sig_str)));
+                            }
+                        } else {
+                            failures.push((wallet, "No signature in output".to_string()));
+                        }
+                    } else {
+                        let stderr_str = String::from_utf8_lossy(&result.stderr);
+                        error!("❌ Batch mint failed for {}: {}", wallet, stderr_str);
+                        failures.push((wallet, stderr_str.to_string()));
+                    }
+                }
+                Err(e) => {
+                    error!("❌ Failed to execute mint command for {}: {}", wallet, e);
+                    failures.push((wallet, e.to_string()));
+                }
+            }
+
+            // Small delay between mints to avoid rate limiting
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+
+        info!(
+            "📊 Batch minting complete: {} successes, {} failures",
+            successes.len(),
+            failures.len()
+        );
+
+        (successes, failures)
+    }
 }

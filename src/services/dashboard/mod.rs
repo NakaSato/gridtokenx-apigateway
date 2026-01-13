@@ -1,5 +1,6 @@
 pub mod types;
  
+use tracing::{info, debug, error};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use chrono::Utc;
@@ -32,7 +33,7 @@ impl DashboardService {
             health_checker,
             event_processor,
             websocket_service,
-                metrics: Arc::new(RwLock::new(GridStatus {
+            metrics: Arc::new(RwLock::new(GridStatus {
                 total_generation: 0.0,
                 total_consumption: 0.0,
                 net_balance: 0.0,
@@ -41,22 +42,40 @@ impl DashboardService {
                 zones: HashMap::new(),
                 zones_data: None,
                 timestamp: Utc::now(),
+                active_meter_ids: std::collections::HashSet::new(),
+                meter_generation: HashMap::new(),
+                meter_consumption: HashMap::new(),
             })),
         }
     }
 
     /// Handle a new meter reading to update aggregate grid status and broadcast
-    pub async fn handle_meter_reading(&self, kwh: f64, _meter_serial: &str, zone_id: Option<i32>) -> anyhow::Result<()> {
+    pub async fn handle_meter_reading(
+        &self, 
+        kwh: f64, 
+        meter_serial: &str, 
+        zone_id: Option<i32>,
+        power_gen: f64,
+        power_cons: f64
+    ) -> anyhow::Result<()> {
         let mut metrics = self.metrics.write().await;
         
-        // Update aggregate totals
+        let meter_id = meter_serial.to_string();
+        info!("📊 Dashboard Update: meter={}, power_gen={:.2}, power_cons={:.2}, kwh={:.4}", meter_id, power_gen, power_cons, kwh);
+
+        // 1. Update Global Metrics (Latest Power Aggregation)
+        let old_gen = metrics.meter_generation.insert(meter_id.clone(), power_gen).unwrap_or(0.0);
+        let old_cons = metrics.meter_consumption.insert(meter_id.clone(), power_cons).unwrap_or(0.0);
+
+        metrics.total_generation = metrics.total_generation - old_gen + power_gen;
+        metrics.total_consumption = metrics.total_consumption - old_cons + power_cons;
+
+        // Keep CO2 saved as cumulative based on Energy (kWh)
         if kwh > 0.0 {
-            metrics.total_generation += kwh;
-        } else {
-            metrics.total_consumption += kwh.abs();
+            metrics.co2_saved_kg += kwh * 0.431;
         }
 
-        // Update zone-specific totals if zone_id is provided
+        // 2. Update Zone-specific Metrics
         if let Some(zid) = zone_id {
             let zone_status = metrics.zones.entry(zid).or_insert(ZoneGridStatus {
                 zone_id: zid,
@@ -64,28 +83,33 @@ impl DashboardService {
                 consumption: 0.0,
                 net_balance: 0.0,
                 active_meters: 0,
+                active_meter_ids: std::collections::HashSet::new(),
+                meter_generation: HashMap::new(),
+                meter_consumption: HashMap::new(),
             });
 
-            if kwh > 0.0 {
-                zone_status.generation += kwh;
-            } else {
-                zone_status.consumption += kwh.abs();
-            }
+            let z_old_gen = zone_status.meter_generation.insert(meter_id.clone(), power_gen).unwrap_or(0.0);
+            let z_old_cons = zone_status.meter_consumption.insert(meter_id.clone(), power_cons).unwrap_or(0.0);
+
+            zone_status.generation = zone_status.generation - z_old_gen + power_gen;
+            zone_status.consumption = zone_status.consumption - z_old_cons + power_cons;
             zone_status.net_balance = zone_status.generation - zone_status.consumption;
             
-            // Simple increment for now, similar to global logic
-            if zone_status.active_meters < 10 {
-                zone_status.active_meters += 1;
+            // Real active meter tracking for zone
+            if meter_serial != "unknown" {
+                zone_status.active_meter_ids.insert(meter_id.clone());
             }
+            zone_status.active_meters = zone_status.active_meter_ids.len() as i32;
         }
 
-        // Increment active meters if it was 0 or just maintain (simple logic for now)
-        if metrics.active_meters < 30 { 
-             metrics.active_meters += 1;
+        // Real active meter tracking
+        if meter_serial != "unknown" {
+            metrics.active_meter_ids.insert(meter_serial.to_string());
         }
+        metrics.active_meters = metrics.active_meter_ids.len() as i64;
 
         metrics.net_balance = metrics.total_generation - metrics.total_consumption;
-        metrics.co2_saved_kg = metrics.total_generation * 0.431;
+        // metrics.co2_saved_kg updated above cumulatively
         metrics.timestamp = Utc::now();
 
         // Broadcast to all connected clients

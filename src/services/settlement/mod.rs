@@ -3,6 +3,7 @@ pub mod types;
 use anyhow::Result;
 use chrono::Utc;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,6 +17,8 @@ use crate::services::BlockchainService;
 use crate::services::erc::{ErcService, IssueErcRequest};
 use crate::services::notification::{NotificationService, SettlementNotification};
 use crate::handlers::websocket::broadcaster::broadcast_settlement_complete;
+use crate::middleware::metrics;
+use futures::{stream, StreamExt};
 use solana_sdk::signature::Signer;
 
 pub use types::*;
@@ -292,6 +295,14 @@ impl SettlementService {
                     "✅ Settlement {} completed: tx {}",
                     settlement_id, tx_result.signature
                 );
+
+                // Record success metrics
+                metrics::track_settlement(true);
+                metrics::track_revenue("fee", settlement.fee_amount.to_f64().unwrap_or(0.0));
+                if let Some(wheeling) = settlement.wheeling_charge {
+                    metrics::track_revenue("wheeling", wheeling.to_f64().unwrap_or(0.0));
+                }
+
                 Ok(tx_result)
             }
             Err(e) => {
@@ -300,6 +311,9 @@ impl SettlementService {
                 // Update status to failed
                 self.update_settlement_status(settlement_id, SettlementStatus::Failed)
                     .await?;
+
+                // Record failure metric
+                metrics::track_settlement(false);
 
                 Err(ApiError::Internal(format!(
                     "Settlement execution failed: {}",
@@ -509,7 +523,7 @@ impl SettlementService {
             .ok_or_else(|| ApiError::Internal(format!("Order {} has no PDA stored", order_id)))
     }
 
-    /// Process all pending settlements
+    /// Process all pending settlements in parallel
     pub async fn process_pending_settlements(&self) -> Result<usize, ApiError> {
         let pending_ids = self.get_pending_settlements().await?;
 
@@ -518,24 +532,35 @@ impl SettlementService {
             return Ok(0);
         }
 
-        info!("🚀 Processing {} pending settlements...", pending_ids.len());
+        info!("🚀 Processing {} pending settlements concurrently...", pending_ids.len());
         let total_count = pending_ids.len();
-        let mut processed = 0;
 
-        for settlement_id in pending_ids {
-            match self.execute_settlement(settlement_id).await {
-                Ok(_) => {
-                    processed += 1;
+        // Use StreamExt to process settlements in parallel with a concurrency limit
+        let concurrency = 10; // Process 10 settlements at a time
+        
+        // Use a counter for successful settlements
+        let processed_count = Arc::new(tokio::sync::Mutex::new(0));
+        let this = Arc::new(self.clone());
+
+        stream::iter(pending_ids)
+            .for_each_concurrent(concurrency, |settlement_id| {
+                let this = this.clone();
+                let processed_count = processed_count.clone();
+                async move {
+                    match this.execute_settlement(settlement_id).await {
+                        Ok(_) => {
+                            let mut count = processed_count.lock().await;
+                            *count += 1;
+                        }
+                        Err(e) => {
+                            error!("❌ Failed to process settlement {}: {}", settlement_id, e);
+                        }
+                    }
                 }
-                Err(e) => {
-                    error!("❌ Failed to process settlement {}: {}", settlement_id, e);
-                }
-            }
+            })
+            .await;
 
-            // Small delay between settlements to avoid rate limiting
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-
+        let processed = *processed_count.lock().await;
         let success_rate = (processed as f64 / total_count as f64) * 100.0;
         info!(
             "🏁 BATCH SETTLEMENT COMPLETE: Success Rate: {:.1}% ({}/{})",

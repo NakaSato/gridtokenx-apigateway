@@ -182,7 +182,7 @@ impl MarketClearingService {
         order_id: Uuid,
         amount: Decimal,
         asset_type: &str, // "currency" or "energy"
-        session_token: Option<&str>,
+        _session_token: Option<&str>,
     ) -> Result<String> {
         if !self.config.tokenization.enable_real_blockchain {
              return Ok(format!("mock_escrow_lock_{}", order_id));

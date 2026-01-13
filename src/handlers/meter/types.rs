@@ -31,6 +31,10 @@ pub struct SubmitReadingRequest {
     pub surplus_energy: Option<f64>,
     pub deficit_energy: Option<f64>,
 
+    // Power Data (kW)
+    pub power_generated: Option<f64>,
+    pub power_consumed: Option<f64>,
+
     // Electrical Parameters
     pub voltage: Option<f64>,
     pub current: Option<f64>,

@@ -8,14 +8,16 @@
 
 use anyhow::Result;
 use api_gateway::services::{
-    blockchain_service::BlockchainService,
-    erc_service::ErcService,
-    market_clearing_service::{MarketClearingService, OrderMatch},
-    settlement_service::SettlementService,
+    blockchain::BlockchainService,
+    erc::ErcService,
+    market_clearing::types::OrderMatch,
+    settlement::SettlementService,
 };
 use api_gateway::database::schema::types::OrderSide;
+use api_gateway::services::market_clearing::MarketClearingService;
+use solana_sdk::signature::Keypair;
 use chrono::Utc;
-use rust_decimal::Decimal;
+use rust_decimal::prelude::*;
 use solana_sdk::signature::Signer;
 use sqlx::PgPool;
 use std::str::FromStr;
@@ -46,14 +48,35 @@ async fn setup_trading_cycle_test() -> Result<(
 
     // Initialize blockchain service (localnet)
     let blockchain_service = Arc::new(
-        BlockchainService::new("http://127.0.0.1:8899".to_string(), "localnet".to_string())
-            .expect("Failed to create blockchain service"),
+        BlockchainService::new(
+            "http://127.0.0.1:8899".to_string(), 
+            "localnet".to_string(),
+            api_gateway::config::SolanaProgramsConfig::default()
+        )
+        .expect("Failed to create blockchain service"),
     );
 
     // Initialize services
+    let encryption_secret = std::env::var("ENCRYPTION_SECRET")
+        .unwrap_or_else(|_| "test_encryption_secret_32chars!!".to_string());
+    
     let erc_service = ErcService::new(db_pool.clone(), (*blockchain_service).clone());
-    let settlement_service = SettlementService::new(db_pool.clone(), (*blockchain_service).clone());
-    let market_clearing_service = MarketClearingService::new(db_pool.clone());
+    let settlement_service = SettlementService::new(db_pool.clone(), (*blockchain_service).clone(), encryption_secret);
+    
+    // config for market clearing
+    let config = api_gateway::config::Config::from_env();
+    let audit_logger = api_gateway::services::AuditLogger::new(db_pool.clone());
+    let websocket_service = api_gateway::services::WebSocketService::new();
+    
+    let market_clearing_service = MarketClearingService::new(
+        db_pool.clone(),
+        (*blockchain_service).clone(),
+        config?.clone(),
+        api_gateway::services::WalletService::new("http://localhost:8899"),
+        audit_logger.clone(),
+        websocket_service.clone(),
+        erc_service.clone()
+    );
 
     Ok((db_pool, blockchain_service, erc_service, settlement_service, market_clearing_service))
 }
@@ -70,19 +93,15 @@ async fn create_test_users_and_wallets(
         let wallet = solana_sdk::pubkey::Pubkey::new_unique();
 
         // Create user in database
-        sqlx::query!(
-            r#"
-            INSERT INTO users (id, email, wallet_address, role, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (id) DO NOTHING
-            "#,
-            user_id,
-            format!("test{}@example.com", i),
-            wallet.to_string(),
-            "consumer",
-            Utc::now(),
-            Utc::now()
+        sqlx::query(
+            "INSERT INTO users (id, email, wallet_address, role, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING"
         )
+        .bind(user_id)
+        .bind(format!("test{}@example.com", i))
+        .bind(wallet.to_string())
+        .bind("consumer")
+        .bind(Utc::now())
+        .bind(Utc::now())
         .execute(db_pool)
         .await?;
 
@@ -105,8 +124,8 @@ fn create_mock_trade_matches(
             buy_order_id: Uuid::new_v4(),
             sell_order_id: Uuid::new_v4(),
             epoch_id: Uuid::new_v4(), // Mock epoch ID
-            matched_amount: bigdecimal::BigDecimal::from_str(&(100 + i as f64 * 50).to_string()).unwrap(),
-            match_price: bigdecimal::BigDecimal::from_str(&format!("0.{}", 10 + i)).unwrap(),
+            matched_amount: Decimal::from(100 + i as i32 * 50),
+            match_price: Decimal::from_str(&format!("0.{}", 10 + i)).unwrap(),
             match_time: Utc::now(),
             status: "pending".to_string(),
         };
@@ -118,7 +137,7 @@ fn create_mock_trade_matches(
 
 #[tokio::test]
 async fn test_complete_trading_cycle() -> Result<()> {
-    let (db_pool, blockchain_service, erc_service, settlement_service, market_clearing_service) =
+    let (db_pool, blockchain_service, erc_service, settlement_service, market_clearing_service): (PgPool, Arc<BlockchainService>, ErcService, SettlementService, api_gateway::services::market_clearing::MarketClearingService) =
         setup_trading_cycle_test().await?;
 
     println!("\n🔄 ============================================");
@@ -130,8 +149,8 @@ async fn test_complete_trading_cycle() -> Result<()> {
     println!("📋 Phase 1: Setup Users and Environment");
     println!("-------------------------------------------");
 
-    let authority = blockchain_service.get_authority_keypair().await?;
-    let governance_program_id = BlockchainService::governance_program_id()?;
+    let authority: Keypair = blockchain_service.get_authority_keypair().await?;
+    let governance_program_id = blockchain_service.governance_program_id()?;
 
     println!("✅ Authority loaded: {}", authority.pubkey());
     println!("✅ Governance program: {}", governance_program_id);
@@ -197,30 +216,29 @@ async fn test_complete_trading_cycle() -> Result<()> {
     // For this test, we will manually insert the settlements to proceed with testing SettlementService processing.
     let mut settlements = Vec::new();
     for (i, trade) in trades.iter().enumerate() {
-        let total_amount = trade.matched_amount.clone() * trade.match_price.clone();
-        let fee_amount = total_amount.clone() * bigdecimal::BigDecimal::from_str("0.01").unwrap();
-        let net_amount = total_amount.clone() - fee_amount.clone();
+        let total_amount = trade.matched_amount * trade.match_price;
+        let fee_amount = total_amount * Decimal::from_str("0.01").unwrap();
+        let net_amount = total_amount - fee_amount;
         let settlement_id = Uuid::new_v4();
         
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO settlements (
                 id, epoch_id, buyer_id, seller_id, energy_amount, 
                 price_per_kwh, total_amount, fee_amount, net_amount, status
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
-            RETURNING id, epoch_id, buyer_id, seller_id, energy_amount, price_per_kwh, total_amount, fee_amount, net_amount, status
-            "#,
-            settlement_id,
-            trade.epoch_id,
-            buyers[i].0,
-            sellers[i].0,
-            trade.matched_amount,
-            trade.match_price,
-            total_amount,
-            fee_amount,
-            net_amount
+            "#
         )
-        .fetch_one(&db_pool)
+        .bind(settlement_id)
+        .bind(trade.epoch_id)
+        .bind(buyers[i].0)
+        .bind(sellers[i].0)
+        .bind(trade.matched_amount)
+        .bind(trade.match_price)
+        .bind(total_amount)
+        .bind(fee_amount)
+        .bind(net_amount)
+        .execute(&db_pool)
         .await?;
         
         // Fetch it back as struct
@@ -238,12 +256,12 @@ async fn test_complete_trading_cycle() -> Result<()> {
     // Simulate token minting for settlements
     for settlement in &settlements {
         println!("✅ Processing tokens for settlement: {}", settlement.id);
-        println!("   Buyer: {} -> {} GRID", settlement.buyer_id, settlement.total_amount);
+        println!("   Buyer: {} -> {} GRID", settlement.buyer_id, settlement.total_value);
         println!("   Fee: {} GRID", settlement.fee_amount);
 
         // Update settlement status to simulate processing
         settlement_service
-            .update_settlement_status(settlement.id, api_gateway::services::settlement_service::SettlementStatus::Processing)
+            .update_settlement_status(settlement.id, api_gateway::services::settlement::SettlementStatus::Processing)
             .await?;
 
         // Simulate blockchain transaction
@@ -252,7 +270,7 @@ async fn test_complete_trading_cycle() -> Result<()> {
             .update_settlement_confirmed(
                 settlement.id,
                 &mock_tx,
-                api_gateway::services::settlement_service::SettlementStatus::Completed,
+                api_gateway::services::settlement::SettlementStatus::Completed,
             )
             .await?;
 
@@ -294,15 +312,15 @@ async fn test_complete_trading_cycle() -> Result<()> {
     println!("---------------------------------------");
 
     let total_energy: f64 = trades.iter()
-        .map(|t| t.matched_amount.to_string().parse::<f64>().unwrap_or(0.0))
+        .map(|t| t.matched_amount.to_f64().unwrap_or(0.0))
         .sum();
 
-    let total_volume: bigdecimal::BigDecimal = settlements.iter()
-        .map(|s| s.total_amount.clone())
+    let total_volume: Decimal = settlements.iter()
+        .map(|s| s.total_value)
         .sum();
 
-    let total_fees: bigdecimal::BigDecimal = settlements.iter()
-        .map(|s| s.fee_amount.clone())
+    let total_fees: Decimal = settlements.iter()
+        .map(|s| s.fee_amount)
         .sum();
 
     println!("📈 Trading Cycle Summary:");
@@ -322,7 +340,7 @@ async fn test_complete_trading_cycle() -> Result<()> {
 
 #[tokio::test]
 async fn test_trading_cycle_error_handling() -> Result<()> {
-    let (db_pool, blockchain_service, erc_service, settlement_service, _market_clearing_service) =
+    let (db_pool, blockchain_service, erc_service, settlement_service, _market_clearing_service): (PgPool, Arc<BlockchainService>, ErcService, SettlementService, api_gateway::services::market_clearing::MarketClearingService) =
         setup_trading_cycle_test().await?;
 
     println!("\n⚠️ ============================================");
@@ -338,27 +356,38 @@ async fn test_trading_cycle_error_handling() -> Result<()> {
     let seller_id = Uuid::new_v4();
     
     // Insert users first
-    sqlx::query!(
-        "INSERT INTO users (id, email, wallet_address, role) VALUES ($1, $2, $3, 'consumer'), ($4, $5, $6, 'prosumer')",
-        buyer_id, format!("b_{}@test.com", buyer_id), Uuid::new_v4().to_string(),
-        seller_id, format!("s_{}@test.com", seller_id), Uuid::new_v4().to_string()
-    ).execute(&db_pool).await?;
+    sqlx::query(
+        "INSERT INTO users (id, email, wallet_address, role) VALUES ($1, $2, $3, 'consumer'), ($4, $5, $6, 'prosumer')"
+    )
+    .bind(buyer_id)
+    .bind(format!("b_{}@test.com", buyer_id))
+    .bind(Uuid::new_v4().to_string())
+    .bind(seller_id)
+    .bind(format!("s_{}@test.com", seller_id))
+    .bind(Uuid::new_v4().to_string())
+    .execute(&db_pool)
+    .await?;
 
-    sqlx::query!(
+    sqlx::query(
         r#"
         INSERT INTO settlements (
             id, epoch_id, buyer_id, seller_id, energy_amount, 
             price_per_kwh, total_amount, fee_amount, net_amount, status
         ) VALUES ($1, $2, $3, $4, 100, 0.1, 10, 0.1, 9.9, 'pending')
-        "#,
-        settlement_id, Uuid::new_v4(), buyer_id, seller_id
-    ).execute(&db_pool).await?;
+        "#
+    )
+    .bind(settlement_id)
+    .bind(Uuid::new_v4())
+    .bind(buyer_id)
+    .bind(seller_id)
+    .execute(&db_pool)
+    .await?;
 
     let settlement = settlement_service.get_settlement(settlement_id).await?;
     
     // Test status transitions
     settlement_service
-        .update_settlement_status(settlement.id, api_gateway::services::settlement_service::SettlementStatus::Processing)
+        .update_settlement_status(settlement.id, api_gateway::services::settlement::SettlementStatus::Processing)
         .await?;
     println!("✅ Status updated to Processing");
 
@@ -366,7 +395,7 @@ async fn test_trading_cycle_error_handling() -> Result<()> {
         .update_settlement_confirmed(
             settlement.id,
             "ERROR-TEST-TX",
-            api_gateway::services::settlement_service::SettlementStatus::Completed,
+            api_gateway::services::settlement::SettlementStatus::Completed,
         )
         .await?;
     println!("✅ Status updated to Completed");
@@ -380,7 +409,7 @@ async fn test_trading_cycle_error_handling() -> Result<()> {
 
 #[tokio::test]
 async fn test_trading_cycle_integration() -> Result<()> {
-    let (_db_pool, blockchain_service, erc_service, _settlement_service, _market_clearing_service) =
+    let (_db_pool, blockchain_service, erc_service, _settlement_service, _market_clearing_service): (PgPool, Arc<BlockchainService>, ErcService, SettlementService, api_gateway::services::market_clearing::MarketClearingService) =
         setup_trading_cycle_test().await?;
 
     println!("\n🔗 ============================================");
@@ -417,8 +446,8 @@ async fn test_trading_cycle_integration() -> Result<()> {
 
     // Test program ID validation
     println!("\n📋 Step 3: Program ID Validation");
-    let energy_token_program_id = BlockchainService::energy_token_program_id()?;
-    let trading_program_id = BlockchainService::trading_program_id()?;
+    let energy_token_program_id = blockchain_service.energy_token_program_id()?;
+    let trading_program_id = blockchain_service.trading_program_id()?;
     
     println!("✅ Energy Token Program: {}", energy_token_program_id);
     println!("✅ Trading Program: {}", trading_program_id);

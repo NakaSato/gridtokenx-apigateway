@@ -260,6 +260,28 @@ GridTokenX Platform - Automated Test Email
         info!("Test email sent to {}", to_email);
         Ok(())
     }
+
+    /// Send a generic notification email
+    pub async fn send_notification_email(
+        &self,
+        to_email: &str,
+        username: &str,
+        title: &str,
+        message: &str,
+    ) -> Result<()> {
+        if !self.enabled {
+            info!(
+                "Email service disabled, skipping notification email to {}",
+                to_email
+            );
+            return Ok(());
+        }
+
+        let html_body = templates::EmailTemplates::notification_email(username, title, message);
+        let text_body = templates::EmailTemplates::notification_email_text(username, title, message);
+
+        self.send_email(to_email, title, &html_body, &text_body).await
+    }
 }
 
 #[cfg(test)]

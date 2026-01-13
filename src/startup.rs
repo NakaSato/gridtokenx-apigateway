@@ -161,6 +161,10 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
     );
     info!("✅ Event processor service initialized");
 
+    // Initialize reading processor service (Asynchronous queue)
+    let reading_processor = services::reading_processor::ReadingProcessorService::new();
+    info!("✅ Reading processor service initialized");
+
     // Initialize dashboard service
     let dashboard_service = services::DashboardService::new(
         db_pool.clone(),
@@ -169,6 +173,14 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
         websocket_service.clone(),
     );
     info!("✅ Dashboard service initialized");
+
+    // Initialize notification dispatcher
+    let notification_dispatcher = services::NotificationDispatcher::new(
+        db_pool.clone(),
+        services::NotificationDispatcherConfig::default(),
+        email_service.clone(),
+    );
+    info!("✅ Notification dispatcher initialized");
 
     // Initialize HTTP Client
     let http_client = reqwest::Client::builder()
@@ -200,8 +212,10 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
         event_processor: event_processor.clone(),
         price_monitor,
         recurring_scheduler,
+        reading_processor: reading_processor.clone(),
         webhook_service,
         erc_service,
+        notification_dispatcher,
         metrics_handle,
         http_client,
     };
@@ -306,6 +320,24 @@ pub async fn spawn_background_tasks(app_state: &AppState, _config: &Config) {
         event_processor.start().await;
     });
     info!("✅ Event Processor Service started");
+
+    // Start Reading Processor Service (Worker Scaling)
+    let reading_processor = app_state.reading_processor.clone();
+    let app_state_arc = std::sync::Arc::new(app_state.clone());
+    let worker_count = std::env::var("METER_PROCESSOR_WORKERS")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(4);
+    
+    info!("🚀 Spawning {} Reading Processor workers", worker_count);
+    for i in 0..worker_count {
+        let processor = reading_processor.clone();
+        let state = app_state_arc.clone();
+        tokio::spawn(async move {
+            processor.start(state, i).await;
+        });
+    }
+    info!("✅ Reading Processor Service (Worker) started");
 
     // Start Grid History Recorder
     app_state.dashboard_service.start_history_recorder().await;

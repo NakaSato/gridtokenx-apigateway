@@ -402,7 +402,16 @@ pub async fn submit_reading(
     }
 
     // Update aggregate grid status in dashboard service immediately after validation
-    let _ = state.dashboard_service.handle_meter_reading(kwh_f64, request.meter_serial.as_deref().unwrap_or("unknown"), zone_id).await;
+    let power_gen = request.power_generated.unwrap_or(0.0);
+    let power_cons = request.power_consumed.unwrap_or(0.0);
+    
+    let _ = state.dashboard_service.handle_meter_reading(
+        kwh_f64, 
+        request.meter_serial.as_deref().unwrap_or("unknown"), 
+        zone_id,
+        power_gen,
+        power_cons
+    ).await;
 
     // Check for alerts and broadcast via WebSocket
     let meter_id = request.meter_serial.clone().unwrap_or_else(|| "unknown".to_string());
@@ -806,6 +815,26 @@ pub async fn register_meter_by_id(
 
     if let Ok(count) = existing {
         if count > 0 {
+            // Check if we have location updates for existing meter
+            if request.latitude.is_some() || request.longitude.is_some() {
+                // Update meter location
+                info!("🔄 Updated location for existing meter {}", request.meter_id);
+
+                // ALSO update meter_registry
+                let mut registry_builder = sqlx::QueryBuilder::<sqlx::Postgres>::new("UPDATE meter_registry SET updated_at = NOW()");
+                if let Some(loc) = &request.location {
+                    registry_builder.push(", location_address = ");
+                    registry_builder.push_bind(loc);
+                }
+                if let Some(zid) = request.zone_id {
+                    registry_builder.push(", zone_id = ");
+                    registry_builder.push_bind(zid);
+                }
+                registry_builder.push(" WHERE meter_serial = ");
+                registry_builder.push_bind(&request.meter_id);
+                let _ = registry_builder.build().execute(&state.db).await;
+            }
+
             info!("✅ Meter {} already registered", request.meter_id);
             return Ok(Json(RegisterMeterByIdResponse {
                 success: true,
@@ -842,11 +871,14 @@ pub async fn register_meter_by_id(
         Ok(_) => {
             info!("✅ Meter {} registered successfully", request.meter_id);
             
-            // Also insert into meter_registry for FK constraints
+            // Also insert into meter_registry for FK constraints (with UPSERT)
             let _ = sqlx::query(
                 "INSERT INTO meter_registry (id, user_id, meter_serial, meter_type, location_address, meter_key_hash, verification_method, verification_status, zone_id)
                  VALUES ($1, $2, $3, $4, $5, 'simulator_hash', 'auto', 'verified', $6)
-                 ON CONFLICT (meter_serial) DO NOTHING"
+                 ON CONFLICT (meter_serial) DO UPDATE SET 
+                    zone_id = EXCLUDED.zone_id,
+                    location_address = EXCLUDED.location_address,
+                    updated_at = NOW()"
             )
             .bind(meter_id)
             .bind(system_user_id)

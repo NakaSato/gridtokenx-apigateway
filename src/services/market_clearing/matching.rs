@@ -14,10 +14,12 @@ use crate::error::ApiError;
 use crate::handlers::websocket::broadcaster::broadcast_p2p_order_update;
 use super::MarketClearingService;
 use super::types::{OrderMatch, Settlement};
+use crate::middleware::metrics;
 
 impl MarketClearingService {
     /// Run order matching algorithm for an epoch
     pub async fn run_order_matching(&self, epoch_id: Uuid) -> Result<Vec<OrderMatch>> {
+        let start_time = std::time::Instant::now();
         info!("Starting order matching for epoch: {}", epoch_id);
 
         // Get current order book
@@ -241,6 +243,10 @@ impl MarketClearingService {
                 }
             }
         }
+
+        let clearing_duration = start_time.elapsed();
+        metrics::track_market_clearing(clearing_duration.as_millis() as f64, true);
+        metrics::track_trade_match(total_volume.to_f64().unwrap_or(0.0), matches.len() as u64);
 
         info!(
             "🏆 MATCHING COMPLETE [Epoch {}]: matched_count={}, total_volume={} kWh, clearing_price={} GRIDX",

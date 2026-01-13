@@ -317,7 +317,7 @@ impl MeterVerificationService {
             r#"
             INSERT INTO meter_verification_attempts (
                 meter_serial, user_id, verification_method,
-                ip_address, user_agent, attempt_result, failure_reason
+                ip_address, user_agent, attempt_status, failure_reason
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#,
