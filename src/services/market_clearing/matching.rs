@@ -6,7 +6,7 @@ use rust_decimal::Decimal;
 use sqlx::Row;
 use uuid::Uuid;
 use std::str::FromStr;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use reqwest::Client;
 
 use crate::database::schema::types::OrderStatus;
@@ -34,166 +34,117 @@ impl MarketClearingService {
         let mut total_volume = Decimal::ZERO;
         let mut total_match_count = 0;
 
-        // Order matching algorithm: price-time priority
-        while let Some(buy_order) = buy_orders.first_mut() {
-            if let Some(sell_order) = sell_orders.first_mut() {
-                // Check if orders can be matched (bid >= ask)
-                if buy_order.price_per_kwh >= sell_order.price_per_kwh {
-                    // Calculate clearing price as midpoint of bid-ask spread
-                    // This ensures fair pricing for both parties
-                    let match_price = (buy_order.price_per_kwh + sell_order.price_per_kwh) 
-                        / Decimal::from(2);
+        // Order matching algorithm: Landed Cost priority
+        // Instead of simple price-time matching, we find the best seller for each buyer
+        // considering zonal wheeling charges and losses.
+        while !buy_orders.is_empty() && !sell_orders.is_empty() {
+            let buy_order = &buy_orders[0];
+            let mut best_sell_idx = None;
+            let mut max_surplus = Decimal::from(-1); // Initialize to indicate no match found
+            let mut match_price = Decimal::ZERO;
 
-                    // Calculate match amount (minimum of remaining amounts)
-                    let match_amount = buy_order
-                        .energy_amount
-                        .clone()
-                        .min(sell_order.energy_amount.clone());
-
-                    if match_amount > Decimal::ZERO {
-                        let match_amount_clone = match_amount.clone();
-                        let match_price_clone = match_price.clone();
-
-                        // Create order match
-                        let order_match = OrderMatch {
-                            id: Uuid::new_v4(),
-                            epoch_id,
-                            buy_order_id: buy_order.order_id,
-                            sell_order_id: sell_order.order_id,
-                            matched_amount: match_amount_clone.clone(),
-                            match_price: match_price_clone.clone(),
-                            match_time: Utc::now(),
-                            status: "pending".to_string(),
-                        };
-
-                        // Save match to database
-                        self.save_order_match(&order_match).await?;
-                        matches.push(order_match.clone());
-
-                        info!(
-                            "🤝 MATCHED: BuyOrder({}) vs SellOrder({}) | Amount: {} kWh | Price: {} GRIDX | MatchID: {}",
-                            order_match.buy_order_id,
-                            order_match.sell_order_id,
-                            order_match.matched_amount,
-                            order_match.match_price,
-                            order_match.id
-                        );
-
-                        // Update order amounts
-                        buy_order.energy_amount -= match_amount_clone.clone();
-                        sell_order.energy_amount -= match_amount_clone.clone();
-
-                        // Update totals
-                        total_volume += match_amount_clone.clone();
-                        total_match_count += 1;
-
-                        // Remove fully filled orders
-                        info!(
-                            "Buy order {} remaining amount: {}",
-                            buy_order.order_id, buy_order.energy_amount
-                        );
-                        if buy_order.energy_amount <= Decimal::ZERO {
-                            info!(
-                                "Buy order {} is fully filled, updating status",
-                                buy_order.order_id
-                            );
-                            self.update_order_status(buy_order.order_id, OrderStatus::Filled)
-                                .await?;
-                            
-                            // Broadcast fully filled status
-                            let _ = broadcast_p2p_order_update(
-                                buy_order.order_id,
-                                buy_order.user_id,
-                                "buy".to_string(),
-                                "filled".to_string(),
-                                buy_order.original_amount.to_string(),
-                                buy_order.original_amount.to_string(),
-                                "0".to_string(),
-                                buy_order.price_per_kwh.to_string(),
-                            ).await;
-                            
-                            buy_orders.remove(0);
-                        } else {
-                            info!(
-                                "Buy order {} is partially filled, updating amount",
-                                buy_order.order_id
-                            );
-                            self.update_order_filled_amount(
-                                buy_order.order_id,
-                                match_amount_clone.clone(),
-                            )
-                            .await?;
-                            
-                            // Broadcast partial fill status
-                            let filled = buy_order.original_amount - buy_order.energy_amount;
-                            let _ = broadcast_p2p_order_update(
-                                buy_order.order_id,
-                                buy_order.user_id,
-                                "buy".to_string(),
-                                "partially_filled".to_string(),
-                                buy_order.original_amount.to_string(),
-                                filled.to_string(),
-                                buy_order.energy_amount.to_string(),
-                                buy_order.price_per_kwh.to_string(),
-                            ).await;
-                        }
-
-                        info!(
-                            "Sell order {} remaining amount: {}",
-                            sell_order.order_id, sell_order.energy_amount
-                        );
-                        if sell_order.energy_amount <= Decimal::ZERO {
-                            info!(
-                                "Sell order {} is fully filled, updating status",
-                                sell_order.order_id
-                            );
-                            self.update_order_status(sell_order.order_id, OrderStatus::Filled)
-                                .await?;
-                            
-                            // Broadcast fully filled status
-                            let _ = broadcast_p2p_order_update(
-                                sell_order.order_id,
-                                sell_order.user_id,
-                                "sell".to_string(),
-                                "filled".to_string(),
-                                sell_order.original_amount.to_string(),
-                                sell_order.original_amount.to_string(),
-                                "0".to_string(),
-                                sell_order.price_per_kwh.to_string(),
-                            ).await;
-                            
-                            sell_orders.remove(0);
-                        } else {
-                            info!(
-                                "Sell order {} is partially filled, updating amount",
-                                sell_order.order_id
-                            );
-                            self.update_order_filled_amount(
-                                sell_order.order_id,
-                                match_amount_clone.clone(),
-                            )
-                            .await?;
-                            
-                            // Broadcast partial fill status
-                            let filled = sell_order.original_amount - sell_order.energy_amount;
-                            let _ = broadcast_p2p_order_update(
-                                sell_order.order_id,
-                                sell_order.user_id,
-                                "sell".to_string(),
-                                "partially_filled".to_string(),
-                                sell_order.original_amount.to_string(),
-                                filled.to_string(),
-                                sell_order.energy_amount.to_string(),
-                                sell_order.price_per_kwh.to_string(),
-                            ).await;
-                        }
+            // Find the best seller for the current top buyer
+            for (sell_idx, sell_order) in sell_orders.iter().enumerate() {
+                // Estimate Zonal Costs for this pair
+                let (wheeling, loss_factor) = self.estimate_zonal_costs(buy_order.zone_id, sell_order.zone_id).await.unwrap_or((Decimal::ZERO, Decimal::ZERO));
+                
+                // Landed Cost = Seller Ask + Wheeling Charge (per kWh) + (Loss Factor * Seller Ask)
+                // Note: wheeling from estimate is for 1kWh
+                let landed_cost = sell_order.price_per_kwh + wheeling + (loss_factor * sell_order.price_per_kwh);
+                
+                if buy_order.price_per_kwh >= landed_cost {
+                    let surplus = buy_order.price_per_kwh - landed_cost;
+                    if surplus > max_surplus {
+                        max_surplus = surplus;
+                        best_sell_idx = Some(sell_idx);
+                        // Clearing price is midpoint of Bid and Landed Cost (for fairness)
+                        match_price = (buy_order.price_per_kwh + landed_cost) / Decimal::from(2);
                     }
-                } else {
-                    // No more matches possible (best buy price < best sell price)
-                    break;
+                }
+            }
+
+            if let Some(sell_idx) = best_sell_idx {
+                let sell_order = &mut sell_orders[sell_idx];
+                let buy_order = &mut buy_orders[0];
+
+                // Calculate match amount (minimum of remaining amounts)
+                let match_amount = buy_order.energy_amount.min(sell_order.energy_amount);
+
+                if match_amount > Decimal::ZERO {
+                    let match_amount_clone = match_amount;
+                    let match_price_clone = match_price;
+
+                    // Create order match
+                    let order_match = OrderMatch {
+                        id: Uuid::new_v4(),
+                        epoch_id,
+                        buy_order_id: buy_order.order_id,
+                        sell_order_id: sell_order.order_id,
+                        matched_amount: match_amount_clone,
+                        match_price: match_price_clone,
+                        match_time: Utc::now(),
+                        status: "pending".to_string(),
+                    };
+
+                    // Save match to database
+                    self.save_order_match(&order_match).await?;
+                    matches.push(order_match.clone());
+
+                    info!(
+                        "🤝 LANDED COST MATCH: BuyOrder({}) vs SellOrder({}) | Amount: {} kWh | Price: {} GRIDX | Surplus: {} | MatchID: {}",
+                        order_match.buy_order_id,
+                        order_match.sell_order_id,
+                        order_match.matched_amount,
+                        order_match.match_price,
+                        max_surplus,
+                        order_match.id
+                    );
+
+                    // Update order amounts
+                    buy_order.energy_amount -= match_amount_clone;
+                    sell_order.energy_amount -= match_amount_clone;
+
+                    // Update totals
+                    total_volume += match_amount_clone;
+                    total_match_count += 1;
+
+                    // Remove fully filled/partially filled status logic (inline)
+                    let b_id = buy_order.order_id;
+                    let b_user = buy_order.user_id;
+                    let b_orig = buy_order.original_amount;
+                    let b_rem = buy_order.energy_amount;
+                    let b_price = buy_order.price_per_kwh;
+
+                    if b_rem <= Decimal::ZERO {
+                        self.update_order_status(b_id, OrderStatus::Filled).await?;
+                        let _ = broadcast_p2p_order_update(b_id, b_user, "buy".to_string(), "filled".to_string(), b_orig.to_string(), b_orig.to_string(), "0".to_string(), b_price.to_string()).await;
+                        buy_orders.remove(0);
+                    } else {
+                        self.update_order_filled_amount(b_id, match_amount_clone).await?;
+                        let filled = b_orig - b_rem;
+                        let _ = broadcast_p2p_order_update(b_id, b_user, "buy".to_string(), "partially_filled".to_string(), b_orig.to_string(), filled.to_string(), b_rem.to_string(), b_price.to_string()).await;
+                    }
+
+                    // For the seller, we need to be careful with indices since we used an index from loop
+                    let s_id = sell_order.order_id;
+                    let s_user = sell_order.user_id;
+                    let s_orig = sell_order.original_amount;
+                    let s_rem = sell_order.energy_amount;
+                    let s_price = sell_order.price_per_kwh;
+
+                    if s_rem <= Decimal::ZERO {
+                        self.update_order_status(s_id, OrderStatus::Filled).await?;
+                        let _ = broadcast_p2p_order_update(s_id, s_user, "sell".to_string(), "filled".to_string(), s_orig.to_string(), s_orig.to_string(), "0".to_string(), s_price.to_string()).await;
+                        sell_orders.remove(sell_idx);
+                    } else {
+                        self.update_order_filled_amount(s_id, match_amount_clone).await?;
+                        let filled = s_orig - s_rem;
+                        let _ = broadcast_p2p_order_update(s_id, s_user, "sell".to_string(), "partially_filled".to_string(), s_orig.to_string(), filled.to_string(), s_rem.to_string(), s_price.to_string()).await;
+                    }
                 }
             } else {
-                break;
+                // No matches possible for the top buyer anymore
+                buy_orders.remove(0);
             }
         }
 
@@ -361,39 +312,37 @@ impl MarketClearingService {
 
 
         // =================================================================
-        // NEW: Execute On-Chain Settlement (Escrow Release)
+        // NEW: Execute Atomic On-Chain Settlement
         // =================================================================
-        // 1. Release Net Payment to Seller (Currency)
-        // Note: Fees and Wheeling Charges remain in Authority Escrow (as revenue)
-        // 4. Trigger Blockchain Settlement (Atomic Swap)
-        // In a real implementation, this would build a single atomic transaction
-        // For this demo, we'll do two transfers (USDC -> Seller, Energy -> Buyer)
-        // NOTE: This is not truly atomic but sufficient for the MVP demo.
+        let buy_order_pda: Option<String> = buy_order.get("order_pda");
+        let sell_order_pda: Option<String> = sell_order.get("order_pda");
 
-        // Transfer USDC from Escrow -> Seller
-        match self
-            .execute_escrow_release(
-                sell_order.get("user_id"), 
-                net_amount, 
-                "currency"
-            )
-            .await
-        {
-            Ok(_sig) => info!("Settlement Payment Release triggered: {} -> Seller {}", net_amount, sell_order.get::<Uuid, _>("user_id")),
-            Err(e) => error!("Failed to release payment escrow: {}", e),
-        }
-
-        // Transfer Energy from Escrow -> Buyer
-        match self
-            .execute_escrow_release(
-                buy_order.get("user_id"), 
-                effective_energy, 
-                "energy"
-            )
-            .await
-        {
-            Ok(_sig) => info!("Settlement Energy Release triggered: {} -> Buyer {}", effective_energy, buy_order.get::<Uuid, _>("user_id")),
-            Err(e) => error!("Failed to release energy escrow for {}: {}", buy_order.get::<Uuid, _>("user_id"), e),
+        if let (Some(b_pda), Some(s_pda)) = (buy_order_pda, sell_order_pda) {
+            info!("🚀 Triggering TRUE ATOMIC SWAP for Match {}", order_match.id);
+            match self.execute_atomic_swap(
+                buy_order.get("user_id"),
+                sell_order.get("user_id"),
+                &b_pda,
+                &s_pda,
+                order_match.matched_amount.clone(),
+                order_match.match_price.clone(),
+                wheeling_charge.clone(),
+                fee_amount.clone(),
+            ).await {
+                Ok(sig) => info!("✅ Atomic Settlement successful: {}", sig),
+                Err(e) => error!("❌ Atomic Settlement failed: {}", e),
+            }
+        } else {
+            warn!("⚠️ Missing order PDAs for Match {}, falling back to legacy settlement", order_match.id);
+            // Fallback (legacy)
+            match self.execute_escrow_release(sell_order.get("user_id"), net_amount, "currency").await {
+                Ok(_) => info!("Settlement Payment Release triggered"),
+                Err(e) => error!("Failed payment release: {}", e),
+            }
+            match self.execute_escrow_release(buy_order.get("user_id"), effective_energy, "energy").await {
+                Ok(_) => info!("Settlement Energy Release triggered"),
+                Err(e) => error!("Failed energy release: {}", e),
+            }
         }
 
 
@@ -509,5 +458,48 @@ impl MarketClearingService {
         }
 
         Ok(settlement)
+    }
+
+    /// Estimate zonal costs for matching selection
+    async fn estimate_zonal_costs(&self, buyer_zone: Option<i32>, seller_zone: Option<i32>) -> Result<(Decimal, Decimal)> {
+        if buyer_zone.is_none() || seller_zone.is_none() {
+             return Ok((Decimal::ZERO, Decimal::ZERO));
+        }
+        let b_zone = buyer_zone.unwrap();
+        let s_zone = seller_zone.unwrap();
+        
+        if b_zone == s_zone {
+             // Intra-zone still has small losses and fees in this simulator (0.1 THB)
+             // But we can check if it's Zero if desired. 
+             // Simulator returns consistent values for b==s.
+        }
+
+        let simulator_url = std::env::var("SIMULATOR_URL").unwrap_or_else(|_| "http://localhost:8000".to_string());
+        let client = Client::new();
+        
+        let calc_request = serde_json::json!({
+            "buyer_zone_id": b_zone,
+            "seller_zone_id": s_zone,
+            "energy_amount": 1.0,
+            "agreed_price": 1.0 
+        });
+
+        match client.post(&format!("{}/api/v1/p2p/calculate-cost", simulator_url))
+            .json(&calc_request)
+            .send()
+            .await 
+        {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(cost_data) = resp.json::<serde_json::Value>().await {
+                    let wheeling = Decimal::from_f64(cost_data["wheeling_charge"].as_f64().unwrap_or(0.0)).unwrap_or(Decimal::ZERO);
+                    let loss_factor = Decimal::from_f64(cost_data["loss_factor"].as_f64().unwrap_or(0.0)).unwrap_or(Decimal::ZERO);
+                    return Ok((wheeling, loss_factor));
+                }
+            }
+            _ => {
+                error!("Failed to fetch costs from simulator for zones {}->{}", s_zone, b_zone);
+            }
+        }
+        Ok((Decimal::ZERO, Decimal::ZERO))
     }
 }

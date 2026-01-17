@@ -368,6 +368,24 @@ pub async fn spawn_background_tasks(app_state: &AppState, _config: &Config) {
         }
     });
     info!("✅ Recurring Scheduler started");
+
+    // Start Kafka Consumer (if enabled)
+    let kafka_consumer = services::KafkaConsumerService::from_env();
+    if kafka_consumer.is_enabled() {
+        let app_state_kafka = std::sync::Arc::new(app_state.clone());
+        tokio::spawn(async move {
+            loop {
+                if let Err(e) = kafka_consumer.start(app_state_kafka.clone()).await {
+                    error!("❌ Kafka consumer error: {}", e);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    info!("🔄 Restarting Kafka consumer...");
+                }
+            }
+        });
+        info!("✅ Kafka Consumer started");
+    } else {
+        info!("⏸️ Kafka Consumer disabled (set KAFKA_ENABLED=true to enable)");
+    }
 }
 
 /// Wait for shutdown signal.

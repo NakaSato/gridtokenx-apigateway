@@ -657,6 +657,64 @@ impl InstructionBuilder {
             data,
         })
     }
+
+    /// Build instruction for executing a truly atomic settlement
+    pub fn build_execute_atomic_settlement_instruction(
+        &self,
+        market: Pubkey,
+        buy_order: Pubkey,
+        sell_order: Pubkey,
+        buyer_currency_escrow: Pubkey,
+        seller_energy_escrow: Pubkey,
+        seller_currency_account: Pubkey,
+        buyer_energy_account: Pubkey,
+        fee_collector: Pubkey,
+        wheeling_collector: Pubkey,
+        energy_mint: Pubkey,
+        currency_mint: Pubkey,
+        escrow_authority: Pubkey,
+        market_authority: Pubkey,
+        amount: u64,
+        price: u64,
+        wheeling_charge: u64,
+        token_program_id: Pubkey,
+        secondary_token_program_id: Pubkey,
+    ) -> Result<Instruction> {
+        let program_id = Pubkey::from_str(TRADING_PROGRAM_ID)?;
+        let system_program = Pubkey::from_str(SYSTEM_PROGRAM_ID)?;
+
+        let accounts = vec![
+            AccountMeta::new(market, false),
+            AccountMeta::new(buy_order, false),
+            AccountMeta::new(sell_order, false),
+            AccountMeta::new(buyer_currency_escrow, false),
+            AccountMeta::new(seller_energy_escrow, false),
+            AccountMeta::new(seller_currency_account, false),
+            AccountMeta::new(buyer_energy_account, false),
+            AccountMeta::new(fee_collector, false),
+            AccountMeta::new(wheeling_collector, false),
+            AccountMeta::new_readonly(energy_mint, false),
+            AccountMeta::new_readonly(currency_mint, false),
+            AccountMeta::new_readonly(escrow_authority, true),
+            AccountMeta::new_readonly(market_authority, true),
+            AccountMeta::new_readonly(token_program_id, false),
+            AccountMeta::new_readonly(system_program, false),
+            AccountMeta::new_readonly(secondary_token_program_id, false),
+        ];
+
+        // discriminator: [86, 216, 13, 114, 76, 114, 212, 11]
+        let mut data = Vec::new();
+        data.extend_from_slice(&[86, 216, 13, 114, 76, 114, 212, 11]);
+        data.extend_from_slice(&amount.to_le_bytes());
+        data.extend_from_slice(&price.to_le_bytes());
+        data.extend_from_slice(&wheeling_charge.to_le_bytes());
+
+        Ok(Instruction {
+            program_id,
+            accounts,
+            data,
+        })
+    }
 }
 
 

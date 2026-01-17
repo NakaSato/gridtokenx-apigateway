@@ -4,8 +4,10 @@ use rust_decimal::Decimal;
 use sqlx::Row;
 use solana_sdk::pubkey::Pubkey;
 use uuid::Uuid;
+use std::str::FromStr;
 use tracing::{error, info};
 
+use solana_sdk::signature::Signer;
 use crate::database::schema::types::OrderSide;
 use crate::services::WalletService;
 use super::MarketClearingService;
@@ -444,5 +446,97 @@ impl MarketClearingService {
         ).await?;
 
         Ok(signature.to_string())
+    }
+
+    /// Execute on-chain truly atomic swap
+    pub(super) async fn execute_atomic_swap(
+        &self,
+        buyer_id: Uuid,
+        seller_id: Uuid,
+        buy_order_pda_str: &str,
+        sell_order_pda_str: &str,
+        amount: Decimal,
+        price: Decimal,
+        wheeling_charge: Decimal,
+        _fee_amount: Decimal,
+    ) -> Result<String> {
+        if !self.config.tokenization.enable_real_blockchain {
+             return Ok(format!("mock_atomic_swap_{}_{}", buyer_id, seller_id));
+        }
+
+        use std::str::FromStr;
+        
+        let buy_order_pda = Pubkey::from_str(buy_order_pda_str)?;
+        let sell_order_pda = Pubkey::from_str(sell_order_pda_str)?;
+
+        // 1. Fetch Wallets
+        let buyer_wallet = self.fetch_user_wallet(buyer_id).await?;
+        let seller_wallet = self.fetch_user_wallet(seller_id).await?;
+
+        // 2. Fetch Mints
+        let energy_mint_str = std::env::var("ENERGY_TOKEN_MINT").unwrap_or_else(|_| "Geq98m3Vw63AqrMEVoZsiW5DbNkScteZAdWDmm95ykYF".to_string());
+        let currency_mint_str = std::env::var("CURRENCY_TOKEN_MINT").unwrap_or_else(|_| "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU".to_string());
+        let energy_mint = Pubkey::from_str(&energy_mint_str)?;
+        let currency_mint = Pubkey::from_str(&currency_mint_str)?;
+
+        // 3. API Authority (Escrow & Market Authority)
+        let api_authority = self.blockchain_service.get_authority_keypair().await?;
+        
+        // 4. ATAs
+        // Escrows (Owned by API Authority)
+        let buyer_currency_escrow = self.blockchain_service.calculate_ata_address(&api_authority.pubkey(), &currency_mint)?;
+        let seller_energy_escrow = self.blockchain_service.calculate_ata_address(&api_authority.pubkey(), &energy_mint)?;
+        
+        // Destinations (Owned by Users)
+        let seller_currency_account = self.blockchain_service.calculate_ata_address(&seller_wallet, &currency_mint)?;
+        let buyer_energy_account = self.blockchain_service.calculate_ata_address(&buyer_wallet, &energy_mint)?;
+
+        // Collectors (Owned by API Authority or dedicated Revenue wallet)
+        // For simplicity, using API Authority ATA as collector
+        let fee_collector = self.blockchain_service.calculate_ata_address(&api_authority.pubkey(), &currency_mint)?;
+        let wheeling_collector = self.blockchain_service.calculate_ata_address(&api_authority.pubkey(), &currency_mint)?;
+
+        // 5. Market PDA
+        let trading_program_id = self.blockchain_service.trading_program_id()?;
+        let (market_pda, _) = Pubkey::find_program_address(&[b"market"], &trading_program_id);
+
+        // 6. Scale Amounts
+        let currency_decimals = 6; // USDC
+        let energy_decimals = 9;   // GRX
+        
+        let amount_raw = (amount * Decimal::from(10_u64.pow(energy_decimals))).to_u64().unwrap_or(0);
+        let price_raw = (price * Decimal::from(10_u64.pow(9))).to_u64().unwrap_or(0); // Price is matched scale
+        let wheeling_raw = (wheeling_charge * Decimal::from(10_u64.pow(currency_decimals))).to_u64().unwrap_or(0);
+
+        // 7. Execute
+        let signature = self.blockchain_service.execute_atomic_settlement(
+            &api_authority,
+            &market_pda,
+            &buy_order_pda,
+            &sell_order_pda,
+            &buyer_currency_escrow,
+            &seller_energy_escrow,
+            &seller_currency_account,
+            &buyer_energy_account,
+            &fee_collector,
+            &wheeling_collector,
+            &energy_mint,
+            &currency_mint,
+            amount_raw,
+            price_raw,
+            wheeling_raw,
+        ).await?;
+
+        Ok(signature.to_string())
+    }
+
+    /// Helper to fetch user wallet pubkey
+    async fn fetch_user_wallet(&self, user_id: Uuid) -> Result<Pubkey> {
+        let row = sqlx::query("SELECT wallet_address FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&self.db)
+            .await?;
+        let addr: String = row.get("wallet_address");
+        Ok(Pubkey::from_str(&addr)?)
     }
 }

@@ -161,7 +161,7 @@ pub struct MatchOrdersResponse {
 }
 
 /// Market statistics
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct MarketStats {
     pub average_price: f64,
     pub total_volume: f64,
@@ -169,14 +169,14 @@ pub struct MarketStats {
     pub pending_orders: i64,
     pub completed_matches: i64,
 }
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct OrderBookEntry {
     pub energy_amount: f64,
     pub price_per_kwh: f64,
     pub username: Option<String>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct OrderBookResponse {
     pub buy_orders: Vec<OrderBookEntry>,
     pub sell_orders: Vec<OrderBookEntry>,

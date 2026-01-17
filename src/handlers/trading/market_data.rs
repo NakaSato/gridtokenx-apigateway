@@ -95,6 +95,18 @@ pub async fn get_trading_stats(
 pub async fn get_orderbook(State(state): State<AppState>) -> Result<Json<super::types::OrderBookResponse>> {
     use rust_decimal::Decimal;
     use sqlx::Row;
+    use crate::services::cache::CacheKeys;
+
+    const ORDERBOOK_CACHE_TTL: u64 = 10; // 10 seconds TTL for real-time data
+    let cache_key = CacheKeys::order_book("default");
+
+    // Try cache first
+    if let Ok(Some(cached)) = state.cache_service.get_json::<super::types::OrderBookResponse>(&cache_key).await {
+        tracing::debug!("Order book cache HIT");
+        return Ok(Json(cached));
+    }
+
+    tracing::debug!("Order book cache MISS - fetching from DB");
 
     // Get buy orders
     let buy_orders = sqlx::query(
@@ -152,11 +164,18 @@ pub async fn get_orderbook(State(state): State<AppState>) -> Result<Json<super::
         })
         .collect::<Vec<_>>();
 
-    Ok(Json(super::types::OrderBookResponse {
+    let response = super::types::OrderBookResponse {
         buy_orders: buys,
         sell_orders: sells,
         timestamp: Utc::now(),
-    }))
+    };
+
+    // Store in cache
+    if let Err(e) = state.cache_service.set_with_ttl(&cache_key, &response, ORDERBOOK_CACHE_TTL).await {
+        tracing::warn!("Failed to cache order book: {}", e);
+    }
+
+    Ok(Json(response))
 }
 
 /// Get market statistics
@@ -174,6 +193,18 @@ pub async fn get_market_stats(
 ) -> Result<Json<super::types::MarketStats>> {
     use rust_decimal::Decimal;
     use sqlx::Row;
+    use crate::services::cache::CacheKeys;
+
+    const MARKET_STATS_CACHE_TTL: u64 = 30; // 30 seconds TTL for aggregated stats
+    let cache_key = CacheKeys::market_stats("24h");
+
+    // Try cache first
+    if let Ok(Some(cached)) = state.cache_service.get_json::<super::types::MarketStats>(&cache_key).await {
+        tracing::debug!("Market stats cache HIT");
+        return Ok(Json(cached));
+    }
+
+    tracing::debug!("Market stats cache MISS - fetching from DB");
 
     // Get average price and volume from recent matches
     let stats_row = sqlx::query(
@@ -210,11 +241,18 @@ pub async fn get_market_stats(
             .map_err(|e| ApiError::Database(e))?;
     let pending_orders: i64 = pending_orders_row.try_get("count").unwrap_or(0);
 
-    Ok(Json(super::types::MarketStats {
+    let response = super::types::MarketStats {
         average_price: avg_price.to_string().parse().unwrap_or(0.0),
         total_volume: total_volume.to_string().parse().unwrap_or(0.0),
         active_orders,
         pending_orders,
         completed_matches,
-    }))
+    };
+
+    // Store in cache
+    if let Err(e) = state.cache_service.set_with_ttl(&cache_key, &response, MARKET_STATS_CACHE_TTL).await {
+        tracing::warn!("Failed to cache market stats: {}", e);
+    }
+
+    Ok(Json(response))
 }

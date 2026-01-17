@@ -331,9 +331,10 @@ pub struct CreateReadingRequest {
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
     
-    // Battery & Environmental
+    // Environment
     pub battery_level: Option<f64>,
     pub weather_condition: Option<String>,
+    pub zone_id: Option<i32>,
     
     // Trading & Certification
     pub rec_eligible: Option<bool>,

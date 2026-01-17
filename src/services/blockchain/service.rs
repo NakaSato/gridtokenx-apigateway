@@ -467,6 +467,57 @@ impl BlockchainService {
         .await
     }
 
+    /// Execute on-chain truly atomic settlement
+    pub async fn execute_atomic_settlement(
+        &self,
+        authority: &Keypair,
+        market: &Pubkey,
+        buy_order: &Pubkey,
+        sell_order: &Pubkey,
+        buyer_currency_escrow: &Pubkey,
+        seller_energy_escrow: &Pubkey,
+        seller_currency_account: &Pubkey,
+        buyer_energy_account: &Pubkey,
+        fee_collector: &Pubkey,
+        wheeling_collector: &Pubkey,
+        energy_mint: &Pubkey,
+        currency_mint: &Pubkey,
+        amount: u64,
+        price: u64,
+        wheeling_charge: u64,
+    ) -> Result<Signature> {
+        info!("Executing Atomic Settlement on-chain: {} kWh @ {} unit", amount, price);
+        
+        let instruction = self.instruction_builder.build_execute_atomic_settlement_instruction(
+            *market,
+            *buy_order,
+            *sell_order,
+            *buyer_currency_escrow,
+            *seller_energy_escrow,
+            *seller_currency_account,
+            *buyer_energy_account,
+            *fee_collector,
+            *wheeling_collector,
+            *energy_mint,
+            *currency_mint,
+            authority.pubkey(), // escrow_authority (signer)
+            authority.pubkey(), // market_authority (signer)
+            amount,
+            price,
+            wheeling_charge,
+            Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")?, // SPL Token (Currency)
+            Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")?, // Token 2022 (Energy)
+        )?;
+
+        let signers = vec![authority];
+        self.build_and_send_transaction_with_priority(
+            vec![instruction],
+            &signers,
+            "token_transaction",
+        )
+        .await
+    }
+
     /// Execute on-chain create_order
     pub async fn execute_create_order(
         &self,

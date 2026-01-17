@@ -27,6 +27,7 @@ pub mod price_monitor;
 pub mod reading_processor;
 pub mod recurring_scheduler;
 pub mod notification_dispatcher;
+pub mod kafka;
 
 pub mod meter_analyzer;
 pub mod meter;
@@ -54,4 +55,4 @@ pub use notification::NotificationService;
 pub use price_monitor::{PriceMonitor, PriceMonitorConfig};
 pub use recurring_scheduler::{RecurringScheduler, RecurringSchedulerConfig};
 pub use notification_dispatcher::{NotificationDispatcher, NotificationDispatcherConfig};
-
+pub use kafka::KafkaConsumerService;

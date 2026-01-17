@@ -150,6 +150,9 @@ base64 = { workspace = true }
 bincode = { workspace = true }
 rustc-hash = "1.1"
 
+# Kafka Consumer
+rdkafka = { version = "0.36", features = ["cmake-build", "tokio"] }
+
 [dev-dependencies]
 tokio-test = "0.4"
 testcontainers = "0.25"
