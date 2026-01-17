@@ -3,8 +3,9 @@ pub mod user;
 pub mod types;
 pub mod admin;
 pub mod zones;
+pub mod zone_rates;
 
-use axum::{routing::get, Router, middleware::from_fn};
+use axum::{routing::{get, post, put, delete}, Router, middleware::from_fn};
 use crate::AppState;
 use crate::auth::middleware::require_admin_role;
 
@@ -19,4 +20,11 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/activity", get(admin::get_admin_activity).layer(from_fn(require_admin_role)))
         .route("/admin/health", get(admin::get_system_health).layer(from_fn(require_admin_role)))
         .route("/admin/zones/economic", get(admin::get_zone_economic_insights).layer(from_fn(require_admin_role)))
+        // Zone rates CRUD
+        .route("/zone-rates", get(zone_rates::list_zone_rates))
+        .route("/zone-rates", post(zone_rates::create_zone_rate).layer(from_fn(require_admin_role)))
+        .route("/zone-rates/:from_zone/:to_zone", get(zone_rates::get_zone_rate_by_zones))
+        .route("/zone-rates/:id", put(zone_rates::update_zone_rate).layer(from_fn(require_admin_role)))
+        .route("/zone-rates/:id", delete(zone_rates::delete_zone_rate).layer(from_fn(require_admin_role)))
 }
+
