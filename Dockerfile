@@ -1,11 +1,17 @@
 # Build Stage
-FROM rust:1.81-slim-bookworm as builder
+FROM rust:1.84-slim-bookworm as builder
 
 WORKDIR /usr/src/app
 COPY . .
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y pkg-config libssl-dev libpq-dev
+RUN apt-get update && apt-get install -y pkg-config libssl-dev libpq-dev cmake build-essential libsasl2-dev curl
+
+# Switch to nightly to support edition2024
+RUN rustup toolchain install nightly && rustup default nightly
+
+# Force SQLx to use offline mode (requires .sqlx directory to be present)
+ENV SQLX_OFFLINE=true
 
 # Build the application
 # We use --bin api-gateway to specifically build the gateway binary
