@@ -2,6 +2,7 @@ use axum::{extract::State, response::Json};
 use chrono::Utc;
 use solana_sdk::pubkey::Pubkey;
 use tracing::{error, info};
+use rust_decimal::prelude::ToPrimitive;
 
 use crate::auth::middleware::AuthenticatedUser;
 use crate::database::schema::types::{OrderSide, OrderStatus, OrderType};
@@ -237,7 +238,7 @@ pub async fn match_blockchain_orders(
     info!("Order matching initiated by admin {}", user.0.sub);
 
     // Trigger matching cycle
-    let matched_count = _state
+    let (matched_count, volume_decimal) = _state
         .market_clearing_engine
         .trigger_matching()
         .await
@@ -246,11 +247,13 @@ pub async fn match_blockchain_orders(
             ApiError::Internal(format!("Matching failed: {}", e))
         })?;
 
+    let total_volume = volume_decimal.to_f64().unwrap_or(0.0);
+
     Ok(Json(MatchOrdersResponse {
         success: true,
         message: "Order matching initiated successfully".to_string(),
         matched_orders: matched_count as u32,
-        total_volume: 0, // TODO: Calculate volume
+        total_volume,
     }))
 }
 

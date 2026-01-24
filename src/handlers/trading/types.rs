@@ -157,7 +157,7 @@ pub struct MatchOrdersResponse {
     pub success: bool,
     pub message: String,
     pub matched_orders: u32,
-    pub total_volume: u64,
+    pub total_volume: f64,
 }
 
 /// Market statistics

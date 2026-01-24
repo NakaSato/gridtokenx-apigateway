@@ -38,6 +38,7 @@ pub async fn create_order(
         use hmac::{Hmac, Mac};
         use sha2::Sha256;
         use hex;
+        // Use crate::services::wallet::WalletService;
 
         // Verify timestamp is within 5 minutes window
         let now_ts = Utc::now().timestamp_millis();
@@ -57,10 +58,46 @@ pub async fn create_order(
             timestamp
         );
 
-        // TODO: Get secret key from user wallet/config. For now using placeholder.
-        let secret_key = "test_secret_key";
+        // Retrieve secret key from wallet session
+        // Note: In this architecture, the session_token is the password used to encrypt the key cache
+        let secret_key: Vec<u8> = if let Some(token) = &payload.session_token {
+            // Find active session
+            let session = sqlx::query!(
+                r#"
+                SELECT cached_key_encrypted, key_salt, key_iv 
+                FROM wallet_sessions 
+                WHERE user_id = $1 AND session_token = $2 AND is_active = true AND expires_at > NOW()
+                "#,
+                user.0.sub,
+                token
+            )
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| ApiError::Database(e))?;
+
+            if let Some(s) = session {
+                use crate::services::wallet::WalletService;
+                // Decrypt the key using the session token as password
+                WalletService::decrypt_private_key_bytes(
+                    token, 
+                    &s.cached_key_encrypted, 
+                    &s.key_salt, 
+                    &s.key_iv
+                ).map_err(|e| {
+                    tracing::error!("Failed to decrypt wallet key for user {}: {}", user.0.sub, e);
+                    ApiError::Internal("Failed to decrypt signing key".to_string())
+                })?
+            } else {
+                tracing::warn!("No active wallet session found for user {}", user.0.sub);
+                return Err(ApiError::Unauthorized("Invalid or expired session token".to_string()));
+            }
+        } else {
+            // Fallback for tests/legacy (remove in production)
+            tracing::warn!("Using fallback test key for user {}", user.0.sub);
+            b"test_secret_key".to_vec()
+        };
         
-        let mut mac = Hmac::<Sha256>::new_from_slice(secret_key.as_bytes())
+        let mut mac = Hmac::<Sha256>::new_from_slice(&secret_key)
             .map_err(|e| ApiError::Internal(format!("HMAC init failed: {}", e)))?;
         
         mac.update(message.as_bytes());
@@ -68,11 +105,11 @@ pub async fn create_order(
         let expected_signature = hex::encode(result.into_bytes());
 
         if signature != &expected_signature {
-           tracing::warn!("Invalid signature. Expected: {}, Got: {}", expected_signature, signature);
+           tracing::warn!("Invalid signature for user {}. Expected: {}, Got: {}", user.0.sub, expected_signature, signature);
            return Err(ApiError::BadRequest("Invalid order signature".to_string()));
         }
         
-        tracing::info!("P2P Order signature verified successfully");
+        tracing::info!("P2P Order signature verified successfully for user {}", user.0.sub);
     }
 
     // Auto-detect zone if not provided

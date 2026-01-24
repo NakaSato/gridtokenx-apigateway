@@ -11,6 +11,8 @@ pub enum SettlementStatus {
     Processing,
     Completed,
     Failed,
+    PendingBridge,
+    BridgingInitiated,
 }
 
 impl std::fmt::Display for SettlementStatus {
@@ -20,6 +22,8 @@ impl std::fmt::Display for SettlementStatus {
             Self::Processing => write!(f, "processing"),
             Self::Completed => write!(f, "completed"),
             Self::Failed => write!(f, "failed"),
+            Self::PendingBridge => write!(f, "pending_bridge"),
+            Self::BridgingInitiated => write!(f, "bridging_initiated"),
         }
     }
 }

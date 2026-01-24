@@ -381,18 +381,18 @@ pub async fn submit_reading(
     // Validate meter is registered (if meter_serial provided)
     let mut zone_id = None;
     if let Some(ref meter_serial) = request.meter_serial {
-        let meter_info = sqlx::query_as::<_, (i64, Option<i32>)>(
-            "SELECT count(*), zone_id FROM meters WHERE serial_number = $1 GROUP BY zone_id"
+        let meter_info = sqlx::query!(
+            "SELECT count(*) as count, zone_id FROM meters WHERE serial_number = $1 GROUP BY zone_id",
+            meter_serial
         )
-        .bind(meter_serial)
         .fetch_optional(&state.db)
         .await
         .unwrap_or(None);
 
         match meter_info {
-            Some((count, zid)) if count > 0 => {
-                info!("✅ Meter {} is registered in Zone {:?}", meter_serial, zid);
-                zone_id = zid;
+            Some(record) if record.count.unwrap_or(0) > 0 => {
+                info!("✅ Meter {} is registered in Zone {:?}", meter_serial, record.zone_id);
+                zone_id = record.zone_id;
             },
             _ => {
                 warn!("⚠️ Meter {} not registered, rejecting reading", meter_serial);
@@ -685,17 +685,26 @@ pub async fn submit_reading(
     let meter_serial = request.meter_serial.clone().unwrap_or_else(|| "unknown".to_string());
     
     // Get meter_id and user_id from database
-    let meter_info = sqlx::query_as::<_, (Uuid, Uuid)>(
-        "SELECT id, user_id FROM meters WHERE serial_number = $1"
+    // Get meter_id and user_id from database
+    let meter_info = sqlx::query!(
+        "SELECT id, user_id FROM meters WHERE serial_number = $1",
+        meter_serial
     )
-    .bind(&meter_serial)
     .fetch_optional(&state.db)
     .await
     .ok()
     .flatten();
 
-    if let Some((meter_uuid, user_uuid)) = meter_info {
-        let insert_result = sqlx::query(
+    if let Some(record) = meter_info {
+        let meter_uuid = record.id;
+        let user_uuid = record.user_id;
+
+        // Helper to convert Option<f64> to Option<Decimal>
+        let to_decimal = |val: Option<f64>| -> Option<Decimal> {
+            val.and_then(|v| Decimal::from_f64_retain(v))
+        };
+
+        let insert_result = sqlx::query!(
             "INSERT INTO meter_readings (
                 id, meter_serial, meter_id, user_id, wallet_address, 
                 timestamp, reading_timestamp, kwh_amount,
@@ -704,40 +713,43 @@ pub async fn submit_reading(
                 thd_voltage, thd_current,
                 latitude, longitude, battery_level, health_score,
                 minted, mint_tx_signature, created_at
-             ) VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9, $10, $11, 
-                       $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, NOW())"
+             ) VALUES ($1, $2, $3, $4, $5, $6, $6, $7, 
+                       $8::NUMERIC, $9::NUMERIC, $10::NUMERIC, $11::NUMERIC, 
+                       $12::NUMERIC, $13::NUMERIC, $14::NUMERIC, $15::NUMERIC, $16::NUMERIC, 
+                       $17::NUMERIC, $18::NUMERIC, $19::FLOAT8, $20::FLOAT8, $21::NUMERIC, $22::FLOAT8, 
+                       $23, $24, NOW())",
+            reading_id,
+            meter_serial,
+            meter_uuid,
+            user_uuid,
+            wallet_address,
+            request.reading_timestamp,
+            // $7 kwh_amount (Decimal)
+            request.kwh_amount,
+            // Energy (f64 -> Numeric -> Decimal)
+            to_decimal(request.energy_generated),
+            to_decimal(request.energy_consumed),
+            to_decimal(request.surplus_energy),
+            to_decimal(request.deficit_energy),
+            // Telemetry (f64 -> Numeric -> Decimal)
+            to_decimal(request.voltage),
+            to_decimal(request.current),
+            to_decimal(request.power_factor),
+            to_decimal(request.frequency),
+            to_decimal(request.temperature),
+            // THD (f64 -> Numeric -> Decimal)
+            to_decimal(request.thd_voltage),
+            to_decimal(request.thd_current),
+            // GPS (Float8 is f64, so pass directly)
+            request.latitude,
+            request.longitude,
+            // Battery (f64 -> Numeric -> Decimal)
+            to_decimal(request.battery_level),
+            // Health
+            health_score,
+            minted,
+            mint_tx_signature
         )
-        .bind(reading_id)
-        .bind(&meter_serial)
-        .bind(meter_uuid)
-        .bind(user_uuid)
-        .bind(&wallet_address)
-        .bind(request.reading_timestamp)
-        .bind(kwh_f64)
-        // Energy data
-        .bind(request.energy_generated)
-        .bind(request.energy_consumed)
-        .bind(request.surplus_energy)
-        .bind(request.deficit_energy)
-        // Electrical parameters
-        .bind(request.voltage)
-        .bind(request.current)
-        .bind(request.power_factor)
-        .bind(request.frequency)
-        .bind(request.temperature)
-        // THD (Total Harmonic Distortion)
-        .bind(request.thd_voltage)
-        .bind(request.thd_current)
-        // GPS
-        .bind(request.latitude)
-        .bind(request.longitude)
-        // Battery
-        .bind(request.battery_level)
-        // Health score
-        .bind(health_score)
-        // Minting status
-        .bind(minted)
-        .bind(&mint_tx_signature)
         .execute(&state.db)
         .await;
 

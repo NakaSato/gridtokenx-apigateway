@@ -1,6 +1,6 @@
 //! GridTokenX API Gateway
 //!
-//! testing Simulator → Gateway → Anchor flow.
+//! Simulator → Gateway → Anchor flow.
 
 use anyhow::Result;
 use std::net::SocketAddr;

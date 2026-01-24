@@ -34,6 +34,8 @@ pub struct Config {
     pub simulator_user_id: String,
     pub encryption_secret: String,
     pub cors_allowed_origins: Vec<String>,
+    pub currency_token_mint: String,
+    pub currency_decimals: u8,
 }
 
 /// Solana program IDs configuration - moved from hardcoded values
@@ -210,6 +212,12 @@ impl Config {
                 trading_program_id: env::var("SOLANA_TRADING_PROGRAM_ID")
                     .unwrap_or_else(|_| "8gHn9oeYcUQgNrMi8fNYGyMCKJTMwM6K413f41AANFt4".to_string()),
             },
+            currency_token_mint: env::var("CURRENCY_TOKEN_MINT")
+                .unwrap_or_else(|_| "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()), // Default: Mock USDC
+            currency_decimals: env::var("CURRENCY_DECIMALS")
+                .unwrap_or_else(|_| "9".to_string()) // Default: 9 decimals
+                .parse()
+                .map_err(|e| anyhow::anyhow!("Invalid CURRENCY_DECIMALS: {}", e))?,
             simulator_user_id: env::var("SIMULATOR_USER_ID")
                 .unwrap_or_else(|_| "63c1d015-6765-4843-9ca3-5ba21ee54d7e".to_string()),
             encryption_secret: env::var("ENCRYPTION_SECRET").map_err(|_| {

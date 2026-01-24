@@ -6,6 +6,7 @@ use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use tracing::{info, warn, error, debug};
 use uuid::Uuid;
+use std::str::FromStr;
 use solana_sdk::pubkey::Pubkey;
 
 use std::sync::Arc;
@@ -226,11 +227,11 @@ impl OrderMatchingEngine {
 
             // Run one matching cycle
             match self.match_orders_cycle().await {
-                Ok(matches) => {
+                Ok((matches, volume)) => {
                     if matches > 0 {
                         info!(
-                            "✅ Matching cycle completed: {} new transactions created",
-                            matches
+                            "✅ Matching cycle completed: {} new transactions created, volume: {} kWh",
+                            matches, volume
                         );
                     } else {
                         debug!("Matching cycle completed: no new matches");
@@ -249,7 +250,7 @@ impl OrderMatchingEngine {
     }
 
     /// Run one matching cycle
-    async fn match_orders_cycle(&self) -> Result<usize> {
+    async fn match_orders_cycle(&self) -> Result<(usize, Decimal)> {
         use crate::models::trading::TradingOrderDb;
 
         // Get all pending buy orders
@@ -348,10 +349,11 @@ impl OrderMatchingEngine {
         info!("Fetched {} sell orders", sell_orders_db.len());
 
         if buy_orders_db.is_empty() || sell_orders_db.is_empty() {
-            return Ok(0);
+            return Ok((0, Decimal::ZERO));
         }
 
         let mut matches_created = 0;
+        let mut total_matched_volume = Decimal::ZERO;
 
         // Try to match each buy order
         for buy_order in &buy_orders_db {
@@ -474,6 +476,7 @@ impl OrderMatchingEngine {
                 ).await {
                     Ok(match_id) => {
                          matches_created += 1;
+                         total_matched_volume += match_amount;
                          // metrics...
                          track_order_matched("p2p", match_amount.to_f64().unwrap_or(0.0));
                          track_trading_operation("match", true);
@@ -524,12 +527,32 @@ impl OrderMatchingEngine {
 
             let _ = sqlx::query("UPDATE trading_orders SET filled_amount = $1, status = $2, updated_at = NOW() WHERE id = $3")
                 .bind(buy_filled_amount)
-                .bind(new_buy_status)
+                .bind(&new_buy_status)
                 .bind(buy_order.id)
                 .execute(&self.db).await;
+
+            // --- AMM FALLBACK ---
+            if remaining_buy_amount > Self::MIN_TRADE_AMOUNT && new_buy_status != OrderStatus::Filled {
+                info!("💧 Buy order {} not fully filled, attempting AMM fallback for {} kWh", buy_order.id, remaining_buy_amount);
+                match self.attempt_amm_match(buy_order, remaining_buy_amount).await {
+                    Ok(filled) => {
+                        buy_filled_amount += filled;
+                        // Final status update after AMM
+                        let final_status = if buy_filled_amount >= buy_energy_amount { OrderStatus::Filled } else { OrderStatus::PartiallyFilled };
+                        let _ = sqlx::query("UPDATE trading_orders SET filled_amount = $1, status = $2, updated_at = NOW() WHERE id = $3")
+                            .bind(buy_filled_amount)
+                            .bind(final_status)
+                            .bind(buy_order.id)
+                            .execute(&self.db).await;
+                    }
+                    Err(e) => {
+                        warn!("AMM fallback skipped or failed for {}: {}", buy_order.id, e);
+                    }
+                }
+            }
         }
 
-        Ok(matches_created)
+        Ok((matches_created, total_matched_volume))
     }
 
     /// Create an order match record
@@ -725,8 +748,90 @@ impl OrderMatchingEngine {
     }
 
     /// Manually trigger a matching cycle (for testing or API endpoints)
-    pub async fn trigger_matching(&self) -> Result<usize> {
+    pub async fn trigger_matching(&self) -> Result<(usize, Decimal)> {
         info!("Manual matching trigger requested");
         self.match_orders_cycle().await
+    }
+
+    /// Attempt to match a remaining order amount with the AMM pool
+    async fn attempt_amm_match(
+        &self,
+        order: &crate::models::trading::TradingOrderDb,
+        remaining_amount: Decimal,
+    ) -> Result<Decimal> {
+        let blockchain = self.blockchain_service.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Blockchain service not available for AMM"))?;
+
+        // 0. Confidential Check
+        if order.is_confidential {
+            info!("🔒 Confidential order {} requires ZK-matching, skipping AMM flash fallback", order.id);
+            return Ok(Decimal::ZERO);
+        }
+
+        // 1. Get Pool PDA and Mints based on Source Type
+        let program_id = blockchain.trading_program_id()?;
+        let market_pda = Pubkey::find_program_address(&[b"market"], &program_id).0;
+        
+        // Map source string to curve type discriminator
+        let curve_type_idx: u8 = match order.energy_source.as_deref() {
+            Some("wind") => 1,
+            Some("battery") => 2,
+            _ => 0, // solar or default
+        };
+
+        // PDA seeds must match programs/trading/src/amm.rs
+        let (pool_pda, _) = Pubkey::find_program_address(
+            &[b"amm_pool", market_pda.as_ref(), &[curve_type_idx]], 
+            &program_id
+        );
+        
+        let energy_mint_str = std::env::var("ENERGY_TOKEN_MINT").unwrap_or_else(|_| "Geq98m3Vw63AqrMEVoZsiW5DbNkScteZAdWDmm95ykYF".to_string());
+        let currency_mint_str = std::env::var("PAYMENT_TOKEN_MINT").unwrap_or_else(|_| "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string());
+        let energy_mint = Pubkey::from_str(&energy_mint_str)?;
+        let currency_mint = Pubkey::from_str(&currency_mint_str)?;
+
+        // 2. Fetch User Info
+        let wallet_query = sqlx::query!("SELECT wallet_address FROM users WHERE id = $1", order.user_id)
+            .fetch_one(&self.db).await?;
+        
+        let user_wallet_str = wallet_query.wallet_address.ok_or_else(|| anyhow::anyhow!("User {} has no wallet", order.user_id))?;
+        let user_wallet = Pubkey::from_str(&user_wallet_str)?;
+        
+        // 3. Setup Token Accounts
+        let authority = blockchain.get_authority_keypair().await?;
+        let user_energy_ata = blockchain.ensure_token_account_exists(&authority, &user_wallet, &energy_mint).await?;
+        let user_currency_ata = blockchain.ensure_token_account_exists(&authority, &user_wallet, &currency_mint).await?;
+
+        // PDAs for vaults (must match Anchor seeds)
+        let (pool_energy_vault, _) = Pubkey::find_program_address(&[b"energy_vault", pool_pda.as_ref()], &program_id);
+        let (pool_currency_vault, _) = Pubkey::find_program_address(&[b"currency_vault", pool_pda.as_ref()], &program_id);
+
+        // 4. Execute Swap
+        let amount_milli_kwh = (remaining_amount * Decimal::from(1000)).to_u64().unwrap_or(0);
+        let max_currency = (remaining_amount * order.price_per_kwh * Decimal::from(1_000_000)).to_u64().unwrap_or(0);
+
+        if amount_milli_kwh == 0 { return Ok(Decimal::ZERO); }
+
+        info!("🌊 TRIGGERING FLASH LIQUIDITY: AMM Swap ({:?}) for {} milli-kWh", order.energy_source, amount_milli_kwh);
+        
+        // Note: swap_buy_energy needs to be updated if the on-chain instruction changed signature 
+        // to take curve_type. But in our handle_swap_buy_energy, it's inferred from pool PDA.
+        let sig = blockchain.swap_buy_energy(
+            &authority,
+            &pool_pda,
+            &user_energy_ata,
+            &user_currency_ata,
+            &pool_energy_vault,
+            &pool_currency_vault,
+            &energy_mint,
+            &currency_mint,
+            amount_milli_kwh,
+            max_currency,
+        ).await?;
+
+        info!("📈 Flash liquidity swap successful: tx {}", sig);
+        track_order_matched("amm", remaining_amount.to_f64().unwrap_or(0.0));
+
+        Ok(remaining_amount)
     }
 }

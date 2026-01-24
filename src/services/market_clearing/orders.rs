@@ -138,22 +138,57 @@ impl MarketClearingService {
         .execute(&mut *tx)
         .await?;
 
-        // 3. Handle Escrow (Lock Funds/Energy)
+        // 3. Fetch user (for balance/wallet check)
+        // Must happen inside transaction for lock stability if we are checking DB balance
+        let user = sqlx::query!(
+            "SELECT balance, wallet_address FROM users WHERE id = $1 FOR UPDATE", 
+            user_id
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+
+        // 4. Handle Escrow (Lock Funds/Energy)
         match side {
             OrderSide::Buy => {
                 let total_escrow_amount = energy_amount * price_per_kwh_val;
-                
-                // Check balance - DB balance check only for now
-                // TODO: On-chain balance check requires WalletService.get_token_balance() implementation
-                let _use_onchain_balance = self.config.tokenization.use_onchain_balance_for_escrow;
-                
-                // Use DB balance check
-                let user = sqlx::query!("SELECT balance FROM users WHERE id = $1 FOR UPDATE", user_id)
-                    .fetch_one(&mut *tx)
-                    .await?;
 
+                // 2. On-Chain Balance Check (Optional/Configurable)
+                let use_onchain_balance = self.config.tokenization.use_onchain_balance_for_escrow;
+                
+                if use_onchain_balance {
+                    use std::str::FromStr;
+                    use solana_sdk::pubkey::Pubkey;
+
+                    // Get user wallet from DB
+                    let user_wallet_str = match &user.wallet_address {
+                         Some(w) => w,
+                         None => return Err(anyhow::anyhow!("User wallet address required for on-chain check"))
+                    };
+                    
+                    let user_wallet = Pubkey::from_str(user_wallet_str)
+                        .map_err(|e| anyhow::anyhow!("Invalid user wallet address: {}", e))?;
+                        
+                    let currency_mint = Pubkey::from_str(&self.config.currency_token_mint)
+                        .map_err(|e| anyhow::anyhow!("Invalid currency mint config: {}", e))?;
+
+                    // Convert required amount to token units (e.g. 6 decimals for USDC)
+                    let decimals = self.config.currency_decimals;
+                    let required_tokens = (total_escrow_amount * Decimal::from(10u64.pow(decimals as u32)))
+                        .to_u64()
+                        .ok_or_else(|| anyhow::anyhow!("Amount too large"))?;
+
+                    let balance = self.blockchain_service.get_token_balance(&user_wallet, &currency_mint).await?;
+                    
+                    info!("On-chain balance check for user {}: has {} tokens, needs {}", user_id, balance, required_tokens);
+
+                    if balance < required_tokens {
+                         return Err(anyhow::anyhow!("Insufficient on-chain balance. Required: {}, Available: {}", required_tokens, balance));
+                    }
+                }
+
+                // 3. Database Balance Check (Always perform for internal consistency)
                 if user.balance.unwrap_or(Decimal::ZERO) < total_escrow_amount {
-                    return Err(anyhow::anyhow!("Insufficient balance for escrow. Required: {}, Available: {}", total_escrow_amount, user.balance.unwrap_or(Decimal::ZERO)));
+                    return Err(anyhow::anyhow!("Insufficient DB balance for escrow. Required: {}, Available: {}", total_escrow_amount, user.balance.unwrap_or(Decimal::ZERO)));
                 }
 
                 // Update user balance and locked_amount
@@ -181,6 +216,41 @@ impl MarketClearingService {
                 .await?;
             }
             OrderSide::Sell => {
+                // 1. On-Chain Energy Balance Check (Optional/Configurable)
+                let use_onchain_balance = self.config.tokenization.use_onchain_balance_for_escrow;
+
+                if use_onchain_balance {
+                    use std::str::FromStr;
+                    use solana_sdk::pubkey::Pubkey;
+
+                    // Get user wallet from DB (user variable is available now)
+                    let user_wallet_str = match &user.wallet_address {
+                         Some(w) => w,
+                         None => return Err(anyhow::anyhow!("User wallet address required for on-chain check"))
+                    };
+                    
+                    let user_wallet = Pubkey::from_str(user_wallet_str)
+                        .map_err(|e| anyhow::anyhow!("Invalid user wallet address: {}", e))?;
+
+                    let energy_mint = Pubkey::from_str(&self.config.energy_token_mint)
+                        .map_err(|e| anyhow::anyhow!("Invalid energy mint config: {}", e))?;
+                    
+                    // Energy tokens usually have 9 decimals (same as SOL)
+                    // TODO: Move energy decimals to config if variable
+                    let decimals = 9; 
+                    let required_tokens = (energy_amount * Decimal::from(10u64.pow(decimals)))
+                        .to_u64()
+                        .ok_or_else(|| anyhow::anyhow!("Energy amount too large"))?;
+
+                    let balance = self.blockchain_service.get_token_balance(&user_wallet, &energy_mint).await?;
+                    
+                    info!("On-chain energy check for user {}: has {} tokens, needs {}", user_id, balance, required_tokens);
+
+                    if balance < required_tokens {
+                        return Err(anyhow::anyhow!("Insufficient on-chain energy balance. Required: {}, Available: {}", required_tokens, balance));
+                    }
+                }
+
                 // Lock energy in DB
                 sqlx::query!(
                     "UPDATE users SET locked_energy = locked_energy + $1 WHERE id = $2",
@@ -208,6 +278,20 @@ impl MarketClearingService {
 
 
 
+        // Fetch meter type for broadcasting if available (before commit)
+        let mut energy_source_type: Option<String> = None;
+        if let Some(mid) = meter_id {
+             if let Ok(Some(rec)) = sqlx::query!(
+                "SELECT meter_type FROM meter_registry WHERE id = $1",
+                mid
+            )
+            .fetch_optional(&mut *tx)
+            .await 
+            {
+                energy_source_type = rec.meter_type;
+            }
+        }
+
         tx.commit().await?;
 
         info!("Created order {} for user {} with assets escrowed", order_id, user_id);
@@ -219,7 +303,7 @@ impl MarketClearingService {
             price_per_kwh_val.to_f64().unwrap_or(0.0),
             match side {
                 OrderSide::Buy => None,
-                OrderSide::Sell => Some("solar".to_string()), // Simplified assumption
+                OrderSide::Sell => energy_source_type.or(Some("solar".to_string())),
             },
             user_id.to_string(),
         ).await;
@@ -416,9 +500,23 @@ impl MarketClearingService {
                         info!("On-chain escrow refund executed for order {}: {}", order_id, sig);
                     }
                     Err(e) => {
-                         // Critical error if DB refunded but Chain failed. 
-                         // For now, we log it. In a real system, this needs a reconciliation queue.
-                         error!("Failed to execute on-chain refund for order {}: {}", order_id, e);
+                         error!("Failed to execute on-chain refund for order {}: {}. Queueing for retry.", order_id, e);
+                         
+                         // Queue for manual retry
+                         let payload = serde_json::json!({
+                             "type": "EscrowRefund", 
+                             "data": {
+                                 "user_id": user_id,
+                                 "amount": refund_amount,
+                                 "asset_type": asset_type,
+                                 "order_id": order_id
+                             }
+                         });
+                         
+                         let _ = self.queue_blockchain_task("escrow_refund", payload).await.map_err(|qe| {
+                             error!("CRITICAL: Failed to queue blockchain task: {}", qe);
+                             qe
+                         });
                     }
                 }
             }
@@ -482,5 +580,24 @@ impl MarketClearingService {
         }).collect();
 
         Ok(result)
+    }
+
+    /// Queue a blockchain task for retry
+    async fn queue_blockchain_task(&self, task_type: &str, payload: serde_json::Value) -> Result<Uuid> {
+        let id = sqlx::query!(
+            r#"
+            INSERT INTO blockchain_tasks (task_type, payload, status, next_retry_at)
+            VALUES ($1::blockchain_task_type, $2, 'pending', NOW())
+            RETURNING id
+            "#,
+            task_type as _,
+            payload
+        )
+        .fetch_one(&self.db)
+        .await?
+        .id;
+        
+        info!("Queued blockchain task {} (type: {})", id, task_type);
+        Ok(id)
     }
 }

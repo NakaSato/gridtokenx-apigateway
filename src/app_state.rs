@@ -50,6 +50,7 @@ pub struct AppState {
     pub webhook_service: services::WebhookService,
     pub erc_service: services::ErcService,
     pub notification_dispatcher: services::NotificationDispatcher,
+    pub blockchain_task_service: services::BlockchainTaskService,
     
     /// Prometheus metrics handle
     pub metrics_handle: metrics_exporter_prometheus::PrometheusHandle,

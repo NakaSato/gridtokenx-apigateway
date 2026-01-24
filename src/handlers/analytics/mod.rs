@@ -23,8 +23,8 @@ pub fn routes() -> Router<AppState> {
         // Zone rates CRUD
         .route("/zone-rates", get(zone_rates::list_zone_rates))
         .route("/zone-rates", post(zone_rates::create_zone_rate).layer(from_fn(require_admin_role)))
-        .route("/zone-rates/:from_zone/:to_zone", get(zone_rates::get_zone_rate_by_zones))
-        .route("/zone-rates/:id", put(zone_rates::update_zone_rate).layer(from_fn(require_admin_role)))
-        .route("/zone-rates/:id", delete(zone_rates::delete_zone_rate).layer(from_fn(require_admin_role)))
+        .route("/zone-rates/{from_zone}/{to_zone}", get(zone_rates::get_zone_rate_by_zones))
+        .route("/zone-rates/{id}", put(zone_rates::update_zone_rate).layer(from_fn(require_admin_role)))
+        .route("/zone-rates/{id}", delete(zone_rates::delete_zone_rate).layer(from_fn(require_admin_role)))
 }
 

@@ -530,6 +530,16 @@ impl MarketClearingService {
         Ok(signature.to_string())
     }
 
+    /// Retry wrapper for escrow refund
+    pub async fn execute_escrow_refund_retry(
+        &self,
+        buyer_id: &Uuid,
+        amount: Decimal,
+        asset_type: &str,
+    ) -> Result<String> {
+        self.execute_escrow_refund(*buyer_id, amount, asset_type).await
+    }
+
     /// Helper to fetch user wallet pubkey
     async fn fetch_user_wallet(&self, user_id: Uuid) -> Result<Pubkey> {
         let row = sqlx::query("SELECT wallet_address FROM users WHERE id = $1")

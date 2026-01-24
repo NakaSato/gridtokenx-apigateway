@@ -79,7 +79,7 @@ pub async fn request_faucet(
             
             match state
                 .blockchain_service
-                .mint_tokens_direct(&wallet_pubkey, amount_atomic)
+                .mint_tokens_direct(&wallet_pubkey, amount_atomic as f64)
                 .await
             {
                 Ok(sig) => {

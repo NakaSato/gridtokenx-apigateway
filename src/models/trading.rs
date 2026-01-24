@@ -30,6 +30,8 @@ pub struct TradingOrder {
     pub refund_tx_signature: Option<String>,
     pub order_pda: Option<String>,
     pub session_token: Option<String>,
+    pub is_confidential: bool,
+    pub energy_source: Option<String>, // 'solar', 'wind', 'battery'
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -51,6 +53,8 @@ pub struct TradingOrderDb {
     pub refund_tx_signature: Option<String>,
     pub order_pda: Option<String>,
     pub session_token: Option<String>,
+    pub is_confidential: bool,
+    pub energy_source: Option<String>,
     // Conditional order fields
     pub trigger_price: Option<Decimal>,
     pub trigger_type: Option<TriggerType>,
@@ -79,6 +83,8 @@ impl From<TradingOrderDb> for TradingOrder {
             refund_tx_signature: db.refund_tx_signature,
             order_pda: db.order_pda,
             session_token: db.session_token,
+            is_confidential: db.is_confidential,
+            energy_source: db.energy_source,
         }
     }
 }

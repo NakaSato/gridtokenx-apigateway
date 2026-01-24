@@ -181,6 +181,13 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
         email_service.clone(),
     );
     info!("✅ Notification dispatcher initialized");
+    
+    // Initialize blockchain task service
+    let blockchain_task_service = services::BlockchainTaskService::new(
+        db_pool.clone(),
+        std::sync::Arc::new(market_clearing.clone()),
+    );
+    info!("✅ Blockchain task service initialized");
 
     // Initialize HTTP Client
     let http_client = reqwest::Client::builder()
@@ -216,6 +223,7 @@ pub async fn initialize_app(config: &Config) -> Result<AppState> {
         webhook_service,
         erc_service,
         notification_dispatcher,
+        blockchain_task_service: blockchain_task_service.clone(),
         metrics_handle,
         http_client,
     };
@@ -386,6 +394,19 @@ pub async fn spawn_background_tasks(app_state: &AppState, _config: &Config) {
     } else {
         info!("⏸️ Kafka Consumer disabled (set KAFKA_ENABLED=true to enable)");
     }
+
+    // Start Blockchain Task Worker (Retry Queue)
+    let blockchain_task_service = app_state.blockchain_task_service.clone();
+    tokio::spawn(async move {
+        info!("🚀 Starting blockchain task worker (interval: 10s)");
+        loop {
+            if let Err(e) = blockchain_task_service.process_pending_tasks().await {
+                error!("❌ Error processing blockchain tasks: {}", e);
+            }
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        }
+    });
+    info!("✅ Blockchain Task Worker started");
 }
 
 /// Wait for shutdown signal.

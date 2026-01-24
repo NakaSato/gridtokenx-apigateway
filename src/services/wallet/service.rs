@@ -347,6 +347,30 @@ impl WalletService {
         Ok((encrypted_b64, salt_b64, iv_b64))
     }
 
+    /// Decrypt a private key from raw bytes (no Base64 decoding step)
+    /// useful for when data is stored as BYTEA in Postgres
+    pub fn decrypt_private_key_bytes(
+        password: &str,
+        encrypted_data: &[u8],
+        salt: &[u8],
+        iv: &[u8],
+    ) -> Result<Vec<u8>> {
+        // 1. Derive key
+        let mut derived_key = [0u8; 32];
+        pbkdf2::<Hmac<Sha256>>(password.as_bytes(), salt, 100_000, &mut derived_key)
+            .map_err(|e| anyhow!("Key derivation failed: {:?}", e))?;
+
+        // 2. Decrypt
+        let cipher = Aes256Gcm::new(&derived_key.into());
+        let nonce = Nonce::from_slice(iv);
+
+        let plaintext = cipher
+            .decrypt(nonce, encrypted_data)
+            .map_err(|_| anyhow!("Decryption failed - incorrect password or corrupted data"))?;
+
+        Ok(plaintext)
+    }
+
     /// Decrypt a private key using a password
     pub fn decrypt_private_key(
         password: &str,

@@ -31,6 +31,7 @@ pub mod kafka;
 
 pub mod meter_analyzer;
 pub mod meter;
+pub mod blockchain_task;
 
 // Re-exports
 pub use auth::AuthService;
@@ -56,3 +57,4 @@ pub use price_monitor::{PriceMonitor, PriceMonitorConfig};
 pub use recurring_scheduler::{RecurringScheduler, RecurringSchedulerConfig};
 pub use notification_dispatcher::{NotificationDispatcher, NotificationDispatcherConfig};
 pub use kafka::KafkaConsumerService;
+pub use blockchain_task::{BlockchainTaskService, BlockchainTaskType, TaskPayload, EscrowRefundPayload};

@@ -19,7 +19,7 @@ use crate::services::notification::{NotificationService, SettlementNotification}
 use crate::handlers::websocket::broadcaster::broadcast_settlement_complete;
 use crate::middleware::metrics;
 use futures::{stream, StreamExt};
-use solana_sdk::signature::Signer;
+use solana_sdk::signature::{Signature, Signer};
 
 pub use types::*;
 
@@ -64,6 +64,56 @@ impl SettlementService {
             erc_service,
             notification_service,
         }
+    }
+
+    /// Start a simulated Wormhole relayer loop
+    pub async fn start_relayer_loop(self: Arc<Self>) {
+        info!("🌐 Starting simulated Wormhole Relayer loop...");
+        let mut interval = tokio::time::interval(Duration::from_secs(10));
+        
+        loop {
+            interval.tick().await;
+            if let Err(e) = self.process_relayer_queue().await {
+                error!("⚠️ Relayer loop error: {}", e);
+            }
+        }
+    }
+
+    async fn process_relayer_queue(&self) -> Result<()> {
+        // Find settlements with status 'BridgingInitiated'
+        // status is stored as a string in the DB
+        let pending_bridges = sqlx::query!(
+            r#"
+            SELECT id, seller_id, energy_amount, transaction_hash
+            FROM settlements
+            WHERE status = 'BridgingInitiated'
+            "#
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        for bridge in pending_bridges {
+            info!("🚚 Relaying bridge transfer for settlement {}...", bridge.id);
+            
+            // Simulate VAA generation (in production, this would fetch from Guardian network)
+            let mock_vaa_hash = [0u8; 32]; // Simulation VAA
+            
+            // Complete bridge transfer on-chain
+            match self.blockchain.complete_bridge_transfer(
+                &self.blockchain.get_authority_keypair().await?,
+                mock_vaa_hash,
+            ).await {
+                Ok(sig) => {
+                    info!("✅ Bridge transfer completed: tx {}", sig);
+                    self.update_bridge_completed(bridge.id, &sig.to_string()).await?;
+                }
+                Err(e) => {
+                    error!("❌ Bridge completion failed for {}: {}", bridge.id, e);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Create settlement records from matched trades
@@ -164,6 +214,17 @@ impl SettlementService {
         // I need to calculate `effective_energy` here.
         let effective_energy = trade.quantity * (Decimal::ONE - trade.loss_factor);
         
+        // 5. Cross-Chain Detection
+        // If the buyer is on another chain (detected by mock logic), 
+        // we use initiate_bridge_transfer instead of local transfer
+        let is_cross_chain = trade.buyer_id.to_string().starts_with("0000"); 
+        
+        let status = if is_cross_chain {
+            SettlementStatus::PendingBridge
+        } else {
+            SettlementStatus::Pending
+        };
+
         let settlement = Settlement {
             id: Uuid::new_v4(),
             trade_id: trade.id,
@@ -175,9 +236,7 @@ impl SettlementService {
             price: trade.price,
             total_value,
             fee_amount,
-            net_amount: total_value - fee_amount - wheeling_charge, // Assuming Seller bears wheeling?
-            // Actually let's just record it. Logic on payment is not in scope of this file (it handles Energy Token transfer mostly).
-            // But I will populate the new columns.
+            net_amount: total_value - fee_amount - wheeling_charge, 
             wheeling_charge: Some(wheeling_charge),
             loss_factor: Some(trade.loss_factor),
             loss_cost: Some(trade.loss_cost),
@@ -187,7 +246,7 @@ impl SettlementService {
             buyer_session_token: trade.buyer_session_token.clone(),
             seller_session_token: trade.seller_session_token.clone(),
             
-            status: SettlementStatus::Pending,
+            status,
             blockchain_tx: None,
             created_at: Utc::now(),
             confirmed_at: None,
@@ -252,7 +311,27 @@ impl SettlementService {
         // Get settlement details
         let settlement = self.get_settlement(settlement_id).await?;
 
-        // Execute blockchain transaction
+        // 1. Handle Briding Status
+        if settlement.status == SettlementStatus::PendingBridge {
+            match self.execute_bridge_initiation(&settlement).await {
+                Ok(sig) => {
+                    self.update_settlement_confirmed(settlement_id, &sig, SettlementStatus::BridgingInitiated).await?;
+                    return Ok(SettlementTransaction {
+                        settlement_id,
+                        signature: sig,
+                        slot: 0,
+                        confirmation_status: "bridging_initiated".to_string(),
+                    });
+                }
+                Err(e) => {
+                    error!("❌ Bridge initiation failed for {}: {}", settlement_id, e);
+                    self.update_settlement_status(settlement_id, SettlementStatus::Failed).await?;
+                    return Err(e);
+                }
+            }
+        }
+
+        // 2. Execute normal blockchain transaction
         match self.execute_blockchain_transfer(&settlement).await {
             Ok(tx_result) => {
                 // Update settlement with transaction signature
@@ -477,6 +556,40 @@ impl SettlementService {
         })
     }
 
+    /// Execute bridge initiation for cross-chain settlement
+    async fn execute_bridge_initiation(&self, settlement: &Settlement) -> Result<String, ApiError> {
+        info!("🌁 Initiating bridge for cross-chain settlement {}", settlement.id);
+        
+        let authority = self.blockchain.get_authority_keypair().await
+            .map_err(|e| ApiError::Internal(format!("Failed to get authority: {}", e)))?;
+        
+        let market_str = std::env::var("TRADING_MARKET_ADDRESS")
+            .unwrap_or_else(|_| "Fmk6vb74MjZpXVE9kAS5q4U5L8hr2AEJcDikfRSFTiyY".to_string());
+        let market = BlockchainService::parse_pubkey(&market_str)
+            .map_err(|e| ApiError::Internal(format!("Invalid market address: {}", e)))?;
+
+        // In a real scenario, we'd find the sell_order PDA
+        // For simulation, we use a placeholder or derive it
+        let sell_order = BlockchainService::parse_pubkey("Fmk6vb74MjZpXVE9kAS5q4U5L8hr2AEJcDikfRSFTiyY").unwrap();
+
+        let amount_atomic = (settlement.energy_amount * Decimal::from(1_000_000_000)).trunc().to_string().parse::<u64>().unwrap_or(0);
+        
+        let target_chain = 1; // Simulated target chain ID
+        let target_address = [0u8; 32]; // Simulated target address
+        
+        let sig = self.blockchain.initiate_bridge_transfer(
+            &authority,
+            &market,
+            &sell_order,
+            amount_atomic,
+            target_chain,
+            target_address,
+        ).await
+        .map_err(|e| ApiError::Internal(format!("Bridge initiation failed: {}", e)))?;
+        
+        Ok(sig.to_string())
+    }
+
     /// Helper: Get order creation transaction signature
     #[allow(dead_code)]
     async fn get_order_creation_tx(&self, order_id: Uuid) -> Result<String, ApiError> {
@@ -597,6 +710,8 @@ impl SettlementService {
             "processing" => SettlementStatus::Processing,
             "completed" | "confirmed" => SettlementStatus::Completed,
             "failed" => SettlementStatus::Failed,
+            "pending_bridge" => SettlementStatus::PendingBridge,
+            "bridging_initiated" => SettlementStatus::BridgingInitiated,
             _ => SettlementStatus::Pending,
         };
 
@@ -647,6 +762,102 @@ impl SettlementService {
         Ok(rows.into_iter().map(|row| row.get("id")).collect())
     }
 
+    /// Execute a batch of settlements in on-chain transactions with physical transfers
+    pub async fn execute_batch_settlement(
+        &self,
+        settlement_ids: Vec<Uuid>,
+    ) -> Result<Signature, ApiError> {
+        info!("🚀 Executing enhanced batched settlement for {} trades", settlement_ids.len());
+
+        let mut settlements = Vec::new();
+        for id in &settlement_ids {
+            settlements.push(self.get_settlement(*id).await?);
+        }
+
+        // 1. Collect data and resolve ATAs
+        let mut amounts = Vec::new();
+        let mut prices = Vec::new();
+        let mut wheeling_charges = Vec::new();
+        let mut transfer_accounts = Vec::new();
+
+        use solana_sdk::instruction::AccountMeta;
+
+        for s in &settlements {
+            let amount_atomic = (s.energy_amount * Decimal::from(1_000_000_000))
+                .trunc()
+                .to_string()
+                .parse::<u64>()
+                .unwrap_or(0);
+            
+            let price_atomic = (s.price * Decimal::from(1_000_000_000))
+                .trunc()
+                .to_string()
+                .parse::<u64>()
+                .unwrap_or(0);
+            
+            let wheeling_atomic = (s.wheeling_charge.unwrap_or(Decimal::ZERO) * Decimal::from(1_000_000_000))
+                .trunc()
+                .to_string()
+                .parse::<u64>()
+                .unwrap_or(0);
+
+            amounts.push(amount_atomic);
+            prices.push(price_atomic);
+            wheeling_charges.push(wheeling_atomic);
+
+            // Resolve ATAs for this match
+            // In a real system, these would be fetched/derived.
+            // For now, we use placeholders or derive them if possible.
+            let buyer_wallet = self.get_user_wallet(&s.buyer_id).await?;
+            let seller_wallet = self.get_user_wallet(&s.seller_id).await?;
+            
+            // Simplified PDA/ATA derivation for demonstration
+            let buyer_currency = BlockchainService::parse_pubkey(&buyer_wallet).unwrap(); 
+            let seller_energy = BlockchainService::parse_pubkey(&seller_wallet).unwrap();
+            let seller_currency = BlockchainService::parse_pubkey(&seller_wallet).unwrap();
+            let buyer_energy = BlockchainService::parse_pubkey(&buyer_wallet).unwrap();
+            let fee_collector = BlockchainService::parse_pubkey("GTuRUUwCfvmqW7knqQtzQLMCy61p4UKUrdT5ssVgZbat").unwrap();
+            let wheeling_collector = BlockchainService::parse_pubkey("GTuRUUwCfvmqW7knqQtzQLMCy61p4UKUrdT5ssVgZbat").unwrap();
+
+            transfer_accounts.push(AccountMeta::new(buyer_currency, false));
+            transfer_accounts.push(AccountMeta::new(seller_energy, false));
+            transfer_accounts.push(AccountMeta::new(seller_currency, false));
+            transfer_accounts.push(AccountMeta::new(buyer_energy, false));
+            transfer_accounts.push(AccountMeta::new(fee_collector, false));
+            transfer_accounts.push(AccountMeta::new(wheeling_collector, false));
+        }
+
+        // 2. Execute on-chain
+        let authority = self.blockchain.get_authority_keypair().await
+            .map_err(|e| ApiError::Internal(format!("Failed to get authority: {}", e)))?;
+        
+        let market_str = std::env::var("TRADING_MARKET_ADDRESS")
+            .unwrap_or_else(|_| "Fmk6vb74MjZpXVE9kAS5q4U5L8hr2AEJcDikfRSFTiyY".to_string());
+        let market = BlockchainService::parse_pubkey(&market_str)
+            .map_err(|e| ApiError::Internal(format!("Invalid market address: {}", e)))?;
+
+        let signature = self.blockchain.execute_batch_settlement(
+            &authority,
+            &market,
+            amounts,
+            prices,
+            wheeling_charges,
+            transfer_accounts,
+        ).await
+        .map_err(|e| ApiError::Internal(format!("Batch settlement failed: {}", e)))?;
+
+        // 3. Update database records
+        for s in settlements {
+            self.update_settlement_confirmed(s.id, &signature.to_string(), SettlementStatus::Completed).await?;
+            if let Err(e) = self.finalize_escrow(&s).await {
+                error!("⚠️ Failed to finalize escrow for settlement {}: {}", s.id, e);
+            }
+        }
+
+        info!("✅ Enhanced batch settlement completed: tx {}", signature);
+        Ok(signature)
+    }
+
     /// Update settlement status
     pub async fn update_settlement_status(
         &self,
@@ -694,6 +905,14 @@ impl SettlementService {
         .map_err(ApiError::Database)?;
 
         Ok(())
+    }
+
+    pub async fn update_bridge_completed(
+        &self,
+        id: Uuid,
+        tx_signature: &str,
+    ) -> Result<(), ApiError> {
+        self.update_settlement_confirmed(id, tx_signature, SettlementStatus::Completed).await
     }
 
     /// Retry failed settlements with exponential backoff (called by background job)
